@@ -3,7 +3,8 @@
   "rules": [
     {
       "pathPattern": ".*\\.valveTag$",
-      "tagTableReference": { "tableName": "VALVE_TAGS" }
+      "tagTableReference": { "tableName": "VALVE_TAGS" },
+      "constraints": { "requireTagTableValue": true }
     }
   ]
 }

@@ -104,6 +104,60 @@ public sealed class Scene
     /// accepts the same suggestion. Matched by AutocompleteSuggestion.DisplayName.
     /// </summary>
     [JsonProperty("hoverSuggestion")] public string? HoverSuggestion { get; set; }
+
+    /// <summary>
+    /// Paints a click ring at the last-known cursor position. Two phases:
+    /// "press"   — small tight ring, for the frame where the click target
+    ///             is still visible (dropdown open, suggestion row still
+    ///             there). Place BEFORE the action frame.
+    /// "release" — large expanded ring, for the action frame itself (accept,
+    ///             Set, Apply, revert, scope click).
+    /// Any other truthy value (e.g. true) is treated as "release" for
+    /// backward compatibility with earlier scripts.
+    /// </summary>
+    [JsonProperty("click")] public string? Click { get; set; }
+
+    /// <summary>
+    /// If true, paints the fake scope-dropdown overlay below the Scope
+    /// ComboBox — same visual as clicking the chevron on the real combo.
+    /// Cleared automatically at the start of every non-preserveState scene,
+    /// so you need to set it on every consecutive frame the dropdown should
+    /// remain visible.
+    /// </summary>
+    [JsonProperty("openScopeDropdown")] public bool? OpenScopeDropdown { get; set; }
+
+    /// <summary>
+    /// AncestorPath of the scope row to pre-select in the open scope overlay,
+    /// so the row reads as "mouse is about to click this". Requires
+    /// <see cref="OpenScopeDropdown"/> = true.
+    /// </summary>
+    [JsonProperty("hoverScope")] public string? HoverScope { get; set; }
+
+    /// <summary>
+    /// Path of a single pending inline edit to revert — same effect as clicking
+    /// the per-row undo (↶) button in the Pending Edits panel.
+    /// </summary>
+    [JsonProperty("revertPending")] public string? RevertPending { get; set; }
+
+    /// <summary>
+    /// If true, clears the entire pending-edits queue — same effect as
+    /// clicking "Undo all" in the sidebar or "Discard" in the toolbar.
+    /// </summary>
+    [JsonProperty("discardAllPending")] public bool? DiscardAllPending { get; set; }
+
+    /// <summary>
+    /// Scene kind. Default (null or "dialog") renders the BulkChangeDialog.
+    /// "chapter" renders a full-bleed intertitle card at the viewport size
+    /// instead — uses <see cref="ChapterTitle"/> / <see cref="ChapterSubtitle"/>
+    /// and skips all other scene directives.
+    /// </summary>
+    [JsonProperty("kind")] public string? Kind { get; set; }
+
+    /// <summary>Main title text for a chapter card (kind=chapter).</summary>
+    [JsonProperty("chapterTitle")] public string? ChapterTitle { get; set; }
+
+    /// <summary>Optional subtitle / step counter under the main title.</summary>
+    [JsonProperty("chapterSubtitle")] public string? ChapterSubtitle { get; set; }
 }
 
 public sealed class CursorState
@@ -180,6 +234,7 @@ public static class SceneApplier
         // forward even when preserveState keeps everything else.
         dialog.HideCursor();
         ClearHoverPreview(vm, dialog);
+        dialog.HideScopeDropdownScripted();
 
         // Reset any expansion/selection/value leaked from a prior scene, so
         // each scene is fully declarative and order-independent — unless the
@@ -274,6 +329,25 @@ public static class SceneApplier
                 Serilog.Log.Warning("Scene {Id}: stageBulk requested but SetPendingCommand disabled", scene.Id);
         }
 
+        if (scene.RevertPending != null)
+        {
+            var entry = vm.PendingEdits.FirstOrDefault(p => p.Node?.Path == scene.RevertPending);
+            if (entry == null)
+                Serilog.Log.Warning("Scene {Id}: revertPending path not found in queue: {Path}. Queue: {Paths}",
+                    scene.Id, scene.RevertPending,
+                    string.Join(", ", vm.PendingEdits.Select(p => p.Node?.Path ?? "?")));
+            else
+                vm.UndoPendingEdit(entry);
+        }
+
+        if (scene.DiscardAllPending == true)
+        {
+            if (vm.HasPendingEdits)
+                vm.DiscardPendingSilent();
+            else
+                Serilog.Log.Warning("Scene {Id}: discardAllPending requested but queue is empty", scene.Id);
+        }
+
         if (scene.Apply == true)
         {
             if (vm.ApplyCommand.CanExecute(null))
@@ -295,9 +369,22 @@ public static class SceneApplier
         if (scene.HoverSuggestion != null)
             ApplyHoverPreview(vm, dialog, scene.HoverSuggestion);
 
+        // Open the fake scope dropdown overlay *after* any scope change in the
+        // same scene, so AvailableScopes reflects the (possibly new) selected
+        // member and the hover row resolves.
+        if (scene.OpenScopeDropdown == true)
+            dialog.ShowScopeDropdownForScripted(scene.HoverScope);
+
         // Cursor last so it paints above everything else in the frame.
         if (scene.Cursor != null)
             ApplyCursor(scene, dialog);
+
+        // Click ring uses the last-known cursor position — apply AFTER cursor
+        // so a scene can re-resolve the target AND fire the click in one step.
+        if (scene.Click != null)
+            dialog.ShowClickRingAtLastCursor(scene.Click);
+        else
+            dialog.HideClickRing();
     }
 
     private static void ApplyCursor(Scene scene, BulkChangeDialog dialog)
