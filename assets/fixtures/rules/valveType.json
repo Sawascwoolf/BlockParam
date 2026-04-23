@@ -1,0 +1,11 @@
+{
+  "version": "1.0",
+  "rules": [
+    {
+      "pathPattern": ".*\\.valveType$",
+      "datatype": "Int",
+      "tagTableReference": { "tableName": "VALVE_TYPES" },
+      "constraints": { "requireTagTableValue": true }
+    }
+  ]
+}

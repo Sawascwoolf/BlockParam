@@ -50,3 +50,7 @@ Thumbs.db
 ## Claude Code per-developer settings (contain local paths, personal allowlists)
 .claude/settings.json
 .claude/settings.local.json
+
+## Workflow video intermediate frames — regenerable via DevLauncher --capture-script.
+## Only the stitched MP4 + fixtures + scripts are tracked.
+assets/screenshots/workflow/wf*.png

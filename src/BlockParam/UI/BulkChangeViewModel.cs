@@ -2080,9 +2080,17 @@ public class BulkChangeViewModel : ViewModelBase
     {
         if (string.IsNullOrEmpty(newValue))
         {
-            // Inline revert: the setter already ran ClearPending on the node,
-            // but the aggregated pending queue / preview still need a refresh
-            // — otherwise the row lingers in the sidebar list.
+            // Inline revert / cleared field: drop any stale validation error
+            // from the prior value, then refresh the aggregated pending queue
+            // / preview — otherwise the row lingers red and a stale message
+            // stays in StatusText. StartsWith matches the exact producer
+            // format ($"{memberVm.Name}: {error}") without accidentally
+            // clearing messages about other members whose name contains this
+            // one as a substring.
+            memberVm.HasInlineError = false;
+            memberVm.InlineErrorMessage = null;
+            if (StatusText.StartsWith(memberVm.Name + ":"))
+                StatusText = "";
             RefreshPendingAndPreview();
             return;
         }

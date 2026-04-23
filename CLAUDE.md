@@ -119,6 +119,10 @@ Canonical outputs live in `assets/screenshots/`. To add a new shot, pick a prese
 - Use `Siemens.Collaboration.Net.TiaPortal.Openness.Extensions` for convenience methods
 - All user-facing strings must go through i18n resource files
 - Freemium counter logic must be isolated in its own service for easy swap to online licensing later
+- When clarifying anything with the user, prefer the **AskUserQuestion** tool over
+  free-form prose. Always include a concrete set of options and **recommend one of
+  them** (mark it in the question text) so the user can accept with a single click
+  instead of typing a reply.
 
 ## Project Structure
 

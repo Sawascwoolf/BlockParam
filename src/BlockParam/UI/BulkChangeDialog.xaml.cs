@@ -369,6 +369,99 @@ public partial class BulkChangeDialog : Window
     internal void HideInlineOverlayScripted() => HideInlineOverlay();
 
     /// <summary>
+    /// Scripted-only: opens a fake ComboBox dropdown below the real scope
+    /// ComboBox, populated with the VM's AvailableScopes. The real Popup
+    /// lives in a separate HWND and cannot be captured by RenderTargetBitmap,
+    /// so we draw our own overlay inside the main visual tree.
+    /// If <paramref name="hoverPath"/> matches a scope's AncestorPath that
+    /// row is pre-selected so it reads as "mouse is about to click this".
+    /// </summary>
+    internal void ShowScopeDropdownForScripted(string? hoverPath = null)
+    {
+        if (DataContext is not BulkChangeViewModel vm) return;
+        if (vm.AvailableScopes.Count == 0) return;
+
+        // Force a layout pass so the ComboBox has a real ActualWidth/Height.
+        UpdateLayout();
+
+        ScopeOverlayList.ItemsSource = vm.AvailableScopes;
+        ScopeOverlayList.SelectedItem = null;
+        if (hoverPath != null)
+        {
+            foreach (var s in vm.AvailableScopes)
+            {
+                if (s.AncestorPath == hoverPath)
+                {
+                    ScopeOverlayList.SelectedItem = s;
+                    break;
+                }
+            }
+        }
+
+        var bottomLeft = ScopeCombo.TranslatePoint(
+            new System.Windows.Point(0, ScopeCombo.ActualHeight), this);
+        ScopeOverlay.Width = ScopeCombo.ActualWidth;
+        ScopeOverlay.Margin = new Thickness(bottomLeft.X, bottomLeft.Y, 0, 0);
+        ScopeOverlay.Visibility = Visibility.Visible;
+
+        // Materialize row containers so cursor-target lookups can resolve them.
+        UpdateLayout();
+        foreach (var item in ScopeOverlayList.Items)
+            ScopeOverlayList.ItemContainerGenerator.ContainerFromItem(item);
+    }
+
+    /// <summary>Scripted-only: tears down the scope dropdown overlay.</summary>
+    internal void HideScopeDropdownScripted()
+    {
+        ScopeOverlay.Visibility = Visibility.Collapsed;
+        ScopeOverlayList.ItemsSource = null;
+        ScopeOverlayList.SelectedItem = null;
+    }
+
+    /// <summary>
+    /// Finds the per-row undo (↶) Button for the pending-edit entry whose
+    /// node has the given path. Walks the PendingEditsList container
+    /// generator + the row's visual tree. Returns null if the entry isn't
+    /// in the pending queue or hasn't been materialized yet.
+    /// </summary>
+    private FrameworkElement? FindRevertButton(string nodePath)
+    {
+        if (DataContext is not BulkChangeViewModel vm) return null;
+        UpdateLayout();
+        foreach (var item in PendingEditsList.Items)
+        {
+            if (item is PendingEditEntry entry && entry.Node?.Path == nodePath)
+            {
+                var container = PendingEditsList.ItemContainerGenerator
+                    .ContainerFromItem(item) as FrameworkElement;
+                if (container == null) return null;
+                // The row template has exactly one Button (the ↶ undo button),
+                // so the first Button descendant is the one we want.
+                foreach (var btn in FindAllDescendants<System.Windows.Controls.Button>(container))
+                    return btn;
+            }
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// Finds the ListBoxItem in the scripted scope overlay whose bound
+    /// ScopeLevel has the given AncestorPath. Returns null if the overlay
+    /// is hidden or the path doesn't match any scope.
+    /// </summary>
+    private ListBoxItem? FindScopeOverlayRow(string ancestorPath)
+    {
+        if (ScopeOverlay.Visibility != Visibility.Visible) return null;
+        if (ScopeOverlayList.ItemsSource == null) return null;
+        foreach (var item in ScopeOverlayList.Items)
+        {
+            if (item is Services.ScopeLevel s && s.AncestorPath == ancestorPath)
+                return ScopeOverlayList.ItemContainerGenerator.ContainerFromItem(item) as ListBoxItem;
+        }
+        return null;
+    }
+
+    /// <summary>
     /// Scripted-only: paints the cursor overlay at window-relative (x, y).
     /// Coordinates are in DIPs (same space as the viewport config). Hotspot
     /// is the cursor tip at (0, 0) after the translation.
@@ -378,10 +471,52 @@ public partial class BulkChangeDialog : Window
         Canvas.SetLeft(CursorShape, x);
         Canvas.SetTop(CursorShape, y);
         CursorOverlay.Visibility = Visibility.Visible;
+        _lastCursorX = x;
+        _lastCursorY = y;
+        _hasCursorPoint = true;
     }
 
-    /// <summary>Scripted-only: hides the cursor overlay.</summary>
-    internal void HideCursor() => CursorOverlay.Visibility = Visibility.Collapsed;
+    /// <summary>Scripted-only: hides the cursor overlay (and the click ring).</summary>
+    internal void HideCursor()
+    {
+        CursorOverlay.Visibility = Visibility.Collapsed;
+        HideClickRing();
+    }
+
+    /// <summary>
+    /// Scripted-only: paints a click ring centered on the cursor's last known
+    /// position. Two phases produce a natural "press → release" feel:
+    ///   "press"   — inner tight ring (28 DIP, high opacity). Place on a
+    ///               frame where the click target is still visible (dropdown
+    ///               open, row highlighted) — this is the "finger goes down"
+    ///               beat, BEFORE the action commits.
+    ///   "release" — outer expanded ring (56 DIP, lower opacity). Place on
+    ///               the action frame itself — this is the "finger lifts,
+    ///               UI reacts" beat.
+    /// No-op if no cursor has been shown yet in the current session.
+    /// </summary>
+    internal void ShowClickRingAtLastCursor(string phase)
+    {
+        if (!_hasCursorPoint) return;
+        double size = phase == "press" ? 28 : 56;
+        double opacity = phase == "press" ? 0.9 : 0.55;
+        ClickRing.Width = size;
+        ClickRing.Height = size;
+        ClickRing.Opacity = opacity;
+        Canvas.SetLeft(ClickRing, _lastCursorX - size * 0.5);
+        Canvas.SetTop(ClickRing, _lastCursorY - size * 0.5);
+        ClickRing.Visibility = Visibility.Visible;
+        // Also reveal the overlay so the ring renders even if the arrow
+        // isn't painted on this frame.
+        CursorOverlay.Visibility = Visibility.Visible;
+    }
+
+    /// <summary>Scripted-only: hides the click ring (arrow stays as-is).</summary>
+    internal void HideClickRing() => ClickRing.Visibility = Visibility.Collapsed;
+
+    private double _lastCursorX;
+    private double _lastCursorY;
+    private bool _hasCursorPoint;
 
     /// <summary>
     /// Scripted-only: resolves a cursor target name to window-relative
@@ -406,6 +541,34 @@ public partial class BulkChangeDialog : Window
         {
             element = ApplyButton;
             xInset = ApplyButton.ActualWidth * 0.5; // button: center
+        }
+        else if (target == "set")
+        {
+            element = SetButton;
+            xInset = SetButton.ActualWidth * 0.5;
+        }
+        else if (target == "newValue")
+        {
+            element = BulkNewValueBox;
+            xInset = BulkNewValueBox.ActualWidth * 0.5;
+        }
+        else if (target == "scope")
+        {
+            element = ScopeCombo;
+            // Point at the dropdown chevron on the right of the ComboBox,
+            // so the "about to click to open" read is unambiguous.
+            xInset = ScopeCombo.ActualWidth - 12;
+        }
+        else if (target.StartsWith("scopeItem:"))
+        {
+            element = FindScopeOverlayRow(target.Substring("scopeItem:".Length));
+            xInset = 20;
+        }
+        else if (target.StartsWith("revertButton:"))
+        {
+            element = FindRevertButton(target.Substring("revertButton:".Length));
+            // The ↶ button is small and right-aligned — aim for its center.
+            xInset = element != null ? element.ActualWidth * 0.5 : 0;
         }
         else if (target.StartsWith("suggestion:"))
         {

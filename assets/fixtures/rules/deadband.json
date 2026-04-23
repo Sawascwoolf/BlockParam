@@ -1,0 +1,10 @@
+{
+  "version": "1.0",
+  "rules": [
+    {
+      "pathPattern": ".*\\.deadband$",
+      "datatype": "Real",
+      "constraints": { "min": 1, "max": 100 }
+    }
+  ]
+}
