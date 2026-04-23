@@ -1,0 +1,30 @@
+TYPE "UDT_BlockParamTest"
+VERSION : 0.1
+   STRUCT
+      moduleId : Int;   // Module identifier {bp_varTable=MOD_}
+      elementId : Int;   // Element identifier {bp_varTable=ELE_}
+      messageId : Int;   // Message identifier {bp_varTable=MES_}
+      temperature : Real;   // Process temperature in degC {bp_min=0}{bp_max=150}
+      pressure : Real;   // Pressure in bar {bp_min=0}{bp_max=10}
+      mode : Int;   // Operating mode {bp_allowed=0,1,2,3}
+      priority : Int;   // Alarm priority {bp_min=1}{bp_max=5}
+      debugFlag : Bool;   // Internal, not for bulk edit {bp_exclude=true}
+      actualValue : Real;   // Just a plain comment, no rule
+      setpoint : Real;   // Target value {bp_min=0}{bp_max=100}
+   END_STRUCT;
+END_TYPE
+
+DATA_BLOCK "DB_BlockParamTest"
+{ S7_Optimized_Access := 'TRUE' }
+VERSION : 0.1
+NON_RETAIN
+   STRUCT
+      drive1 : "UDT_BlockParamTest";
+      drive2 : "UDT_BlockParamTest";
+      drive3 : "UDT_BlockParamTest";
+      directMember : Int;   // DB-local rule {bp_varTable=MOD_}
+   END_STRUCT;
+
+BEGIN
+
+END_DATA_BLOCK

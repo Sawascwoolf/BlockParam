@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Document>
+  <Engineering version="V20" />
+  <DocumentInfo>
+    <Created>2026-04-10T20:43:33Z</Created>
+    <ExportSetting>WithDefaults</ExportSetting>
+  </DocumentInfo>
+  <SW.Blocks.GlobalDB ID="0">
+    <AttributeList>
+      <Interface><Sections xmlns="http://www.siemens.com/automation/Openness/SW/Interface/v5">
+  <Section Name="Static">
+    <Member Name="drive1" Datatype="Struct" Remanence="NonRetain" Accessibility="Public">
+      <AttributeList>
+        <BooleanAttribute Name="SetPoint" SystemDefined="true">false</BooleanAttribute>
+      </AttributeList>
+      <Member Name="blocked" Datatype="&quot;messageConfig_UDT&quot;">
+        <AttributeList>
+          <BooleanAttribute Name="SetPoint" SystemDefined="true">true</BooleanAttribute>
+        </AttributeList>
+        <Sections>
+          <Section Name="None">
+            <Member Name="moduleId" Datatype="Int">
+              <StartValue>10</StartValue>
+            </Member>
+            <Member Name="elementId" Datatype="Int">
+              <StartValue>1</StartValue>
+            </Member>
+            <Member Name="messageId" Datatype="Int">
+              <StartValue>101</StartValue>
+            </Member>
+            <Member Name="bmkId" Datatype="Int" />
+            <Member Name="actualValue" Datatype="Int" />
+          </Section>
+        </Sections>
+      </Member>
+      <Member Name="communicationError" Datatype="&quot;messageConfig_UDT&quot;">
+        <AttributeList>
+          <BooleanAttribute Name="SetPoint" SystemDefined="true">true</BooleanAttribute>
+        </AttributeList>
+        <Sections>
+          <Section Name="None">
+            <Member Name="moduleId" Datatype="Int">
+              <StartValue>10</StartValue>
+            </Member>
+            <Member Name="elementId" Datatype="Int">
+              <StartValue>1</StartValue>
+            </Member>
+            <Member Name="messageId" Datatype="Int">
+              <StartValue>102</StartValue>
+            </Member>
+            <Member Name="bmkId" Datatype="Int" />
+            <Member Name="actualValue" Datatype="Int" />
+          </Section>
+        </Sections>
+      </Member>
+    </Member>
+    <Member Name="drive2" Datatype="Struct" Remanence="NonRetain" Accessibility="Public">
+      <AttributeList>
+        <BooleanAttribute Name="SetPoint" SystemDefined="true">false</BooleanAttribute>
+      </AttributeList>
+      <Member Name="blocked" Datatype="&quot;messageConfig_UDT&quot;">
+        <AttributeList>
+          <BooleanAttribute Name="SetPoint" SystemDefined="true">true</BooleanAttribute>
+        </AttributeList>
+        <Sections>
+          <Section Name="None">
+            <Member Name="moduleId" Datatype="Int">
+              <StartValue>20</StartValue>
+            </Member>
+            <Member Name="elementId" Datatype="Int">
+              <StartValue>2</StartValue>
+            </Member>
+            <Member Name="messageId" Datatype="Int">
+              <StartValue>201</StartValue>
+            </Member>
+            <Member Name="bmkId" Datatype="Int" />
+            <Member Name="actualValue" Datatype="Int" />
+          </Section>
+        </Sections>
+      </Member>
+    </Member>
+  </Section>
+</Sections></Interface>
+      <MemoryLayout>Optimized</MemoryLayout>
+      <Name>TP307</Name>
+      <Number>1</Number>
+      <ProgrammingLanguage>DB</ProgrammingLanguage>
+    </AttributeList>
+  </SW.Blocks.GlobalDB>
+</Document>

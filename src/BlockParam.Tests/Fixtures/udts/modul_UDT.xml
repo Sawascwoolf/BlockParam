@@ -1,0 +1,180 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Document>
+  <Engineering version="V20" />
+  <DocumentInfo>
+    <Created>2026-04-18T06:33:56.5273818Z</Created>
+    <ExportSetting>WithDefaults</ExportSetting>
+    <InstalledProducts>
+      <Product>
+        <DisplayName>Totally Integrated Automation Portal</DisplayName>
+        <DisplayVersion>V20</DisplayVersion>
+      </Product>
+      <OptionPackage>
+        <DisplayName>TIA Portal Openness</DisplayName>
+        <DisplayVersion>V20</DisplayVersion>
+      </OptionPackage>
+      <OptionPackage>
+        <DisplayName>TIA Portal Version Control Interface</DisplayName>
+        <DisplayVersion>V20</DisplayVersion>
+      </OptionPackage>
+      <Product>
+        <DisplayName>STEP 7 Professional</DisplayName>
+        <DisplayVersion>V20</DisplayVersion>
+      </Product>
+      <OptionPackage>
+        <DisplayName>STEP 7 Safety</DisplayName>
+        <DisplayVersion>V20</DisplayVersion>
+      </OptionPackage>
+      <Product>
+        <DisplayName>WinCC Basic/Comfort/Advanced</DisplayName>
+        <DisplayVersion>V20</DisplayVersion>
+      </Product>
+    </InstalledProducts>
+  </DocumentInfo>
+  <SW.Types.PlcStruct ID="0">
+    <AttributeList>
+      <Interface><Sections xmlns="http://www.siemens.com/automation/Openness/SW/Interface/v5">
+  <Section Name="None">
+    <Member Name="drive1" Datatype="&quot;driveMessagesConfig_UDT&quot;">
+      <AttributeList>
+        <BooleanAttribute Name="ExternalAccessible" SystemDefined="true">false</BooleanAttribute>
+        <BooleanAttribute Name="ExternalVisible" SystemDefined="true">false</BooleanAttribute>
+        <BooleanAttribute Name="ExternalWritable" SystemDefined="true">false</BooleanAttribute>
+        <BooleanAttribute Name="SetPoint" SystemDefined="true">true</BooleanAttribute>
+      </AttributeList>
+      <Sections>
+        <Section Name="None">
+          <Member Name="communicationError" Datatype="&quot;messageConfig_UDT&quot;">
+            <Sections>
+              <Section Name="None">
+                <Member Name="moduleId" Datatype="Int" />
+                <Member Name="elementId" Datatype="Int" />
+                <Member Name="messageId" Datatype="Int" />
+                <Member Name="bmkId" Datatype="Int" />
+                <Member Name="actualValue" Datatype="Int" />
+              </Section>
+            </Sections>
+          </Member>
+          <Member Name="blocked" Datatype="&quot;messageConfig_UDT&quot;">
+            <Sections>
+              <Section Name="None">
+                <Member Name="moduleId" Datatype="Int" />
+                <Member Name="elementId" Datatype="Int" />
+                <Member Name="messageId" Datatype="Int" />
+                <Member Name="bmkId" Datatype="Int" />
+                <Member Name="actualValue" Datatype="Int" />
+              </Section>
+            </Sections>
+          </Member>
+        </Section>
+      </Sections>
+    </Member>
+    <Member Name="drive2" Datatype="Struct">
+      <AttributeList>
+        <BooleanAttribute Name="ExternalAccessible" SystemDefined="true">false</BooleanAttribute>
+        <BooleanAttribute Name="ExternalVisible" SystemDefined="true">false</BooleanAttribute>
+        <BooleanAttribute Name="ExternalWritable" SystemDefined="true">false</BooleanAttribute>
+        <BooleanAttribute Name="SetPoint" SystemDefined="true">false</BooleanAttribute>
+      </AttributeList>
+      <Member Name="blocked" Datatype="&quot;messageConfig_UDT&quot;">
+        <AttributeList>
+          <BooleanAttribute Name="ExternalAccessible" SystemDefined="true">false</BooleanAttribute>
+          <BooleanAttribute Name="ExternalVisible" SystemDefined="true">false</BooleanAttribute>
+          <BooleanAttribute Name="ExternalWritable" SystemDefined="true">false</BooleanAttribute>
+          <BooleanAttribute Name="SetPoint" SystemDefined="true">true</BooleanAttribute>
+        </AttributeList>
+        <Sections>
+          <Section Name="None">
+            <Member Name="moduleId" Datatype="Int" />
+            <Member Name="elementId" Datatype="Int" />
+            <Member Name="messageId" Datatype="Int" />
+            <Member Name="bmkId" Datatype="Int" />
+            <Member Name="actualValue" Datatype="Int" />
+          </Section>
+        </Sections>
+      </Member>
+      <Member Name="communicationError" Datatype="&quot;messageConfig_UDT&quot;">
+        <AttributeList>
+          <BooleanAttribute Name="ExternalAccessible" SystemDefined="true">false</BooleanAttribute>
+          <BooleanAttribute Name="ExternalVisible" SystemDefined="true">false</BooleanAttribute>
+          <BooleanAttribute Name="ExternalWritable" SystemDefined="true">false</BooleanAttribute>
+          <BooleanAttribute Name="SetPoint" SystemDefined="true">true</BooleanAttribute>
+        </AttributeList>
+        <Sections>
+          <Section Name="None">
+            <Member Name="moduleId" Datatype="Int" />
+            <Member Name="elementId" Datatype="Int" />
+            <Member Name="messageId" Datatype="Int" />
+            <Member Name="bmkId" Datatype="Int" />
+            <Member Name="actualValue" Datatype="Int" />
+          </Section>
+        </Sections>
+      </Member>
+    </Member>
+    <Member Name="general" Datatype="Struct">
+      <AttributeList>
+        <BooleanAttribute Name="ExternalAccessible" SystemDefined="true">false</BooleanAttribute>
+        <BooleanAttribute Name="ExternalVisible" SystemDefined="true">false</BooleanAttribute>
+        <BooleanAttribute Name="ExternalWritable" SystemDefined="true">false</BooleanAttribute>
+        <BooleanAttribute Name="SetPoint" SystemDefined="true">false</BooleanAttribute>
+      </AttributeList>
+      <Member Name="transferFailed" Datatype="&quot;messageConfig_UDT&quot;">
+        <AttributeList>
+          <BooleanAttribute Name="ExternalAccessible" SystemDefined="true">false</BooleanAttribute>
+          <BooleanAttribute Name="ExternalVisible" SystemDefined="true">false</BooleanAttribute>
+          <BooleanAttribute Name="ExternalWritable" SystemDefined="true">false</BooleanAttribute>
+          <BooleanAttribute Name="SetPoint" SystemDefined="true">true</BooleanAttribute>
+        </AttributeList>
+        <Sections>
+          <Section Name="None">
+            <Member Name="moduleId" Datatype="Int" />
+            <Member Name="elementId" Datatype="Int" />
+            <Member Name="messageId" Datatype="Int" />
+            <Member Name="bmkId" Datatype="Int" />
+            <Member Name="actualValue" Datatype="Int" />
+          </Section>
+        </Sections>
+      </Member>
+    </Member>
+  </Section>
+</Sections></Interface>
+      <IsFailsafeCompliant>false</IsFailsafeCompliant>
+      <Name>modul_UDT</Name>
+      <Namespace />
+    </AttributeList>
+    <ObjectList>
+      <MultilingualText ID="1" CompositionName="Comment">
+        <ObjectList>
+          <MultilingualTextItem ID="2" CompositionName="Items">
+            <AttributeList>
+              <Culture>de-DE</Culture>
+              <Text />
+            </AttributeList>
+          </MultilingualTextItem>
+          <MultilingualTextItem ID="3" CompositionName="Items">
+            <AttributeList>
+              <Culture>en-GB</Culture>
+              <Text />
+            </AttributeList>
+          </MultilingualTextItem>
+        </ObjectList>
+      </MultilingualText>
+      <MultilingualText ID="4" CompositionName="Title">
+        <ObjectList>
+          <MultilingualTextItem ID="5" CompositionName="Items">
+            <AttributeList>
+              <Culture>de-DE</Culture>
+              <Text />
+            </AttributeList>
+          </MultilingualTextItem>
+          <MultilingualTextItem ID="6" CompositionName="Items">
+            <AttributeList>
+              <Culture>en-GB</Culture>
+              <Text />
+            </AttributeList>
+          </MultilingualTextItem>
+        </ObjectList>
+      </MultilingualText>
+    </ObjectList>
+  </SW.Types.PlcStruct>
+</Document>

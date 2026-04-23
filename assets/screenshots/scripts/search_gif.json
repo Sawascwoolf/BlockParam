@@ -1,0 +1,28 @@
+{
+  "output_dir": "../search",
+  "dpi": 192,
+  "viewport": { "width": 1280, "height": 800 },
+  "fixture": "../../fixtures/DB_ProcessPlant_A1.xml",
+  "udt_dir": "../../fixtures/UdtTypes",
+  "scenes": [
+    { "id": "gif_search_01_empty",     "filename": "gif_search_01_empty.png",     "dialog": "main", "filter": { "searchText": "" } },
+    { "id": "gif_search_02_d",         "filename": "gif_search_02_d.png",         "dialog": "main", "filter": { "searchText": "d" } },
+    { "id": "gif_search_03_de",        "filename": "gif_search_03_de.png",        "dialog": "main", "filter": { "searchText": "de" } },
+    { "id": "gif_search_04_dea",       "filename": "gif_search_04_dea.png",       "dialog": "main", "filter": { "searchText": "dea" } },
+    { "id": "gif_search_05_dead",      "filename": "gif_search_05_dead.png",      "dialog": "main", "filter": { "searchText": "dead" } },
+    { "id": "gif_search_06_deadb",     "filename": "gif_search_06_deadb.png",     "dialog": "main", "filter": { "searchText": "deadb" } },
+    { "id": "gif_search_07_deadba",    "filename": "gif_search_07_deadba.png",    "dialog": "main", "filter": { "searchText": "deadba" } },
+    { "id": "gif_search_08_deadban",   "filename": "gif_search_08_deadban.png",   "dialog": "main", "filter": { "searchText": "deadban" } },
+    { "id": "gif_search_09_deadband",  "filename": "gif_search_09_deadband.png",  "dialog": "main", "filter": { "searchText": "deadband" } },
+    { "id": "gif_search_10_empty",     "filename": "gif_search_10_empty.png",     "dialog": "main", "filter": { "searchText": "" } },
+    { "id": "gif_search_11_h",         "filename": "gif_search_11_h.png",         "dialog": "main", "filter": { "searchText": "h" } },
+    { "id": "gif_search_12_hi",        "filename": "gif_search_12_hi.png",        "dialog": "main", "filter": { "searchText": "hi" } },
+    { "id": "gif_search_13_hiH",       "filename": "gif_search_13_hiH.png",       "dialog": "main", "filter": { "searchText": "hiH" } },
+    { "id": "gif_search_14_hiHi",      "filename": "gif_search_14_hiHi.png",      "dialog": "main", "filter": { "searchText": "hiHi" } },
+    { "id": "gif_search_15_hiHiL",     "filename": "gif_search_15_hiHiL.png",     "dialog": "main", "filter": { "searchText": "hiHiL" } },
+    { "id": "gif_search_16_hiHiLi",    "filename": "gif_search_16_hiHiLi.png",    "dialog": "main", "filter": { "searchText": "hiHiLi" } },
+    { "id": "gif_search_17_hiHiLim",   "filename": "gif_search_17_hiHiLim.png",   "dialog": "main", "filter": { "searchText": "hiHiLim" } },
+    { "id": "gif_search_18_hiHiLimi",  "filename": "gif_search_18_hiHiLimi.png",  "dialog": "main", "filter": { "searchText": "hiHiLimi" } },
+    { "id": "gif_search_19_hiHiLimit", "filename": "gif_search_19_hiHiLimit.png", "dialog": "main", "filter": { "searchText": "hiHiLimit" } }
+  ]
+}

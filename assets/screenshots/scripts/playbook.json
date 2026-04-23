@@ -1,0 +1,61 @@
+{
+  "output_dir": "../",
+  "dpi": 192,
+  "viewport": { "width": 1280, "height": 800 },
+  "fixture": "../../fixtures/DB_ProcessPlant_A1.xml",
+  "udt_dir": "../../fixtures/UdtTypes",
+  "scenes": [
+    {
+      "id": "01_hero",
+      "filename": "01_hero.png",
+      "dialog": "main",
+      "expand": [
+        "units[1,2]",
+        "units[1,2].modules[1]",
+        "units[1,2].modules[1].valves[1]",
+        "units[1,2].modules[1].valves[1].flowLimits"
+      ],
+      "filter": { "setpointsOnly": false, "searchText": "" }
+    },
+    {
+      "id": "02_bulk_edit_plant",
+      "filename": "02_bulk_edit_plant.png",
+      "dialog": "main",
+      "filter": { "setpointsOnly": false, "searchText": "hiHiLimit" },
+      "select": "units[1,2].modules[1].valves[1].flowLimits.hiHiLimit",
+      "scope": "units",
+      "newValue": "85.0"
+    },
+    {
+      "id": "03_scope_module",
+      "filename": "03_scope_module.png",
+      "dialog": "main",
+      "filter": { "setpointsOnly": false, "searchText": "hiHiLimit" },
+      "select": "units[1,2].modules[1].valves[1].flowLimits.hiHiLimit",
+      "scope": "units[1,2].modules[1].valves",
+      "newValue": "85.0"
+    },
+    {
+      "id": "04_pending_queue",
+      "filename": "04_pending_queue.png",
+      "dialog": "main",
+      "filter": { "setpointsOnly": false, "searchText": "hiHiLimit" },
+      "select": "units[1,2].modules[1].valves[1].flowLimits.hiHiLimit",
+      "scope": "units[1,2].modules[1].valves",
+      "newValue": "85.0",
+      "stageBulk": true
+    },
+    {
+      "id": "05_collapsed_rail",
+      "filename": "05_collapsed_rail.png",
+      "dialog": "main",
+      "expand": [
+        "units[1,2]",
+        "units[1,2].modules[1]",
+        "units[1,2].modules[1].valves[1]",
+        "units[1,2].modules[1].valves[1].flowLimits"
+      ],
+      "sidebar": { "collapsed": true }
+    }
+  ]
+}

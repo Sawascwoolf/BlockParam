@@ -1,0 +1,30 @@
+{
+  "version": "1.0",
+  "rules": [
+    {
+      "pathPattern": "ModuleId",
+      "datatype": "Int",
+      "constraints": {
+        "min": 0,
+        "max": 9999
+      },
+      "tagTableReference": {
+        "tableName": "Constants_Modules",
+        "description": "Module ID constants"
+      }
+    },
+    {
+      "pathPattern": "ElementId",
+      "datatype": "Int",
+      "constraints": {
+        "allowedValues": [1, 2, 3, 42, 100]
+      }
+    }
+  ],
+  "commentGeneration": {
+    "enabled": true,
+    "language": "en-US",
+    "separator": " > ",
+    "levels": ["db", "parent", "self"]
+  }
+}

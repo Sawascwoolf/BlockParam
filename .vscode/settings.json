@@ -1,0 +1,19 @@
+{
+  "files.exclude": {
+    "**/bin": true,
+    "**/obj": true,
+    "**/.vs": true
+  },
+  "editor.formatOnSave": true,
+  "dotnet.defaultSolution": "BlockParam.sln",
+  "omnisharp.enableRoslynAnalyzers": true,
+  "omnisharp.enableEditorConfigSupport": true,
+  "[csharp]": {
+    "editor.defaultFormatter": "ms-dotnettools.csharp",
+    "editor.tabSize": 4,
+    "editor.insertSpaces": true
+  },
+  "[xml]": {
+    "editor.tabSize": 2
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "recommendations": [
+    "ms-dotnettools.csharp",
+    "ms-dotnettools.csdevkit",
+    "ms-dotnettools.vscode-dotnet-runtime",
+    "formulahendry.dotnet-test-explorer",
+    "redhat.vscode-xml",
+    "ms-vscode.csharp"
+  ]
+}

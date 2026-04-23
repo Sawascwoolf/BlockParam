@@ -1,0 +1,62 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <LangVersion>latest</LangVersion>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>BlockParam</RootNamespace>
+    <AssemblyName>BlockParam</AssemblyName>
+    <Version>0.14.5</Version>
+    <Authors>Sawascwoolf</Authors>
+    <Description>TIA Portal Add-In for editing Data Block start values and parameters — single and in bulk</Description>
+    <ApplicationIcon>Resources\BlockParam_logo.ico</ApplicationIcon>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Resource Include="Resources\BlockParam_logo.ico" />
+    <Resource Include="Resources\BlockParam_logo_256.png" />
+  </ItemGroup>
+
+  <!-- Framework references for WinForms dialogs (FolderBrowserDialog) -->
+  <ItemGroup>
+    <Reference Include="System.Windows.Forms" />
+    <Reference Include="System.Net.Http" />
+  </ItemGroup>
+
+  <!-- Siemens TIA Portal Add-In packages -->
+  <ItemGroup>
+    <PackageReference Include="Siemens.Collaboration.Net.TiaPortal.Packages.OpennessAddIn" Version="20.0.*" />
+    <PackageReference Include="Newtonsoft.Json" Version="13.*" />
+    <PackageReference Include="Serilog" Version="3.*" />
+    <PackageReference Include="Serilog.Sinks.File" Version="5.*" />
+    <PackageReference Include="Microsoft.Bcl.HashCode" Version="1.*" />
+    <PackageReference Include="PolySharp" Version="1.*">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <!-- Expose internal scripting-only hooks (FlushPendingHighlighting etc.)
+       to the DevLauncher so the capture-mode scene scripts can drive the
+       ViewModel deterministically. These hooks are intentionally NOT part
+       of the public API — the interactive UI never needs them. -->
+  <ItemGroup>
+    <InternalsVisibleTo Include="BlockParam.DevLauncher" />
+  </ItemGroup>
+
+  <!-- Embedded resources for localization -->
+  <ItemGroup>
+    <EmbeddedResource Update="Localization\Strings.resx">
+      <Generator>ResXFileCodeGenerator</Generator>
+      <LastGenOutput>Strings.Designer.cs</LastGenOutput>
+    </EmbeddedResource>
+    <Compile Update="Localization\Strings.Designer.cs">
+      <DesignTime>True</DesignTime>
+      <AutoGen>True</AutoGen>
+      <DependentUpon>Strings.resx</DependentUpon>
+    </Compile>
+  </ItemGroup>
+
+</Project>

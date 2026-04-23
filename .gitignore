@@ -1,0 +1,52 @@
+## .NET / C#
+bin/
+obj/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+[Bb]uild/
+bld/
+
+## NuGet
+*.nupkg
+**/[Pp]ackages/*
+!**/[Pp]ackages/build/
+
+## Visual Studio
+.vs/
+*.rsuser
+*.cache
+*.aps
+*.ncb
+*.opendb
+*.opensdf
+*.sdf
+*.cachefile
+*.VC.db
+*.VC.VC.opendb
+launchSettings.json
+
+## TIA Portal Add-In
+*.addin
+AddInPublisherConfiguration.xml
+addin-staging/
+publish/
+
+## OS
+Thumbs.db
+.DS_Store
+
+## IDE
+*.idea/
+
+## Claude Code worktrees (agent scratch dirs, separate git worktrees)
+.claude/worktrees/
+
+## Claude Code per-developer settings (contain local paths, personal allowlists)
+.claude/settings.json
+.claude/settings.local.json

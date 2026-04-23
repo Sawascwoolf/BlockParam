@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Document>
+  <DocumentInfo>
+    <Created>2024-01-01T00:00:00</Created>
+    <ExportSetting>WithDefaults</ExportSetting>
+  </DocumentInfo>
+  <SW.Blocks.GlobalDB ID="0">
+    <AttributeList>
+      <Interface>
+        <Sections xmlns="http://www.siemens.com/automation/Openness/SW/Interface/v5">
+          <Section Name="Static">
+            <Member Name="Drive1" Datatype="&quot;UDT_Element&quot;" Accessibility="Public">
+              <Member Name="Msg_CommError" Datatype="&quot;UDT_Message&quot;">
+                <Member Name="ModuleId" Datatype="Int">
+                  <StartValue>42</StartValue>
+                </Member>
+                <Member Name="ElementId" Datatype="Int">
+                  <StartValue>1</StartValue>
+                </Member>
+                <Member Name="MessageId" Datatype="Int">
+                  <StartValue>101</StartValue>
+                </Member>
+                <Member Name="Active" Datatype="Bool">
+                  <StartValue>false</StartValue>
+                </Member>
+              </Member>
+              <Member Name="Msg_Overtemp" Datatype="&quot;UDT_Message&quot;">
+                <Member Name="ModuleId" Datatype="Int">
+                  <StartValue>42</StartValue>
+                </Member>
+                <Member Name="ElementId" Datatype="Int">
+                  <StartValue>1</StartValue>
+                </Member>
+                <Member Name="MessageId" Datatype="Int">
+                  <StartValue>102</StartValue>
+                </Member>
+                <Member Name="Active" Datatype="Bool">
+                  <StartValue>false</StartValue>
+                </Member>
+              </Member>
+            </Member>
+            <Member Name="Sensor1" Datatype="&quot;UDT_Element&quot;" Accessibility="Public">
+              <Member Name="Msg_CommError" Datatype="&quot;UDT_Message&quot;">
+                <Member Name="ModuleId" Datatype="Int">
+                  <StartValue>42</StartValue>
+                </Member>
+                <Member Name="ElementId" Datatype="Int">
+                  <StartValue>2</StartValue>
+                </Member>
+                <Member Name="MessageId" Datatype="Int">
+                  <StartValue>201</StartValue>
+                </Member>
+                <Member Name="Active" Datatype="Bool">
+                  <StartValue>false</StartValue>
+                </Member>
+              </Member>
+              <Member Name="Msg_Overtemp" Datatype="&quot;UDT_Message&quot;">
+                <Member Name="ModuleId" Datatype="Int">
+                  <StartValue>42</StartValue>
+                </Member>
+                <Member Name="ElementId" Datatype="Int">
+                  <StartValue>2</StartValue>
+                </Member>
+                <Member Name="MessageId" Datatype="Int">
+                  <StartValue>202</StartValue>
+                </Member>
+                <Member Name="Active" Datatype="Bool">
+                  <StartValue>false</StartValue>
+                </Member>
+              </Member>
+            </Member>
+          </Section>
+        </Sections>
+      </Interface>
+      <MemoryLayout>Optimized</MemoryLayout>
+      <Name>UdtInstancesDB</Name>
+      <Number>3</Number>
+      <ProgrammingLanguage>DB</ProgrammingLanguage>
+    </AttributeList>
+  </SW.Blocks.GlobalDB>
+</Document>

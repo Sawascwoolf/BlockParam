@@ -1,0 +1,181 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Document>
+  <Engineering version="V20" />
+  <DocumentInfo>
+    <Created>2026-04-20T18:50:18.1743947Z</Created>
+    <ExportSetting>WithDefaults</ExportSetting>
+    <InstalledProducts>
+      <Product>
+        <DisplayName>Totally Integrated Automation Portal</DisplayName>
+        <DisplayVersion>V20</DisplayVersion>
+      </Product>
+      <OptionPackage>
+        <DisplayName>TIA Portal Openness</DisplayName>
+        <DisplayVersion>V20</DisplayVersion>
+      </OptionPackage>
+      <OptionPackage>
+        <DisplayName>TIA Portal Version Control Interface</DisplayName>
+        <DisplayVersion>V20</DisplayVersion>
+      </OptionPackage>
+      <Product>
+        <DisplayName>STEP 7 Professional</DisplayName>
+        <DisplayVersion>V20</DisplayVersion>
+      </Product>
+      <OptionPackage>
+        <DisplayName>STEP 7 Safety</DisplayName>
+        <DisplayVersion>V20</DisplayVersion>
+      </OptionPackage>
+      <Product>
+        <DisplayName>WinCC Basic/Comfort/Advanced</DisplayName>
+        <DisplayVersion>V20</DisplayVersion>
+      </Product>
+    </InstalledProducts>
+  </DocumentInfo>
+  <SW.Types.PlcStruct ID="0">
+    <AttributeList>
+      <Interface><Sections xmlns="http://www.siemens.com/automation/Openness/SW/Interface/v5">
+  <Section Name="None">
+    <Member Name="hiHiLimit" Datatype="Real">
+      <AttributeList>
+        <BooleanAttribute Name="ExternalAccessible" SystemDefined="true">true</BooleanAttribute>
+        <BooleanAttribute Name="ExternalVisible" SystemDefined="true">true</BooleanAttribute>
+        <BooleanAttribute Name="ExternalWritable" SystemDefined="true">true</BooleanAttribute>
+        <BooleanAttribute Name="SetPoint" SystemDefined="true">true</BooleanAttribute>
+      </AttributeList>
+      <Comment>
+        <MultiLanguageText Lang="en-GB">Upper critical alarm limit, action required</MultiLanguageText>
+      </Comment>
+      <StartValue>100.0</StartValue>
+    </Member>
+    <Member Name="hiLimit" Datatype="Real">
+      <AttributeList>
+        <BooleanAttribute Name="ExternalAccessible" SystemDefined="true">true</BooleanAttribute>
+        <BooleanAttribute Name="ExternalVisible" SystemDefined="true">true</BooleanAttribute>
+        <BooleanAttribute Name="ExternalWritable" SystemDefined="true">true</BooleanAttribute>
+        <BooleanAttribute Name="SetPoint" SystemDefined="true">true</BooleanAttribute>
+      </AttributeList>
+      <Comment>
+        <MultiLanguageText Lang="en-GB">Upper warning alarm limit</MultiLanguageText>
+      </Comment>
+      <StartValue>90.0</StartValue>
+    </Member>
+    <Member Name="loLimit" Datatype="Real">
+      <AttributeList>
+        <BooleanAttribute Name="ExternalAccessible" SystemDefined="true">true</BooleanAttribute>
+        <BooleanAttribute Name="ExternalVisible" SystemDefined="true">true</BooleanAttribute>
+        <BooleanAttribute Name="ExternalWritable" SystemDefined="true">true</BooleanAttribute>
+        <BooleanAttribute Name="SetPoint" SystemDefined="true">true</BooleanAttribute>
+      </AttributeList>
+      <Comment>
+        <MultiLanguageText Lang="en-GB">Lower warning alarm limit</MultiLanguageText>
+      </Comment>
+      <StartValue>10.0</StartValue>
+    </Member>
+    <Member Name="loLoLimit" Datatype="Real">
+      <AttributeList>
+        <BooleanAttribute Name="ExternalAccessible" SystemDefined="true">true</BooleanAttribute>
+        <BooleanAttribute Name="ExternalVisible" SystemDefined="true">true</BooleanAttribute>
+        <BooleanAttribute Name="ExternalWritable" SystemDefined="true">true</BooleanAttribute>
+        <BooleanAttribute Name="SetPoint" SystemDefined="true">true</BooleanAttribute>
+      </AttributeList>
+      <Comment>
+        <MultiLanguageText Lang="en-GB">Lower critical alarm limit, action required</MultiLanguageText>
+      </Comment>
+      <StartValue>5.0</StartValue>
+    </Member>
+    <Member Name="hysteresis" Datatype="Real">
+      <AttributeList>
+        <BooleanAttribute Name="ExternalAccessible" SystemDefined="true">true</BooleanAttribute>
+        <BooleanAttribute Name="ExternalVisible" SystemDefined="true">true</BooleanAttribute>
+        <BooleanAttribute Name="ExternalWritable" SystemDefined="true">true</BooleanAttribute>
+        <BooleanAttribute Name="SetPoint" SystemDefined="true">true</BooleanAttribute>
+      </AttributeList>
+      <Comment>
+        <MultiLanguageText Lang="en-GB">Alarm hysteresis to prevent chattering</MultiLanguageText>
+      </Comment>
+      <StartValue>0.5</StartValue>
+    </Member>
+    <Member Name="alarmDelay" Datatype="Time">
+      <AttributeList>
+        <BooleanAttribute Name="ExternalAccessible" SystemDefined="true">true</BooleanAttribute>
+        <BooleanAttribute Name="ExternalVisible" SystemDefined="true">true</BooleanAttribute>
+        <BooleanAttribute Name="ExternalWritable" SystemDefined="true">true</BooleanAttribute>
+        <BooleanAttribute Name="SetPoint" SystemDefined="true">true</BooleanAttribute>
+      </AttributeList>
+      <Comment>
+        <MultiLanguageText Lang="en-GB">Delay before alarm is raised</MultiLanguageText>
+      </Comment>
+      <StartValue>T#3S</StartValue>
+    </Member>
+    <Member Name="enable" Datatype="Bool">
+      <AttributeList>
+        <BooleanAttribute Name="ExternalAccessible" SystemDefined="true">true</BooleanAttribute>
+        <BooleanAttribute Name="ExternalVisible" SystemDefined="true">true</BooleanAttribute>
+        <BooleanAttribute Name="ExternalWritable" SystemDefined="true">true</BooleanAttribute>
+        <BooleanAttribute Name="SetPoint" SystemDefined="true">true</BooleanAttribute>
+      </AttributeList>
+      <Comment>
+        <MultiLanguageText Lang="en-GB">Enable alarm monitoring for this limit set</MultiLanguageText>
+      </Comment>
+      <StartValue>TRUE</StartValue>
+    </Member>
+  </Section>
+</Sections></Interface>
+      <IsFailsafeCompliant>false</IsFailsafeCompliant>
+      <Name>UDT_AlarmLimits</Name>
+      <Namespace />
+    </AttributeList>
+    <ObjectList>
+      <MultilingualText ID="1" CompositionName="Comment">
+        <ObjectList>
+          <MultilingualTextItem ID="2" CompositionName="Items">
+            <AttributeList>
+              <Culture>de-DE</Culture>
+              <Text />
+            </AttributeList>
+          </MultilingualTextItem>
+          <MultilingualTextItem ID="3" CompositionName="Items">
+            <AttributeList>
+              <Culture>en-GB</Culture>
+              <Text> ============================================================
+ BlockParam Demo - Process Plant Structure (Setpoints + Comments)
+ Author: Tobias Laubscher
+ Target: TIA Portal V17+
+ Comment language: en-GB
+
+ Import procedure:
+   1. Set TIA project editing language to English (United Kingdom)
+   2. Add as external source, then "Generate blocks from source"
+   3. Verify Setpoint flags and comments on a sample member
+
+ Hierarchy depth from DB root to leaf:
+   DB -> units[] -> modules[] -> valves[] -> *Limits -> hiLimit  (5 levels)
+
+ Setpoint policy:
+   - Tunable parameters and every parent container on the path
+     carry { S7_SetPoint := 'True' }
+   - Identification / metadata members (tags, names, IDs) do not
+ ============================================================</Text>
+            </AttributeList>
+          </MultilingualTextItem>
+        </ObjectList>
+      </MultilingualText>
+      <MultilingualText ID="4" CompositionName="Title">
+        <ObjectList>
+          <MultilingualTextItem ID="5" CompositionName="Items">
+            <AttributeList>
+              <Culture>de-DE</Culture>
+              <Text />
+            </AttributeList>
+          </MultilingualTextItem>
+          <MultilingualTextItem ID="6" CompositionName="Items">
+            <AttributeList>
+              <Culture>en-GB</Culture>
+              <Text />
+            </AttributeList>
+          </MultilingualTextItem>
+        </ObjectList>
+      </MultilingualText>
+    </ObjectList>
+  </SW.Types.PlcStruct>
+</Document>

@@ -1,0 +1,116 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Document>
+  <Engineering version="V20" />
+  <DocumentInfo>
+    <Created>2026-04-10T22:01:57.8344067Z</Created>
+    <ExportSetting>WithDefaults</ExportSetting>
+    <InstalledProducts>
+      <Product>
+        <DisplayName>Totally Integrated Automation Portal</DisplayName>
+        <DisplayVersion>V20</DisplayVersion>
+      </Product>
+      <OptionPackage>
+        <DisplayName>TIA Portal Openness</DisplayName>
+        <DisplayVersion>V20</DisplayVersion>
+      </OptionPackage>
+      <OptionPackage>
+        <DisplayName>TIA Portal Version Control Interface</DisplayName>
+        <DisplayVersion>V20</DisplayVersion>
+      </OptionPackage>
+      <Product>
+        <DisplayName>STEP 7 Professional</DisplayName>
+        <DisplayVersion>V20</DisplayVersion>
+      </Product>
+      <OptionPackage>
+        <DisplayName>STEP 7 Safety</DisplayName>
+        <DisplayVersion>V20</DisplayVersion>
+      </OptionPackage>
+      <Product>
+        <DisplayName>WinCC Basic/Comfort/Advanced</DisplayName>
+        <DisplayVersion>V20</DisplayVersion>
+      </Product>
+    </InstalledProducts>
+  </DocumentInfo>
+  <SW.Tags.PlcTagTable ID="0">
+    <AttributeList>
+      <Name>ELE_</Name>
+    </AttributeList>
+    <ObjectList>
+      <SW.Tags.PlcUserConstant ID="1" CompositionName="UserConstants">
+        <AttributeList>
+          <DataTypeName>Int</DataTypeName>
+          <Name>ELE_DRIVE_1</Name>
+          <Value>1</Value>
+        </AttributeList>
+        <ObjectList>
+          <MultilingualText ID="2" CompositionName="Comment">
+            <ObjectList>
+              <MultilingualTextItem ID="3" CompositionName="Items">
+                <AttributeList>
+                  <Culture>de-DE</Culture>
+                  <Text>Kommentar ELE_DRIVE_1</Text>
+                </AttributeList>
+              </MultilingualTextItem>
+              <MultilingualTextItem ID="4" CompositionName="Items">
+                <AttributeList>
+                  <Culture>en-GB</Culture>
+                  <Text />
+                </AttributeList>
+              </MultilingualTextItem>
+            </ObjectList>
+          </MultilingualText>
+        </ObjectList>
+      </SW.Tags.PlcUserConstant>
+      <SW.Tags.PlcUserConstant ID="5" CompositionName="UserConstants">
+        <AttributeList>
+          <DataTypeName>Int</DataTypeName>
+          <Name>ELE_DRIVE_2</Name>
+          <Value>2</Value>
+        </AttributeList>
+        <ObjectList>
+          <MultilingualText ID="6" CompositionName="Comment">
+            <ObjectList>
+              <MultilingualTextItem ID="7" CompositionName="Items">
+                <AttributeList>
+                  <Culture>de-DE</Culture>
+                  <Text>Kommentar ELE_DRIVE_2</Text>
+                </AttributeList>
+              </MultilingualTextItem>
+              <MultilingualTextItem ID="8" CompositionName="Items">
+                <AttributeList>
+                  <Culture>en-GB</Culture>
+                  <Text />
+                </AttributeList>
+              </MultilingualTextItem>
+            </ObjectList>
+          </MultilingualText>
+        </ObjectList>
+      </SW.Tags.PlcUserConstant>
+      <SW.Tags.PlcUserConstant ID="9" CompositionName="UserConstants">
+        <AttributeList>
+          <DataTypeName>Int</DataTypeName>
+          <Name>ELE_GENERAL</Name>
+          <Value>3</Value>
+        </AttributeList>
+        <ObjectList>
+          <MultilingualText ID="A" CompositionName="Comment">
+            <ObjectList>
+              <MultilingualTextItem ID="B" CompositionName="Items">
+                <AttributeList>
+                  <Culture>de-DE</Culture>
+                  <Text>Kommentar ELE_GENERAL</Text>
+                </AttributeList>
+              </MultilingualTextItem>
+              <MultilingualTextItem ID="C" CompositionName="Items">
+                <AttributeList>
+                  <Culture>en-GB</Culture>
+                  <Text />
+                </AttributeList>
+              </MultilingualTextItem>
+            </ObjectList>
+          </MultilingualText>
+        </ObjectList>
+      </SW.Tags.PlcUserConstant>
+    </ObjectList>
+  </SW.Tags.PlcTagTable>
+</Document>

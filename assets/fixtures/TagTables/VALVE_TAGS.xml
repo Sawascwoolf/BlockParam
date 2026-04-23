@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Document>
+  <Engineering version="V20" />
+  <SW.Tags.PlcTagTable ID="0">
+    <AttributeList>
+      <Name>VALVE_TAGS</Name>
+    </AttributeList>
+    <ObjectList>
+
+      <SW.Tags.PlcUserConstant ID="1" CompositionName="UserConstants">
+        <AttributeList>
+          <DataTypeName>String</DataTypeName>
+          <Name>V-10101</Name>
+          <Value>'V-10101'</Value>
+        </AttributeList>
+        <ObjectList>
+          <MultilingualText ID="2" CompositionName="Comment">
+            <ObjectList>
+              <MultilingualTextItem ID="3" CompositionName="Items">
+                <AttributeList>
+                  <Culture>en-US</Culture>
+                  <Text>Unit 1 Module 1 main inlet valve</Text>
+                </AttributeList>
+              </MultilingualTextItem>
+            </ObjectList>
+          </MultilingualText>
+        </ObjectList>
+      </SW.Tags.PlcUserConstant>
+
+      <SW.Tags.PlcUserConstant ID="4" CompositionName="UserConstants">
+        <AttributeList>
+          <DataTypeName>String</DataTypeName>
+          <Name>V-10102</Name>
+          <Value>'V-10102'</Value>
+        </AttributeList>
+        <ObjectList>
+          <MultilingualText ID="5" CompositionName="Comment">
+            <ObjectList>
+              <MultilingualTextItem ID="6" CompositionName="Items">
+                <AttributeList>
+                  <Culture>en-US</Culture>
+                  <Text>Unit 1 Module 1 secondary inlet valve</Text>
+                </AttributeList>
+              </MultilingualTextItem>
+            </ObjectList>
+          </MultilingualText>
+        </ObjectList>
+      </SW.Tags.PlcUserConstant>
+
+      <SW.Tags.PlcUserConstant ID="7" CompositionName="UserConstants">
+        <AttributeList>
+          <DataTypeName>String</DataTypeName>
+          <Name>V-10103</Name>
+          <Value>'V-10103'</Value>
+        </AttributeList>
+        <ObjectList>
+          <MultilingualText ID="8" CompositionName="Comment">
+            <ObjectList>
+              <MultilingualTextItem ID="9" CompositionName="Items">
+                <AttributeList>
+                  <Culture>en-US</Culture>
+                  <Text>Unit 1 Module 1 drain valve</Text>
+                </AttributeList>
+              </MultilingualTextItem>
+            </ObjectList>
+          </MultilingualText>
+        </ObjectList>
+      </SW.Tags.PlcUserConstant>
+
+      <SW.Tags.PlcUserConstant ID="A" CompositionName="UserConstants">
+        <AttributeList>
+          <DataTypeName>String</DataTypeName>
+          <Name>V-10104</Name>
+          <Value>'V-10104'</Value>
+        </AttributeList>
+        <ObjectList>
+          <MultilingualText ID="B" CompositionName="Comment">
+            <ObjectList>
+              <MultilingualTextItem ID="C" CompositionName="Items">
+                <AttributeList>
+                  <Culture>en-US</Culture>
+                  <Text>Unit 1 Module 1 bypass valve</Text>
+                </AttributeList>
+              </MultilingualTextItem>
+            </ObjectList>
+          </MultilingualText>
+        </ObjectList>
+      </SW.Tags.PlcUserConstant>
+
+      <SW.Tags.PlcUserConstant ID="D" CompositionName="UserConstants">
+        <AttributeList>
+          <DataTypeName>String</DataTypeName>
+          <Name>V-10201</Name>
+          <Value>'V-10201'</Value>
+        </AttributeList>
+        <ObjectList>
+          <MultilingualText ID="E" CompositionName="Comment">
+            <ObjectList>
+              <MultilingualTextItem ID="F" CompositionName="Items">
+                <AttributeList>
+                  <Culture>en-US</Culture>
+                  <Text>Unit 1 Module 2 tank outlet</Text>
+                </AttributeList>
+              </MultilingualTextItem>
+            </ObjectList>
+          </MultilingualText>
+        </ObjectList>
+      </SW.Tags.PlcUserConstant>
+
+      <SW.Tags.PlcUserConstant ID="10" CompositionName="UserConstants">
+        <AttributeList>
+          <DataTypeName>String</DataTypeName>
+          <Name>V-10202</Name>
+          <Value>'V-10202'</Value>
+        </AttributeList>
+        <ObjectList>
+          <MultilingualText ID="11" CompositionName="Comment">
+            <ObjectList>
+              <MultilingualTextItem ID="12" CompositionName="Items">
+                <AttributeList>
+                  <Culture>en-US</Culture>
+                  <Text>Unit 1 Module 2 product transfer</Text>
+                </AttributeList>
+              </MultilingualTextItem>
+            </ObjectList>
+          </MultilingualText>
+        </ObjectList>
+      </SW.Tags.PlcUserConstant>
+
+    </ObjectList>
+  </SW.Tags.PlcTagTable>
+</Document>

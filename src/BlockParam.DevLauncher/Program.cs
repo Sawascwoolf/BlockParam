@@ -1,0 +1,389 @@
+using System;
+using System.Collections.Generic;
+using System.Globalization;
+using System.IO;
+using System.Linq;
+using System.Threading;
+using System.Windows;
+using System.Windows.Input;
+using System.Windows.Media;
+using System.Windows.Media.Imaging;
+using Serilog;
+using BlockParam.Config;
+using BlockParam.Licensing;
+using BlockParam.Services;
+using BlockParam.SimaticML;
+using BlockParam.UI;
+
+namespace BlockParam.DevLauncher;
+
+class Program
+{
+    [STAThread]
+    static void Main(string[] args)
+    {
+        // Set up console + file logging for dev.
+        // WPF has no console, so file sink is the authoritative channel.
+        var logPath = Path.Combine(Path.GetTempPath(), "BlockParam", "devlauncher.log");
+        Directory.CreateDirectory(Path.GetDirectoryName(logPath)!);
+        if (File.Exists(logPath)) File.Delete(logPath); // fresh per run
+
+        Log.Logger = new LoggerConfiguration()
+            .MinimumLevel.Debug()
+            .WriteTo.Console(outputTemplate: "{Timestamp:HH:mm:ss} [{Level:u3}] {Message:lj}{NewLine}")
+            .WriteTo.File(logPath, outputTemplate: "{Timestamp:HH:mm:ss.fff} [{Level:u3}] {Message:lj}{NewLine}")
+            .CreateLogger();
+        Log.Information("DevLauncher log: {Path}", logPath);
+
+        // --- Parse capture arguments ---
+        // --capture <out.png> [<dbName>]          one-shot single scene
+        // --capture-script <script.json>          multi-scene JSON-driven
+        var capturePlan = TryParseCapturePlan(args, out var captureDbArg);
+        if (capturePlan is FailedPlan fail)
+        {
+            MessageBox.Show(fail.Message, "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            return;
+        }
+        if (capturePlan != null)
+        {
+            // Force English for marketing screenshots regardless of OS culture.
+            var en = new CultureInfo("en-US");
+            Thread.CurrentThread.CurrentCulture = en;
+            Thread.CurrentThread.CurrentUICulture = en;
+            CultureInfo.DefaultThreadCurrentCulture = en;
+            CultureInfo.DefaultThreadCurrentUICulture = en;
+        }
+
+        // 1. Find DB XML. Capture plan fixture wins; bare arg next; else defaults.
+        var tiaExportDir = Path.Combine(Path.GetTempPath(), "BlockParam");
+        string? xmlPath;
+        var dbArg = (capturePlan as CapturePlan)?.FixturePath
+                    ?? captureDbArg
+                    ?? (args.Length > 0 && !args[0].StartsWith("--") ? args[0] : null);
+        if (dbArg != null)
+        {
+            var candidates = new[]
+            {
+                dbArg,
+                Path.Combine(tiaExportDir, dbArg),
+                Path.Combine(tiaExportDir, dbArg.EndsWith(".xml") ? dbArg : dbArg + ".xml"),
+            };
+            xmlPath = candidates.FirstOrDefault(File.Exists);
+            if (xmlPath == null)
+            {
+                MessageBox.Show($"DB XML not found for argument: {dbArg}", "Error",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+                return;
+            }
+        }
+        else
+        {
+            xmlPath = FindFile(
+                Path.Combine(tiaExportDir, "TP307.xml"),
+                Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "demo-db.xml"),
+                Path.Combine("src", "BlockParam.DevLauncher", "demo-db.xml"));
+        }
+
+        if (xmlPath == null)
+        {
+            MessageBox.Show("No DB XML found.", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            return;
+        }
+
+        Log.Information("Loading DB from {Path}", xmlPath);
+        var xml = File.ReadAllText(xmlPath);
+
+        // Load UDT cache if present (for SetPoint + per-instance Comment fallback).
+        // Script mode may override with a committed fixture dir for reproducibility.
+        var udtDir = (capturePlan as CapturePlan)?.UdtDir
+                     ?? Path.Combine(tiaExportDir, "UdtTypes");
+        var udtResolver = new UdtSetPointResolver();
+        var commentResolver = new UdtCommentResolver();
+        if (Directory.Exists(udtDir))
+        {
+            udtResolver.LoadFromDirectory(udtDir);
+            commentResolver.LoadFromDirectory(udtDir);
+            Log.Information("UDT cache loaded: {Count} types from {Dir}", udtResolver.TypeCount, udtDir);
+        }
+        else
+        {
+            Log.Warning("No UDT cache at {Dir}", udtDir);
+        }
+
+        // 2. Config — use real config.json + rules directory. Capture mode
+        // may force a specific rules dir to keep screenshots reproducible
+        // regardless of the developer's %APPDATA% config.
+        var configPath = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+            "BlockParam", "config.json");
+        var scriptedRulesDir = (capturePlan as CapturePlan)?.RulesDir;
+        var configLoader = scriptedRulesDir != null
+            ? new ConfigLoader(File.Exists(configPath) ? configPath : null, scriptedRulesDir)
+            : new ConfigLoader(File.Exists(configPath) ? configPath : null);
+        Log.Information("Config: {Path} (exists={Exists}) scriptedRulesDir={Scripted}",
+            configPath, File.Exists(configPath), scriptedRulesDir ?? "(none)");
+
+        // 3. Tag tables — use real exported XMLs if available.
+        // Must be loaded BEFORE the parser runs so symbolic array bounds
+        // like Array[1..MAX_VALVES] can be resolved during tree construction.
+        var tagTableDir = (capturePlan as CapturePlan)?.TagTableDir
+                          ?? Path.Combine(tiaExportDir, "TagTables");
+        TagTableCache? tagTableCache = null;
+        if (Directory.Exists(tagTableDir) && Directory.GetFiles(tagTableDir, "*.xml").Length > 0)
+        {
+            tagTableCache = new TagTableCache(new XmlFileTagTableReader(tagTableDir));
+            Log.Information("TagTables from {Dir}: {Tables}",
+                tagTableDir, string.Join(", ", tagTableCache.GetTableNames()));
+        }
+        else
+        {
+            Log.Warning("No tag tables found at {Dir}", tagTableDir);
+        }
+
+        IConstantResolver? constantResolver = tagTableCache != null
+            ? new TagTableConstantResolver(tagTableCache)
+            : null;
+        var parser = new SimaticMLParser(constantResolver, udtResolver, commentResolver);
+        var dbInfo = parser.Parse(xml);
+        if (dbInfo.UnresolvedUdts.Count > 0)
+            Log.Warning("Unresolved UDTs: {Types}", string.Join(", ", dbInfo.UnresolvedUdts));
+
+        // 4. Services
+        var logger = new ChangeLogger();
+        var bulkService = new BulkChangeService(logger, configLoader);
+        var analyzer = new HierarchyAnalyzer();
+        var appDataDir = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+            "BlockParam");
+        var freeTracker = new LocalUsageTracker(
+            Path.Combine(Path.GetTempPath(), "BlockParam_dev_usage.dat"),
+            dailyLimit: 3);
+
+        var serverUrl = configLoader.ReadLicenseServerUrl() ?? OnlineLicenseService.DefaultServerUrl;
+        var licenseService = new OnlineLicenseService(appDataDir, serverUrl);
+        var usageTracker = new LicensedUsageTracker(licenseService, freeTracker);
+
+        // 5. Show dialog
+        var app = new Application();
+        app.DispatcherUnhandledException += (_, e) =>
+        {
+            Log.Error(e.Exception, "UNHANDLED EXCEPTION");
+            e.Handled = true; // prevent crash, log instead
+        };
+        var vm = new BulkChangeViewModel(
+            dbInfo, xml, analyzer, bulkService, usageTracker, configLoader,
+            onApply: modifiedXml =>
+            {
+                Log.Information("Apply: XML modified ({Len} chars)", modifiedXml.Length);
+                // Save to temp for inspection
+                var outPath = Path.Combine(tiaExportDir, $"{dbInfo.Name}_modified.xml");
+                File.WriteAllText(outPath, modifiedXml);
+                Log.Information("Saved to {Path}", outPath);
+            },
+            tagTableCache: tagTableCache,
+            tagTableDir: tagTableDir,
+            licenseService: licenseService,
+            udtDir: udtDir,
+            udtResolver: udtResolver,
+            commentResolver: commentResolver);
+
+        licenseService.StartHeartbeat();
+        var dialog = new BulkChangeDialog(vm);
+
+        if (capturePlan is CapturePlan plan)
+        {
+            if (plan.Viewport is { } vp)
+            {
+                dialog.Width = vp.Width;
+                dialog.Height = vp.Height;
+            }
+            dialog.ContentRendered += (_, _) =>
+            {
+                // Defer one dispatcher cycle so the initial layout settles,
+                // then iterate scenes sequentially on the UI thread.
+                dialog.Dispatcher.BeginInvoke(new Action(() =>
+                    RunScenes(dialog, vm, plan)),
+                    System.Windows.Threading.DispatcherPriority.Background);
+            };
+        }
+
+        app.Run(dialog);
+        licenseService.StopHeartbeat();
+        licenseService.Dispose();
+    }
+
+    private static void RunScenes(BulkChangeDialog dialog, BulkChangeViewModel vm, CapturePlan plan)
+    {
+        foreach (var scene in plan.Scenes)
+        {
+            Log.Information("Scene {Id}: applying state", scene.Id);
+
+            // Per-scene viewport override takes precedence over the script-level one.
+            var effective = scene.Viewport ?? plan.Viewport;
+            if (effective != null)
+            {
+                dialog.Width = effective.Width;
+                dialog.Height = effective.Height;
+                // Let WPF fully measure / arrange against the new size before
+                // the scene's state changes touch the flat list — otherwise
+                // row virtualization can land on stale heights.
+                dialog.Dispatcher.Invoke(() => { },
+                    System.Windows.Threading.DispatcherPriority.Render);
+            }
+
+            SceneApplier.Apply(scene, vm, dialog);
+
+            // WPF re-queries ICommand.CanExecute only in response to input
+            // events (mouse, focus). Headless scene changes don't produce
+            // any — InvalidateRequerySuggested queues the requery at
+            // Background priority, which is LOWER than Render, so without
+            // an explicit pump the snapshot happens before IsEnabled
+            // propagates. A ContextIdle-priority pump waits for every
+            // higher-priority job (Render, Input, Background) to drain.
+            CommandManager.InvalidateRequerySuggested();
+            dialog.Dispatcher.Invoke(() => { },
+                System.Windows.Threading.DispatcherPriority.ContextIdle);
+
+            // Force measure/arrange after the requery (button IsEnabled /
+            // visual-state changes may invalidate layout), then one more
+            // Render-priority pump to flush the final visual update before
+            // we snap.
+            dialog.UpdateLayout();
+            dialog.Dispatcher.Invoke(() => { },
+                System.Windows.Threading.DispatcherPriority.Render);
+
+            var outPath = Path.Combine(plan.OutputDir, scene.Filename);
+            Directory.CreateDirectory(Path.GetDirectoryName(outPath)!);
+            CaptureWindowToPng(dialog, outPath, plan.Scale);
+            Log.Information("Scene {Id}: saved {Path}", scene.Id, outPath);
+        }
+        dialog.Close();
+    }
+
+    private static void CaptureWindowToPng(Window window, string outputPath, double scale)
+    {
+        var width = (int)Math.Ceiling(window.ActualWidth * scale);
+        var height = (int)Math.Ceiling(window.ActualHeight * scale);
+        var dpi = 96.0 * scale;
+
+        var rtb = new RenderTargetBitmap(width, height, dpi, dpi, PixelFormats.Pbgra32);
+        rtb.Render(window);
+
+        var encoder = new PngBitmapEncoder();
+        encoder.Frames.Add(BitmapFrame.Create(rtb));
+        using var fs = File.Create(outputPath);
+        encoder.Save(fs);
+    }
+
+    private static string? FindFile(params string[] candidates)
+    {
+        foreach (var path in candidates)
+        {
+            var full = Path.GetFullPath(path);
+            if (File.Exists(full)) return full;
+        }
+        return null;
+    }
+
+    // --- Capture-plan plumbing ---
+
+    private abstract class CapturePlanBase { }
+    private sealed class FailedPlan : CapturePlanBase
+    {
+        public FailedPlan(string message) { Message = message; }
+        public string Message { get; }
+    }
+    private sealed class CapturePlan : CapturePlanBase
+    {
+        public CapturePlan(string outputDir, double scale, Viewport? viewport,
+            string? fixturePath, string? udtDir, string? tagTableDir, string? rulesDir,
+            List<Scene> scenes)
+        {
+            OutputDir = outputDir;
+            Scale = scale;
+            Viewport = viewport;
+            FixturePath = fixturePath;
+            UdtDir = udtDir;
+            TagTableDir = tagTableDir;
+            RulesDir = rulesDir;
+            Scenes = scenes;
+        }
+        public string OutputDir { get; }
+        public double Scale { get; }
+        public Viewport? Viewport { get; }
+        public string? FixturePath { get; }
+        public string? UdtDir { get; }
+        public string? TagTableDir { get; }
+        public string? RulesDir { get; }
+        public List<Scene> Scenes { get; }
+    }
+
+    /// <summary>
+    /// Parses --capture / --capture-script into a unified plan.
+    /// Returns null if no capture flag is present (interactive mode).
+    /// </summary>
+    private static CapturePlanBase? TryParseCapturePlan(string[] args, out string? legacyDbArg)
+    {
+        legacyDbArg = null;
+        if (args.Length == 0) return null;
+
+        if (args[0] == "--capture")
+        {
+            if (args.Length < 2)
+                return new FailedPlan("--capture requires an output PNG path.");
+
+            var outFile = Path.GetFullPath(args[1]);
+            legacyDbArg = args.Length >= 3 ? args[2] : "DB_ProcessPlant_A1";
+            return new CapturePlan(
+                outputDir: Path.GetDirectoryName(outFile)!,
+                scale: 2.0,
+                viewport: null,
+                fixturePath: null,
+                udtDir: null,
+                tagTableDir: null,
+                rulesDir: null,
+                scenes: new List<Scene>
+                {
+                    new Scene { Id = "default", Filename = Path.GetFileName(outFile), Dialog = "main" },
+                });
+        }
+
+        if (args[0] == "--capture-script")
+        {
+            if (args.Length < 2)
+                return new FailedPlan("--capture-script requires a script path.");
+
+            var scriptPath = Path.GetFullPath(args[1]);
+            if (!File.Exists(scriptPath))
+                return new FailedPlan($"Script not found: {scriptPath}");
+
+            var (script, baseDir) = CaptureScriptLoader.Load(scriptPath);
+            var outputDir = CaptureScriptLoader.ResolveRelative(baseDir, script.OutputDir ?? ".");
+            var fixturePath = script.Fixture != null
+                ? CaptureScriptLoader.ResolveRelative(baseDir, script.Fixture)
+                : null;
+            var udtDir = script.UdtDir != null
+                ? CaptureScriptLoader.ResolveRelative(baseDir, script.UdtDir)
+                : null;
+            var tagTableDir = script.TagTableDir != null
+                ? CaptureScriptLoader.ResolveRelative(baseDir, script.TagTableDir)
+                : null;
+            var rulesDir = script.RulesDir != null
+                ? CaptureScriptLoader.ResolveRelative(baseDir, script.RulesDir)
+                : null;
+            // DPI 96 = 1x, 192 = 2x; convert to scale factor.
+            var scale = (script.Dpi ?? 192.0) / 96.0;
+            return new CapturePlan(
+                outputDir: outputDir,
+                scale: scale,
+                viewport: script.Viewport,
+                fixturePath: fixturePath,
+                udtDir: udtDir,
+                tagTableDir: tagTableDir,
+                rulesDir: rulesDir,
+                scenes: script.Scenes);
+        }
+
+        return null;
+    }
+}

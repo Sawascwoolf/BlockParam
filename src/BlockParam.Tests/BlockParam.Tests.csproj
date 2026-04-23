@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <RootNamespace>BlockParam.Tests</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.*" />
+    <PackageReference Include="xunit" Version="2.*" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.*" />
+    <PackageReference Include="FluentAssertions" Version="6.*" />
+    <PackageReference Include="NSubstitute" Version="5.*" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\BlockParam\BlockParam.csproj" />
+  </ItemGroup>
+
+  <!-- Include XML fixture files as embedded resources -->
+  <ItemGroup>
+    <EmbeddedResource Include="Fixtures\**\*.xml" />
+    <EmbeddedResource Include="Fixtures\**\*.json" />
+  </ItemGroup>
+
+</Project>

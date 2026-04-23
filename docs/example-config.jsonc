@@ -1,0 +1,78 @@
+// Example configuration for BlockParam Add-In
+//
+// Rule files are loaded from up to 3 directories (highest priority first):
+//   1. TIA Project: {ProjectPath}\UserFiles\BlockParam\
+//   2. Local:       %AppData%\BlockParam\rules\
+//   3. Shared:      configured via rulesDirectory in config.json
+//
+// Each .json file contains one rule or one exclude list.
+// This file is OPTIONAL — the tool works fully without it.
+
+// --- Example rule file: moduleId.json ---
+{
+  "version": "1.0",
+  "rules": [
+    {
+      // Match moduleId members inside messageConfig_UDT instances
+      "pathPattern": ".*{udt:messageConfig_UDT}\\.moduleId$",
+      "datatype": "Int",
+      "constraints": {
+        "min": 0,
+        "max": 9999,
+        "requireTagTableValue": true
+      },
+      "tagTableReference": {
+        "tableName": "MOD_*"
+      }
+    }
+  ]
+}
+
+// --- Example rule file: elementId.json ---
+// {
+//   "version": "1.0",
+//   "rules": [
+//     {
+//       "pathPattern": ".*{udt:messageConfig_UDT}\\.elementId$",
+//       "datatype": "Int",
+//       "constraints": {
+//         "allowedValues": [1, 2, 3, 4, 5, 10, 20, 30, 40, 50]
+//       },
+//       "tagTableReference": {
+//         "tableName": "ELE_*"
+//       }
+//     }
+//   ]
+// }
+
+// --- Example comment rule: messageConfig-comment.json ---
+// Comment templates are defined per-rule, not globally.
+// Placeholders: {db}, {parent}, {self}, {memberName},
+//               {memberName.comment}, {memberName.name}, {memberName.value}
+// {
+//   "version": "1.0",
+//   "rules": [
+//     {
+//       "pathPattern": ".*{udt:messageConfig_UDT}$",
+//       "commentTemplate": "{db}.{parent} ({moduleId}, {elementId}) : {moduleId.comment}",
+//       "commentLanguage": "en-US"
+//     }
+//   ]
+// }
+
+// --- Example exclude rule: exclude-actual.json ---
+// Members matching this pattern are hidden in the "Show setpoints only" filter.
+// {
+//   "version": "1.0",
+//   "rules": [{
+//     "pathPattern": ".*\\.actualValue$",
+//     "excludeFromSetpoints": true
+//   }]
+// }
+
+// --- config.json (optional, for shared directory path) ---
+// Save as: %AppData%\BlockParam\config.json
+// {
+//   "version": "1.0",
+//   "rulesDirectory": "\\\\server\\share\\tia-rules"
+// }

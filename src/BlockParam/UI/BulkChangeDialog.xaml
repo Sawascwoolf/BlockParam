@@ -1,0 +1,1029 @@
+<Window x:Class="BlockParam.UI.BulkChangeDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:BlockParam.UI"
+        xmlns:loc="clr-namespace:BlockParam.Localization"
+        Title="{Binding Title}"
+                Width="1100" Height="700"
+        MinWidth="800" MinHeight="500"
+        WindowStartupLocation="CenterScreen"
+        Background="#F0F0F0"
+        FontFamily="Segoe UI" FontSize="12">
+
+    <Window.Resources>
+        <local:BoolToVisibilityConverter x:Key="BoolToVis"/>
+        <local:NullToVisibilityConverter x:Key="NullToVis"/>
+        <local:StringNotEmptyToVisibilityConverter x:Key="StringToVis"/>
+        <local:InvertBoolConverter x:Key="InvertBool"/>
+
+        <!-- Suggestion row style: hover-preview paints the entry as if the
+             mouse were over it. Set by capture scripts so a still frame
+             reads as "this row is about to be clicked" before the next
+             scene accepts it (#TODO). -->
+        <Style x:Key="SuggestionItemStyle" TargetType="ListBoxItem">
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding IsHoverPreview}" Value="True">
+                    <Setter Property="Background" Value="#D4E8FA"/>
+                    <Setter Property="BorderBrush" Value="#1f6feb"/>
+                    <Setter Property="BorderThickness" Value="1"/>
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+
+        <!-- Inspector section icons (Material 24x24) -->
+        <!-- Pencil = Bulk edit (input) -->
+        <Geometry x:Key="IconEdit">M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zm17.71-10.21c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z</Geometry>
+        <!-- Eye = Bulk preview (what would happen) -->
+        <Geometry x:Key="IconEye">M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z</Geometry>
+        <!-- Clock = Pending edits (waiting to apply) -->
+        <Geometry x:Key="IconClock">M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm.5-13H11v6l5.25 3.15.75-1.23-4.5-2.67V7z</Geometry>
+
+        <!-- Expand/collapse button with three visual states -->
+        <Style x:Key="ExpandToggle" TargetType="Button">
+            <Setter Property="Width" Value="16"/>
+            <Setter Property="Height" Value="16"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Focusable" Value="False"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Background="Transparent" Width="16" Height="16">
+                            <Path x:Name="Arrow" Fill="#444"
+                                  HorizontalAlignment="Center" VerticalAlignment="Center"
+                                  Data="M 0,0 L 6,4 L 0,8 Z"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <!-- Normal expanded: down arrow -->
+                            <DataTrigger Binding="{Binding IsExpanded}" Value="True">
+                                <Setter TargetName="Arrow" Property="Data"
+                                        Value="M 0,0 L 8,0 L 4,6 Z"/>
+                            </DataTrigger>
+                            <!-- Smart-expanded: right arrow in blue (like collapsed but colored) -->
+                            <DataTrigger Binding="{Binding IsSmartExpanded}" Value="True">
+                                <Setter TargetName="Arrow" Property="Data"
+                                        Value="M 0,0 L 6,4 L 0,8 Z"/>
+                                <Setter TargetName="Arrow" Property="Fill" Value="#0078D7"/>
+                            </DataTrigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+
+    <Grid>
+    <!-- Root wrapper so the inline autocomplete overlay can layer above
+         the entire dialog (ListView item containers can't overlap sibling
+         rows from inside their own cell, so the overlay lives here). -->
+    <DockPanel Margin="8">
+        <!-- Bottom bar: action buttons + license/usage info + status -->
+        <DockPanel DockPanel.Dock="Bottom" Margin="0,8,0,0">
+            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                <!-- License / usage summary — clickable to open the license dialog.
+                     Single control replaces the old tier badge + separate Manage link. -->
+                <Button Content="{Binding UsageStatusText}" FontSize="10"
+                        Command="{Binding EnterLicenseKeyCommand}"
+                        Visibility="{Binding ShowLicenseKeyButton, Converter={StaticResource BoolToVis}}"
+                        Background="Transparent" BorderThickness="0" Foreground="#666"
+                        Cursor="Hand" Padding="0" VerticalAlignment="Center" Margin="0,0,12,0"
+                        ToolTip="{Binding LicenseKeyButtonText}"/>
+                <Button Content="{loc:Loc License_UpgradeToPro}" FontSize="10"
+                        Command="{Binding UpgradeToProCommand}"
+                        Visibility="{Binding IsLimitReached, Converter={StaticResource BoolToVis}}"
+                        Background="#0078D7" Foreground="White" BorderThickness="0"
+                        Cursor="Hand" Padding="8,3" Margin="0,0,12,0"
+                        VerticalAlignment="Center" FontWeight="SemiBold"/>
+                <Button Content="{loc:Loc Dialog_Discard}" Command="{Binding DiscardPendingCommand}"
+                        MinWidth="60" Height="26" Margin="0,0,4,0" Padding="8,0"
+                        Visibility="{Binding PendingStatusText, Converter={StaticResource NullToVis}}"/>
+                <Button x:Name="ApplyButton"
+                        Content="{loc:Loc Dialog_Apply}" Command="{Binding ApplyCommand}"
+                        MinWidth="70" Height="26" Margin="0,0,4,0" Padding="8,0"
+                        ToolTip="{loc:Loc Dialog_ApplyTooltip}"/>
+                <Button Content="{loc:Loc Dialog_ApplyAndClose}"
+                        Command="{Binding ApplyAndCloseCommand}"
+                        MinWidth="100" Height="26" Margin="0,0,4,0" Padding="8,0"
+                        ToolTip="{loc:Loc Dialog_ApplyTooltip}"/>
+                <Button Content="{loc:Loc Dialog_Close}" Click="OnClose"
+                        MinWidth="60" Height="26" Padding="8,0"/>
+            </StackPanel>
+            <TextBlock Text="{Binding PendingStatusText}" FontSize="10"
+                       Foreground="#B8860B" VerticalAlignment="Center"
+                       Visibility="{Binding PendingStatusText, Converter={StaticResource NullToVis}}"
+                       Margin="0,0,8,0"/>
+            <TextBlock Text="{Binding StatusText}" VerticalAlignment="Center"
+                       Foreground="#333"/>
+        </DockPanel>
+
+        <!-- Main content: Table column (left) + Right Inspector sidebar (right) -->
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" MinWidth="400"/>
+                <ColumnDefinition x:Name="SplitterColumn" Width="4"/>
+                <ColumnDefinition x:Name="SidebarColumn" Width="340" MinWidth="28"/>
+            </Grid.ColumnDefinitions>
+
+            <!-- Left: Toolbar + banner + legend + Member Table (stacked) -->
+            <DockPanel Grid.Column="0" LastChildFill="True">
+                <!-- Toolbar -->
+                <DockPanel DockPanel.Dock="Top" Margin="0,0,0,6">
+                    <Button DockPanel.Dock="Right"
+                            Command="{Binding EditConfigCommand}"
+                            Width="28" Height="24"
+                            Background="Transparent" BorderThickness="0"
+                            ToolTip="{loc:Loc Dialog_EditConfig}" Cursor="Hand">
+                        <Path Data="M12,15.5A3.5,3.5 0 0,1 8.5,12A3.5,3.5 0 0,1 12,8.5A3.5,3.5 0 0,1 15.5,12A3.5,3.5 0 0,1 12,15.5M19.43,12.97C19.47,12.65 19.5,12.33 19.5,12C19.5,11.67 19.47,11.34 19.43,11L21.54,9.37C21.73,9.22 21.78,8.95 21.66,8.73L19.66,5.27C19.54,5.05 19.27,4.96 19.05,5.05L16.56,6.05C16.04,5.66 15.5,5.32 14.87,5.07L14.5,2.42C14.46,2.18 14.25,2 14,2H10C9.75,2 9.54,2.18 9.5,2.42L9.13,5.07C8.5,5.32 7.96,5.66 7.44,6.05L4.95,5.05C4.73,4.96 4.46,5.05 4.34,5.27L2.34,8.73C2.21,8.95 2.27,9.22 2.46,9.37L4.57,11C4.53,11.34 4.5,11.67 4.5,12C4.5,12.33 4.53,12.65 4.57,12.97L2.46,14.63C2.27,14.78 2.21,15.05 2.34,15.27L4.34,18.73C4.46,18.95 4.73,19.04 4.95,18.95L7.44,17.94C7.96,18.34 8.5,18.68 9.13,18.93L9.5,21.58C9.54,21.82 9.75,22 10,22H14C14.25,22 14.46,21.82 14.5,21.58L14.87,18.93C15.5,18.67 16.04,18.34 16.56,17.94L19.05,18.95C19.27,19.04 19.54,18.95 19.66,18.73L21.66,15.27C21.78,15.05 21.73,14.78 21.54,14.63L19.43,12.97Z"
+                              Fill="#666" Width="14" Height="14" Stretch="Uniform"/>
+                    </Button>
+                    <CheckBox Content="{loc:Loc Dialog_ShowSetpointsOnly}"
+                              IsChecked="{Binding ShowSetpointsOnly}"
+                              IsEnabled="{Binding CanShowSetpointsOnly}"
+                              ToolTip="{Binding ShowSetpointsOnlyTooltip}"
+                              VerticalAlignment="Center" Margin="0,0,0,0" DockPanel.Dock="Left"/>
+                    <TextBox x:Name="SearchBox"
+                             Text="{Binding SearchQuery, UpdateSourceTrigger=PropertyChanged}"
+                             Width="200" Padding="4,2" VerticalAlignment="Center"
+                             Margin="12,0,0,0" DockPanel.Dock="Left"/>
+                    <TextBlock Text="{Binding SearchHitCount, StringFormat='{}{0} hits'}"
+                               VerticalAlignment="Center" Foreground="#888"
+                               HorizontalAlignment="Right" Margin="8,0,8,0"
+                               Visibility="{Binding HasSearchQuery, Converter={StaticResource BoolToVis}}"/>
+                </DockPanel>
+
+                <!-- Passive banner: rule filter hiding members (#23) -->
+                <Border DockPanel.Dock="Top"
+                        Background="#FFF8E1" BorderBrush="#E0C97F" BorderThickness="1"
+                        Padding="8,4" Margin="0,0,0,4"
+                        Visibility="{Binding ShowRuleFilterBanner, Converter={StaticResource BoolToVis}}">
+                    <DockPanel>
+                        <Button DockPanel.Dock="Right"
+                                Content="{loc:Loc Dialog_RuleFilterBanner_Link}"
+                                Command="{Binding EditConfigCommand}"
+                                Background="Transparent" BorderThickness="0"
+                                Foreground="#0078D7" Cursor="Hand" Padding="4,0"
+                                VerticalAlignment="Center"/>
+                        <TextBlock Text="{Binding RuleFilterBannerText}"
+                                   Foreground="#6B5500" VerticalAlignment="Center"/>
+                    </DockPanel>
+                </Border>
+
+                <!-- Expand/Collapse All + Color legend -->
+                <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,4">
+                    <Button Command="{Binding ExpandAllCommand}"
+                            Width="20" Height="16"
+                            Background="Transparent" BorderThickness="0"
+                            ToolTip="{loc:Loc Dialog_ExpandAll}" Cursor="Hand" Margin="0,0,2,0">
+                        <Path Data="M 0,0 L 8,0 L 4,6 Z" Fill="#666" Width="8" Height="6" Stretch="Uniform"/>
+                    </Button>
+                    <Button Command="{Binding CollapseAllCommand}"
+                            Width="20" Height="16"
+                            Background="Transparent" BorderThickness="0"
+                            ToolTip="{loc:Loc Dialog_CollapseAll}" Cursor="Hand" Margin="0,0,8,0">
+                        <Path Data="M 0,0 L 8,0 L 4,6 Z" Fill="#666" Width="8" Height="6" Stretch="Uniform"
+                              RenderTransformOrigin="0.5,0.5">
+                            <Path.RenderTransform>
+                                <RotateTransform Angle="180"/>
+                            </Path.RenderTransform>
+                        </Path>
+                    </Button>
+                    <Border Background="#FFE0B2" Width="12" Height="12" BorderBrush="#F39C12" BorderThickness="3,0,0,0" Margin="0,0,3,0"/>
+                    <TextBlock Text="Pending" Foreground="#888" FontSize="10" VerticalAlignment="Center" Margin="0,0,10,0"/>
+                    <Border Background="#D5F0D5" Width="12" Height="12" BorderBrush="#4CAF50" BorderThickness="3,0,0,0" Margin="0,0,3,0"/>
+                    <TextBlock Text="Already matching" Foreground="#888" FontSize="10" VerticalAlignment="Center" Margin="0,0,10,0"/>
+                    <Border Background="#CCE5FF" Width="12" Height="12" BorderBrush="#2196F3" BorderThickness="3,0,0,0" Margin="0,0,3,0"/>
+                    <TextBlock Text="Bulk set" Foreground="#888" FontSize="10" VerticalAlignment="Center" Margin="0,0,10,0"/>
+                    <Border Background="#FFCDD2" Width="12" Height="12" BorderBrush="#D32F2F" BorderThickness="3,0,0,0" Margin="0,0,3,0"/>
+                    <TextBlock Text="Invalid" Foreground="#888" FontSize="10" VerticalAlignment="Center"/>
+                </StackPanel>
+
+                <!-- Member Table fills the rest of the column -->
+                <ListView
+                      x:Name="MemberListView"
+                      ItemsSource="{Binding FlatMembers}"
+                      SelectedItem="{Binding SelectedFlatMember}"
+                      SelectionMode="Extended"
+                      BorderBrush="#CCCCCC" BorderThickness="1"
+                      VirtualizingStackPanel.IsVirtualizing="True"
+                      VirtualizingStackPanel.VirtualizationMode="Recycling"
+                      GridViewColumnHeader.Click="OnColumnHeaderClick"
+                      MouseDoubleClick="OnListViewDoubleClick"
+                      ContextMenuOpening="OnListViewContextMenuOpening"
+                      SelectionChanged="OnListViewSelectionChanged">
+                <ListView.ContextMenu>
+                    <ContextMenu/>
+                </ListView.ContextMenu>
+
+                <ListView.Resources>
+                    <!-- Alternating row colors. The 3px left edge is ALWAYS reserved so
+                         rows stay aligned — status triggers only swap BorderBrush (#45). -->
+                    <Style TargetType="ListViewItem">
+                        <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                        <Setter Property="Padding" Value="0,1"/>
+                        <Setter Property="MinHeight" Value="22"/>
+                        <Setter Property="BorderBrush" Value="#E8E8E8"/>
+                        <Setter Property="BorderThickness" Value="3,0,0,1"/>
+                        <Style.Triggers>
+                            <!-- Alternating rows -->
+                            <Trigger Property="ItemsControl.AlternationIndex" Value="1">
+                                <Setter Property="Background" Value="#FAFAFA"/>
+                            </Trigger>
+                            <!-- Status is shown as a 3px colored left edge (plus a pale fill in the Value column) -->
+                            <!-- Pending inline edit (orange) -->
+                            <DataTrigger Binding="{Binding IsPendingInlineEdit}" Value="True">
+                                <Setter Property="BorderBrush" Value="#F39C12"/>
+                            </DataTrigger>
+                            <!-- Already has target value (green, overrides pending) -->
+                            <DataTrigger Binding="{Binding IsAlreadyMatching}" Value="True">
+                                <Setter Property="BorderBrush" Value="#4CAF50"/>
+                            </DataTrigger>
+                            <!-- Will be changed by bulk set (blue) -->
+                            <DataTrigger Binding="{Binding IsAffected}" Value="True">
+                                <Setter Property="BorderBrush" Value="#2196F3"/>
+                            </DataTrigger>
+                            <!-- Invalid inline edit (red, highest priority) -->
+                            <DataTrigger Binding="{Binding HasInlineError}" Value="True">
+                                <Setter Property="BorderBrush" Value="#D32F2F"/>
+                                <Setter Property="ToolTip" Value="{Binding InlineErrorMessage}"/>
+                            </DataTrigger>
+                            <!-- Selected item: subtle blue row tint (status left edge + Value cell fill stay visible) -->
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter Property="Background" Value="#D4E8FA"/>
+                            </Trigger>
+                        </Style.Triggers>
+                    </Style>
+                </ListView.Resources>
+
+                <ListView.View>
+                    <GridView>
+                        <!-- Name column with tree guide lines, indentation, and expand toggle.
+                             Indentation is applied ONLY in this column so the other columns
+                             stay flush regardless of depth (#45). -->
+                        <GridViewColumn Header="{loc:Loc Column_Name}" Width="280">
+                            <GridViewColumn.CellTemplate>
+                                <DataTemplate>
+                                    <StackPanel Orientation="Horizontal">
+                                        <!-- One vertical guide stroke per ancestor level -->
+                                        <ItemsControl ItemsSource="{Binding GuideLevels}" Focusable="False">
+                                            <ItemsControl.ItemsPanel>
+                                                <ItemsPanelTemplate>
+                                                    <StackPanel Orientation="Horizontal"/>
+                                                </ItemsPanelTemplate>
+                                            </ItemsControl.ItemsPanel>
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate>
+                                                    <Border Width="14"
+                                                            BorderBrush="#D0D0D0"
+                                                            BorderThickness="1,0,0,0"/>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                        <!-- Expand/collapse button (only for non-leaf nodes).
+                                             Leaf nodes have no spacer here — they align with
+                                             the parent's toggle, pulling them further left (#45). -->
+                                        <Button Style="{StaticResource ExpandToggle}"
+                                                Visibility="{Binding HasChildren, Converter={StaticResource BoolToVis}}"
+                                                Click="OnExpandToggleClick"/>
+                                        <!-- Name text — bold for parents so structure stands out from leaves (#45) -->
+                                        <TextBlock Text="{Binding Name}" Margin="4,0,0,0"
+                                                   VerticalAlignment="Center">
+                                            <TextBlock.Style>
+                                                <Style TargetType="TextBlock">
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding IsLeaf}" Value="False">
+                                                            <Setter Property="FontWeight" Value="Bold"/>
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </TextBlock.Style>
+                                        </TextBlock>
+                                        <!-- Affected badge -->
+                                        <TextBlock Text="{Binding AffectedBadge}" FontSize="10"
+                                                   Foreground="#0078D7" Margin="6,0,0,0"
+                                                   VerticalAlignment="Center"
+                                                   Visibility="{Binding AffectedBadge, Converter={StaticResource NullToVis}}"/>
+                                    </StackPanel>
+                                </DataTemplate>
+                            </GridViewColumn.CellTemplate>
+                        </GridViewColumn>
+
+                        <!-- Data type column -->
+                        <GridViewColumn Header="{loc:Loc Column_DataType}" Width="140">
+                            <GridViewColumn.CellTemplate>
+                                <DataTemplate>
+                                    <TextBlock Text="{Binding Datatype}">
+                                        <TextBlock.Style>
+                                            <Style TargetType="TextBlock">
+                                                <Setter Property="Foreground" Value="#555"/>
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding HasUnresolvedBound}" Value="True">
+                                                        <Setter Property="Foreground" Value="#B87333"/>
+                                                        <Setter Property="ToolTip">
+                                                            <Setter.Value>
+                                                                <TextBlock>
+                                                                    <Run Text="Array not expanded: "/>
+                                                                    <Run Text="{Binding UnresolvedBound, Mode=OneWay}" FontWeight="Bold"/>
+                                                                    <LineBreak/>
+                                                                    <Run Text="If this is a symbolic bound, export tag tables (Export Tag Tables menu) and reopen the dialog."/>
+                                                                </TextBlock>
+                                                            </Setter.Value>
+                                                        </Setter>
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </TextBlock.Style>
+                                    </TextBlock>
+                                </DataTemplate>
+                            </GridViewColumn.CellTemplate>
+                        </GridViewColumn>
+
+                        <!-- Start value column (editable with inline autocomplete) -->
+                        <GridViewColumn Header="{loc:Loc Column_StartValue}" Width="120">
+                            <GridViewColumn.CellTemplate>
+                                <DataTemplate>
+                                    <Border Margin="-6,-1,-6,-1">
+                                        <Border.Style>
+                                            <Style TargetType="Border">
+                                                <Setter Property="Background" Value="Transparent"/>
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding IsPendingInlineEdit}" Value="True">
+                                                        <Setter Property="Background" Value="#FFE0B2"/>
+                                                    </DataTrigger>
+                                                    <DataTrigger Binding="{Binding IsAlreadyMatching}" Value="True">
+                                                        <Setter Property="Background" Value="#D5F0D5"/>
+                                                    </DataTrigger>
+                                                    <DataTrigger Binding="{Binding IsAffected}" Value="True">
+                                                        <Setter Property="Background" Value="#CCE5FF"/>
+                                                    </DataTrigger>
+                                                    <DataTrigger Binding="{Binding HasInlineError}" Value="True">
+                                                        <Setter Property="Background" Value="#FFCDD2"/>
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </Border.Style>
+                                    <Grid>
+                                        <TextBox x:Name="InlineStartValue"
+                                                 Text="{Binding EditableStartValue, UpdateSourceTrigger=PropertyChanged}"
+                                                 BorderThickness="0" Background="Transparent"
+                                                 FontFamily="Consolas,Courier New"
+                                                 Padding="0,0,14,0" Margin="0"
+                                                 GotFocus="OnStartValueGotFocus"
+                                                 LostFocus="OnStartValueLostFocus"
+                                                 TextChanged="OnInlineTextChanged"
+                                                 Tag="{Binding}"/>
+                                        <Button HorizontalAlignment="Right" VerticalAlignment="Stretch"
+                                                Width="14" Background="Transparent" BorderThickness="0"
+                                                Click="OnInlineDropdownClick" Cursor="Hand"
+                                                Visibility="{Binding IsLeaf, Converter={StaticResource BoolToVis}}">
+                                            <Path Data="M 0,0 L 4,3.5 L 8,0 Z" Fill="#BBB"/>
+                                        </Button>
+                                    </Grid>
+                                    </Border>
+                                </DataTemplate>
+                            </GridViewColumn.CellTemplate>
+                        </GridViewColumn>
+
+                        <!-- Comment column with color coding and tooltip -->
+                        <GridViewColumn Header="{loc:Loc Column_Comment}" Width="250">
+                            <GridViewColumn.CellTemplate>
+                                <DataTemplate>
+                                    <TextBlock Text="{Binding DisplayComment}"
+                                               TextTrimming="CharacterEllipsis"
+                                               ToolTip="{Binding CommentTooltip}">
+                                        <TextBlock.Style>
+                                            <Style TargetType="TextBlock">
+                                                <Setter Property="Foreground" Value="#333"/>
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding CommentState}" Value="updated">
+                                                        <Setter Property="Foreground" Value="#0078D7"/>
+                                                    </DataTrigger>
+                                                    <DataTrigger Binding="{Binding CommentState}" Value="new">
+                                                        <Setter Property="Foreground" Value="#999"/>
+                                                        <Setter Property="FontStyle" Value="Italic"/>
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </TextBlock.Style>
+                                    </TextBlock>
+                                </DataTemplate>
+                            </GridViewColumn.CellTemplate>
+                        </GridViewColumn>
+                    </GridView>
+                </ListView.View>
+            </ListView>
+            </DockPanel>
+
+            <!-- Splitter between tree and inspector -->
+            <GridSplitter Grid.Column="1"
+                          HorizontalAlignment="Stretch" VerticalAlignment="Stretch"
+                          Background="#D6D9DE" ShowsPreview="False"
+                          Visibility="{Binding IsInspectorExpanded, Converter={StaticResource BoolToVis}}"/>
+
+            <!-- Right: Inspector sidebar -->
+            <Border Grid.Column="2" BorderBrush="#B9BEC6" BorderThickness="1,1,0,1"
+                    Background="#FAFAFA">
+                <DockPanel>
+                    <!-- Sidebar header with pin/collapse toggle -->
+                    <Border DockPanel.Dock="Top" Background="#EEF0F3"
+                            BorderBrush="#B9BEC6" BorderThickness="0,0,0,1" Height="26">
+                        <DockPanel LastChildFill="True">
+                            <Button DockPanel.Dock="Left"
+                                    Command="{Binding ToggleInspectorCommand}"
+                                    Width="22" Height="24" Background="Transparent" BorderThickness="0"
+                                    Cursor="Hand" Focusable="False"
+                                    ToolTip="Collapse / expand inspector">
+                                <Grid Width="8" Height="8">
+                                    <!-- Expanded: chevron points right (click to push sidebar away / collapse) -->
+                                    <Path HorizontalAlignment="Center" VerticalAlignment="Center"
+                                          Fill="#5b6471" Stretch="Uniform" Width="8" Height="8"
+                                          Data="M 0,0 L 6,4 L 0,8 Z"
+                                          Visibility="{Binding IsInspectorExpanded, Converter={StaticResource BoolToVis}}"/>
+                                    <!-- Collapsed: chevron points left (click to pull sidebar back / expand) -->
+                                    <Path HorizontalAlignment="Center" VerticalAlignment="Center"
+                                          Fill="#5b6471" Stretch="Uniform" Width="8" Height="8"
+                                          Data="M 6,0 L 0,4 L 6,8 Z"
+                                          Visibility="{Binding IsInspectorExpanded, Converter={StaticResource BoolToVis}, ConverterParameter=Invert}"/>
+                                </Grid>
+                            </Button>
+                            <TextBlock Text="INSPECTOR" VerticalAlignment="Center"
+                                       Margin="4,0,0,0" FontSize="10" FontWeight="Bold"
+                                       Foreground="#1e2227"
+                                       Visibility="{Binding IsInspectorExpanded, Converter={StaticResource BoolToVis}}"/>
+                        </DockPanel>
+                    </Border>
+
+                    <!-- Collapsed rail: vertical icon stack, clicking any icon expands inspector -->
+                    <StackPanel DockPanel.Dock="Top" HorizontalAlignment="Center"
+                                Visibility="{Binding IsInspectorCollapsed, Converter={StaticResource BoolToVis}}">
+                        <!-- Bulk edit -->
+                        <Button Command="{Binding ToggleInspectorCommand}"
+                                Width="26" Height="26" Margin="0,6,0,2"
+                                Background="Transparent" BorderThickness="0" Cursor="Hand"
+                                ToolTip="{loc:Loc Dialog_BulkEdit}">
+                            <Viewbox Width="16" Height="16">
+                                <Path Data="{StaticResource IconEdit}" Fill="#1f6feb"/>
+                            </Viewbox>
+                        </Button>
+                        <!-- Bulk preview + count badge -->
+                        <Grid Width="26" Height="26" Margin="0,2">
+                            <Button Command="{Binding ToggleInspectorCommand}"
+                                    Background="Transparent" BorderThickness="0" Cursor="Hand"
+                                    ToolTip="Bulk preview">
+                                <Viewbox Width="16" Height="16">
+                                    <Path Data="{StaticResource IconEye}" Fill="#1f6feb"/>
+                                </Viewbox>
+                            </Button>
+                            <Border Background="#1f6feb" CornerRadius="7" MinWidth="14" Height="12"
+                                    HorizontalAlignment="Right" VerticalAlignment="Top"
+                                    Padding="3,0" Margin="0,-2,-2,0"
+                                    IsHitTestVisible="False"
+                                    Visibility="{Binding HasBulkPreview, Converter={StaticResource BoolToVis}}">
+                                <TextBlock Text="{Binding BulkPreviewCount}" FontSize="8"
+                                           FontWeight="Bold" Foreground="White"
+                                           HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            </Border>
+                        </Grid>
+                        <!-- Pending edits + count badge -->
+                        <Grid Width="26" Height="26" Margin="0,2,0,6">
+                            <Button Command="{Binding ToggleInspectorCommand}"
+                                    Background="Transparent" BorderThickness="0" Cursor="Hand"
+                                    ToolTip="Pending edits">
+                                <Viewbox Width="16" Height="16">
+                                    <Path Data="{StaticResource IconClock}" Fill="#e0a93a"/>
+                                </Viewbox>
+                            </Button>
+                            <Border Background="#e0a93a" CornerRadius="7" MinWidth="14" Height="12"
+                                    HorizontalAlignment="Right" VerticalAlignment="Top"
+                                    Padding="3,0" Margin="0,-2,-2,0"
+                                    IsHitTestVisible="False"
+                                    Visibility="{Binding HasPendingEdits, Converter={StaticResource BoolToVis}}">
+                                <TextBlock Text="{Binding PendingInlineEditCount}" FontSize="8"
+                                           FontWeight="Bold" Foreground="White"
+                                           HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            </Border>
+                        </Grid>
+                    </StackPanel>
+
+                    <!-- Expanded content: three stacked sections -->
+                    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
+                                  Visibility="{Binding IsInspectorExpanded, Converter={StaticResource BoolToVis}}">
+                        <StackPanel>
+                            <!-- =========================================================
+                                 Section 1 — BULK EDIT (input)
+                                 ========================================================= -->
+                            <Grid>
+                                <StackPanel>
+                                    <Border Background="#EEF0F3" BorderBrush="#B9BEC6"
+                                            BorderThickness="0,0,0,1">
+                                        <DockPanel Margin="0,0,0,0">
+                                            <Button DockPanel.Dock="Left"
+                                                    Command="{Binding ToggleBulkEditCommand}"
+                                                    Background="Transparent" BorderThickness="0"
+                                                    Width="18" Height="24" Cursor="Hand" Focusable="False">
+                                                <Grid Width="10" Height="10">
+                                                    <TextBlock Text="&#x25BC;" FontSize="9" Foreground="#5b6471"
+                                                               HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                               Visibility="{Binding IsBulkEditExpanded, Converter={StaticResource BoolToVis}}"/>
+                                                    <TextBlock Text="&#x25B6;" FontSize="9" Foreground="#5b6471"
+                                                               HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                               Visibility="{Binding IsBulkEditExpanded, Converter={StaticResource BoolToVis}, ConverterParameter=Invert}"/>
+                                                </Grid>
+                                            </Button>
+                                            <!-- Section icon: pencil = edit input -->
+                                            <Viewbox DockPanel.Dock="Left" Width="13" Height="13"
+                                                     Margin="0,0,6,0" VerticalAlignment="Center">
+                                                <Path Data="{StaticResource IconEdit}" Fill="#1f6feb"/>
+                                            </Viewbox>
+                                            <TextBlock Text="{loc:Loc Dialog_BulkEdit}"
+                                                       Margin="0,6,10,6" FontSize="10.5" FontWeight="Bold"
+                                                       Foreground="#1e2227" VerticalAlignment="Center"/>
+                                        </DockPanel>
+                                    </Border>
+
+                                    <!-- Body -->
+                                    <StackPanel Background="White" Margin="0"
+                                                Visibility="{Binding IsBulkEditExpanded, Converter={StaticResource BoolToVis}}">
+                                        <!-- Target field (readonly display) -->
+                                        <StackPanel Margin="12,10,12,0">
+                                            <TextBlock Text="TARGET FIELD" FontSize="9.5" FontWeight="Bold"
+                                                       Foreground="#5b6471" Margin="0,0,0,3"/>
+                                            <Border Background="White" BorderBrush="#D6D9DE" BorderThickness="1"
+                                                    Padding="8,3" MinHeight="24">
+                                                <TextBlock Text="{Binding SelectedMemberDisplay}"
+                                                           FontFamily="Consolas,Courier New" FontSize="11"
+                                                           VerticalAlignment="Center"
+                                                           TextTrimming="CharacterEllipsis"/>
+                                            </Border>
+                                        </StackPanel>
+
+                                        <!-- Scope / Manual-selection -->
+                                        <StackPanel Margin="12,8,12,0"
+                                                    Visibility="{Binding CanEdit, Converter={StaticResource BoolToVis}}">
+                                            <TextBlock Text="SCOPE" FontSize="9.5" FontWeight="Bold"
+                                                       Foreground="#5b6471" Margin="0,0,0,3"/>
+                                            <!-- Scope mode -->
+                                            <StackPanel Visibility="{Binding HasScope, Converter={StaticResource BoolToVis}}">
+                                                <ComboBox ItemsSource="{Binding AvailableScopes}"
+                                                          SelectedItem="{Binding SelectedScope}"
+                                                          HorizontalAlignment="Stretch">
+                                                    <ComboBox.ItemTemplate>
+                                                        <DataTemplate>
+                                                            <TextBlock>
+                                                                <Run Text="Set all "/>
+                                                                <Run Text="{Binding MatchCount, Mode=OneWay}" FontWeight="SemiBold"/>
+                                                                <Run Text=" in '"/>
+                                                                <Run Text="{Binding AncestorName, Mode=OneWay}"/>
+                                                                <Run Text="'"/>
+                                                            </TextBlock>
+                                                        </DataTemplate>
+                                                    </ComboBox.ItemTemplate>
+                                                </ComboBox>
+                                            </StackPanel>
+                                            <!-- Manual-selection mode -->
+                                            <StackPanel Orientation="Horizontal"
+                                                        Visibility="{Binding IsManualMode, Converter={StaticResource BoolToVis}}">
+                                                <TextBlock Text="{Binding ManualSelectionSummary}"
+                                                           VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
+                                                           Margin="0,0,6,0"/>
+                                                <Button Content="{loc:Loc Dialog_ClearSelection}"
+                                                        Command="{Binding ClearManualSelectionCommand}"
+                                                        Height="22" Padding="6,0" FontSize="10"
+                                                        VerticalAlignment="Center"/>
+                                            </StackPanel>
+                                        </StackPanel>
+
+                                        <!-- New value -->
+                                        <StackPanel Margin="12,8,12,0"
+                                                    Visibility="{Binding CanEdit, Converter={StaticResource BoolToVis}}">
+                                            <DockPanel Margin="0,0,0,3">
+                                                <TextBlock DockPanel.Dock="Left" Text="NEW VALUE"
+                                                           FontSize="9.5" FontWeight="Bold" Foreground="#5b6471"/>
+                                                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal"
+                                                            HorizontalAlignment="Right">
+                                                    <CheckBox Content="{loc:Loc Dialog_Constants}" IsChecked="{Binding ShowConstants}"
+                                                              IsEnabled="{Binding ConstantsForced, Converter={StaticResource InvertBool}}"
+                                                              VerticalAlignment="Center" FontSize="10" Margin="0,0,4,0"/>
+                                                    <TextBlock Text="{Binding TagTableAge}" Foreground="#999" FontSize="9"
+                                                               VerticalAlignment="Center" Margin="0,0,3,0"/>
+                                                    <Button Content="&#x21BB;" Command="{Binding RefreshConstantsCommand}"
+                                                            Width="18" Height="16" FontSize="11" Padding="0"
+                                                            Background="Transparent" BorderThickness="0"
+                                                            ToolTip="{loc:Loc Dialog_RefreshConstants}" Cursor="Hand"/>
+                                                </StackPanel>
+                                            </DockPanel>
+                                            <Grid>
+                                                <TextBox x:Name="BulkNewValueBox"
+                                                         Text="{Binding NewValue, UpdateSourceTrigger=PropertyChanged}"
+                                                         Padding="4,3,20,3"
+                                                         PreviewMouseDown="OnBulkValueMouseDown"/>
+                                                <Button HorizontalAlignment="Right" VerticalAlignment="Stretch"
+                                                        Width="20" Background="Transparent" BorderThickness="0"
+                                                        Click="OnDropdownArrowClick" Cursor="Hand"
+                                                        Visibility="{Binding ShowConstants, Converter={StaticResource BoolToVis}}">
+                                                    <Path Data="M 0,0 L 6,5 L 12,0 Z" Fill="#888"/>
+                                                </Button>
+                                            </Grid>
+                                            <!-- Suggestion overlay (was Popup; inline so it is captured
+                                                 by RenderTargetBitmap in capture mode). Sits directly
+                                                 below the TextBox inside the sidebar column. -->
+                                            <Border Background="White" BorderBrush="#CCC" BorderThickness="1"
+                                                    MaxHeight="250" Margin="0,-1,0,0"
+                                                    Visibility="{Binding HasFilteredSuggestions, Converter={StaticResource BoolToVis}}">
+                                                <ListBox ItemsSource="{Binding FilteredSuggestions}"
+                                                         MaxHeight="250" BorderThickness="0"
+                                                         VirtualizingStackPanel.IsVirtualizing="True"
+                                                         ItemContainerStyle="{StaticResource SuggestionItemStyle}"
+                                                         SelectionChanged="OnSuggestionSelected">
+                                                    <ListBox.ItemTemplate>
+                                                        <DataTemplate>
+                                                            <Grid>
+                                                                <Grid.ColumnDefinitions>
+                                                                    <ColumnDefinition Width="160"/>
+                                                                    <ColumnDefinition Width="50"/>
+                                                                    <ColumnDefinition Width="*"/>
+                                                                </Grid.ColumnDefinitions>
+                                                                <TextBlock Grid.Column="0" Text="{Binding DisplayName}" FontWeight="SemiBold"/>
+                                                                <TextBlock Grid.Column="1" Text="{Binding Value}" Foreground="#555"/>
+                                                                <TextBlock Grid.Column="2" Text="{Binding Comment}" Foreground="#888" TextTrimming="CharacterEllipsis"/>
+                                                            </Grid>
+                                                        </DataTemplate>
+                                                    </ListBox.ItemTemplate>
+                                                </ListBox>
+                                            </Border>
+                                            <TextBlock Text="{Binding ValidationError}" Foreground="Red"
+                                                       FontSize="10" Margin="0,2,0,0"
+                                                       Visibility="{Binding ValidationError, Converter={StaticResource StringToVis}}"/>
+                                        </StackPanel>
+
+                                        <!-- Primary Set button -->
+                                        <Button Content="{Binding SetButtonText}"
+                                                Command="{Binding SetPendingCommand}"
+                                                Height="28" Margin="12,10,12,6"
+                                                Background="#1f6feb" Foreground="White"
+                                                BorderThickness="0" FontWeight="SemiBold"
+                                                ToolTip="{loc:Loc Dialog_SetTooltip}"
+                                                Visibility="{Binding CanEdit, Converter={StaticResource BoolToVis}}"/>
+
+                                        <!-- Overlap warning: bulk will overwrite existing pending edits -->
+                                        <Border Margin="12,0,12,12" Padding="6,4"
+                                                Background="#fffbef" BorderBrush="#e0a93a" BorderThickness="1"
+                                                Visibility="{Binding HasBulkPreviewConflict, Converter={StaticResource BoolToVis}}">
+                                            <TextBlock Text="{Binding BulkPreviewConflictWarning}"
+                                                       FontSize="10.5" Foreground="#6b4a0a"
+                                                       TextWrapping="Wrap"/>
+                                        </Border>
+                                    </StackPanel>
+                                </StackPanel>
+
+                                <!-- Limit-reached overlay over Section 1 only -->
+                                <Border Background="#E6FFFFFF"
+                                        Visibility="{Binding IsLimitReached, Converter={StaticResource BoolToVis}}">
+                                    <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center"
+                                                Margin="14,10">
+                                        <TextBlock Text="{loc:Loc Dialog_LimitReachedOverlay_Title}"
+                                                   FontSize="13" FontWeight="SemiBold" Foreground="#333"
+                                                   HorizontalAlignment="Center" TextWrapping="Wrap"/>
+                                        <TextBlock Text="{loc:Loc Dialog_LimitReachedOverlay_Text}"
+                                                   FontSize="11" Foreground="#666" Margin="0,4,0,10"
+                                                   HorizontalAlignment="Center" TextWrapping="Wrap"
+                                                   TextAlignment="Center"/>
+                                        <Button Content="{loc:Loc License_UpgradeToPro}" FontSize="11"
+                                                Command="{Binding UpgradeToProCommand}"
+                                                Background="#0078D7" Foreground="White" BorderThickness="0"
+                                                Cursor="Hand" Padding="14,6" FontWeight="SemiBold"
+                                                Margin="0,0,0,6"/>
+                                        <Button Content="{Binding LicenseKeyButtonText}" FontSize="11"
+                                                Command="{Binding EnterLicenseKeyCommand}"
+                                                Visibility="{Binding ShowLicenseKeyButton, Converter={StaticResource BoolToVis}}"
+                                                Background="Transparent" BorderThickness="1"
+                                                BorderBrush="#0078D7" Foreground="#0078D7"
+                                                Cursor="Hand" Padding="14,5"/>
+                                    </StackPanel>
+                                </Border>
+                            </Grid>
+
+                            <!-- =========================================================
+                                 Section 2 — BULK PREVIEW (live)
+                                 ========================================================= -->
+                            <Border Background="#EEF0F3" BorderBrush="#B9BEC6"
+                                    BorderThickness="0,1,0,1">
+                                <DockPanel>
+                                    <Button DockPanel.Dock="Left"
+                                            Command="{Binding ToggleBulkPreviewCommand}"
+                                            Background="Transparent" BorderThickness="0"
+                                            Width="18" Height="24" Cursor="Hand" Focusable="False">
+                                        <Grid Width="10" Height="10">
+                                            <TextBlock Text="&#x25BC;" FontSize="9" Foreground="#5b6471"
+                                                       HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                       Visibility="{Binding IsBulkPreviewExpanded, Converter={StaticResource BoolToVis}}"/>
+                                            <TextBlock Text="&#x25B6;" FontSize="9" Foreground="#5b6471"
+                                                       HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                       Visibility="{Binding IsBulkPreviewExpanded, Converter={StaticResource BoolToVis}, ConverterParameter=Invert}"/>
+                                        </Grid>
+                                    </Button>
+                                    <!-- Section icon: eye = preview -->
+                                    <Viewbox DockPanel.Dock="Left" Width="13" Height="13"
+                                             Margin="0,0,6,0" VerticalAlignment="Center">
+                                        <Path Data="{StaticResource IconEye}" Fill="#1f6feb"/>
+                                    </Viewbox>
+                                    <TextBlock DockPanel.Dock="Left" Text="BULK PREVIEW"
+                                               Margin="0,6,0,6"
+                                               FontSize="10.5" FontWeight="Bold" Foreground="#1e2227"
+                                               VerticalAlignment="Center"/>
+                                    <Border DockPanel.Dock="Left" Margin="6,0,0,0" Padding="5,0"
+                                            Background="#1f6feb" CornerRadius="8"
+                                            VerticalAlignment="Center"
+                                            Visibility="{Binding HasBulkPreview, Converter={StaticResource BoolToVis}}">
+                                        <TextBlock Text="{Binding BulkPreviewCount}"
+                                                   FontSize="10" FontWeight="Bold" Foreground="White"/>
+                                    </Border>
+                                    <TextBlock DockPanel.Dock="Right" HorizontalAlignment="Right"
+                                               Text="{Binding BulkPreviewSummary}"
+                                               FontSize="10" Foreground="#5b6471"
+                                               FontFamily="Consolas,Courier New"
+                                               VerticalAlignment="Center" Margin="0,0,10,0"/>
+                                </DockPanel>
+                            </Border>
+                            <!-- Empty state -->
+                            <Border Background="White" Padding="12,10" MinHeight="52">
+                                <Border.Style>
+                                    <Style TargetType="Border">
+                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                        <Style.Triggers>
+                                            <MultiDataTrigger>
+                                                <MultiDataTrigger.Conditions>
+                                                    <Condition Binding="{Binding IsBulkPreviewExpanded}" Value="True"/>
+                                                    <Condition Binding="{Binding HasBulkPreview}" Value="False"/>
+                                                </MultiDataTrigger.Conditions>
+                                                <Setter Property="Visibility" Value="Visible"/>
+                                            </MultiDataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Border.Style>
+                                <TextBlock Text="Preview will appear here once a target field, scope and value are chosen."
+                                           FontSize="10.5" Foreground="#8a929d" FontStyle="Italic"
+                                           TextWrapping="Wrap"/>
+                            </Border>
+                            <!-- List -->
+                            <ItemsControl ItemsSource="{Binding BulkPreview}"
+                                          Background="White">
+                                <ItemsControl.Style>
+                                    <Style TargetType="ItemsControl">
+                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                        <Style.Triggers>
+                                            <MultiDataTrigger>
+                                                <MultiDataTrigger.Conditions>
+                                                    <Condition Binding="{Binding IsBulkPreviewExpanded}" Value="True"/>
+                                                    <Condition Binding="{Binding HasBulkPreview}" Value="True"/>
+                                                </MultiDataTrigger.Conditions>
+                                                <Setter Property="Visibility" Value="Visible"/>
+                                            </MultiDataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </ItemsControl.Style>
+                                <!-- No inner ScrollViewer: the sidebar's outer ScrollViewer
+                                     handles wheel events for the whole inspector. -->
+                                <ItemsControl.Template>
+                                    <ControlTemplate TargetType="ItemsControl">
+                                        <Border Background="White">
+                                            <ItemsPresenter/>
+                                        </Border>
+                                    </ControlTemplate>
+                                </ItemsControl.Template>
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Border BorderBrush="#E6E8EC" BorderThickness="0,0,0,1"
+                                                Padding="10,4,10,4" Background="White"
+                                                MouseLeftButtonUp="OnBulkPreviewRowClick">
+                                            <StackPanel>
+                                                <DockPanel LastChildFill="True">
+                                                    <Border DockPanel.Dock="Right" Margin="6,0,0,0"
+                                                            Background="#fde7a8" BorderBrush="#e0a93a" BorderThickness="1"
+                                                            Padding="3,0" CornerRadius="2"
+                                                            VerticalAlignment="Center"
+                                                            Visibility="{Binding HasPendingConflict, Converter={StaticResource BoolToVis}}"
+                                                            ToolTip="Will overwrite an existing pending edit">
+                                                        <TextBlock Text="&#x26A0;" FontSize="9" FontWeight="Bold"
+                                                                   Foreground="#6b4a0a"/>
+                                                    </Border>
+                                                    <TextBlock Text="{Binding ShortPath}"
+                                                               FontFamily="Consolas,Courier New" FontSize="10"
+                                                               Foreground="#5b6471"
+                                                               TextTrimming="CharacterEllipsis"
+                                                               VerticalAlignment="Center"/>
+                                                </DockPanel>
+                                                <StackPanel Orientation="Horizontal" Margin="0,1,0,0">
+                                                    <TextBlock Text="{Binding OriginalValue}"
+                                                               FontFamily="Consolas,Courier New" FontSize="10"
+                                                               Foreground="#1e2227"/>
+                                                    <TextBlock Text=" &#x21E2; " FontSize="10" Foreground="#1f6feb"/>
+                                                    <Border Background="#e3edfc" BorderBrush="#1f6feb"
+                                                            BorderThickness="1" Padding="3,0">
+                                                        <Border.Style>
+                                                            <Style TargetType="Border">
+                                                                <Setter Property="BorderThickness" Value="1"/>
+                                                            </Style>
+                                                        </Border.Style>
+                                                        <TextBlock Text="{Binding PreviewValue}"
+                                                                   FontFamily="Consolas,Courier New" FontSize="10"
+                                                                   FontWeight="SemiBold" FontStyle="Italic"
+                                                                   Foreground="#0b4fbf"/>
+                                                    </Border>
+                                                </StackPanel>
+                                            </StackPanel>
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+
+                            <!-- =========================================================
+                                 Section 3 — PENDING EDITS
+                                 ========================================================= -->
+                            <Border Background="#EEF0F3" BorderBrush="#B9BEC6"
+                                    BorderThickness="0,1,0,1">
+                                <DockPanel>
+                                    <Button DockPanel.Dock="Left"
+                                            Command="{Binding TogglePendingCommand}"
+                                            Background="Transparent" BorderThickness="0"
+                                            Width="18" Height="24" Cursor="Hand" Focusable="False">
+                                        <Grid Width="10" Height="10">
+                                            <TextBlock Text="&#x25BC;" FontSize="9" Foreground="#5b6471"
+                                                       HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                       Visibility="{Binding IsPendingExpanded, Converter={StaticResource BoolToVis}}"/>
+                                            <TextBlock Text="&#x25B6;" FontSize="9" Foreground="#5b6471"
+                                                       HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                       Visibility="{Binding IsPendingExpanded, Converter={StaticResource BoolToVis}, ConverterParameter=Invert}"/>
+                                        </Grid>
+                                    </Button>
+                                    <!-- Section icon: clock = pending/waiting -->
+                                    <Viewbox DockPanel.Dock="Left" Width="13" Height="13"
+                                             Margin="0,0,6,0" VerticalAlignment="Center">
+                                        <Path Data="{StaticResource IconClock}" Fill="#e0a93a"/>
+                                    </Viewbox>
+                                    <TextBlock DockPanel.Dock="Left" Text="PENDING EDITS"
+                                               Margin="0,6,0,6"
+                                               FontSize="10.5" FontWeight="Bold" Foreground="#1e2227"
+                                               VerticalAlignment="Center"/>
+                                    <Border DockPanel.Dock="Left" Margin="6,0,0,0" Padding="5,0"
+                                            Background="#e0a93a" CornerRadius="8"
+                                            VerticalAlignment="Center"
+                                            Visibility="{Binding HasPendingEdits, Converter={StaticResource BoolToVis}}">
+                                        <TextBlock Text="{Binding PendingInlineEditCount}"
+                                                   FontSize="10" FontWeight="Bold" Foreground="White"/>
+                                    </Border>
+                                    <Button DockPanel.Dock="Right" HorizontalAlignment="Right"
+                                            Content="Undo all"
+                                            Command="{Binding DiscardPendingCommand}"
+                                            Background="Transparent" BorderThickness="0"
+                                            Foreground="#0b4fbf" Cursor="Hand"
+                                            FontSize="10" FontWeight="SemiBold"
+                                            Padding="4,0" Margin="0,0,8,0"
+                                            Visibility="{Binding HasPendingEdits, Converter={StaticResource BoolToVis}}"/>
+                                </DockPanel>
+                            </Border>
+                            <!-- Empty state -->
+                            <Border Background="White" Padding="12,10" MinHeight="52">
+                                <Border.Style>
+                                    <Style TargetType="Border">
+                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                        <Style.Triggers>
+                                            <MultiDataTrigger>
+                                                <MultiDataTrigger.Conditions>
+                                                    <Condition Binding="{Binding IsPendingExpanded}" Value="True"/>
+                                                    <Condition Binding="{Binding HasPendingEdits}" Value="False"/>
+                                                </MultiDataTrigger.Conditions>
+                                                <Setter Property="Visibility" Value="Visible"/>
+                                            </MultiDataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Border.Style>
+                                <TextBlock Text="Staged edits will show up here after you hit Set."
+                                           FontSize="10.5" Foreground="#8a929d" FontStyle="Italic"
+                                           TextWrapping="Wrap"/>
+                            </Border>
+                            <!-- List -->
+                            <ItemsControl ItemsSource="{Binding PendingEdits}"
+                                          Background="White">
+                                <ItemsControl.Style>
+                                    <Style TargetType="ItemsControl">
+                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                        <Style.Triggers>
+                                            <MultiDataTrigger>
+                                                <MultiDataTrigger.Conditions>
+                                                    <Condition Binding="{Binding IsPendingExpanded}" Value="True"/>
+                                                    <Condition Binding="{Binding HasPendingEdits}" Value="True"/>
+                                                </MultiDataTrigger.Conditions>
+                                                <Setter Property="Visibility" Value="Visible"/>
+                                            </MultiDataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </ItemsControl.Style>
+                                <!-- No inner ScrollViewer: the sidebar's outer ScrollViewer
+                                     handles wheel events for the whole inspector. -->
+                                <ItemsControl.Template>
+                                    <ControlTemplate TargetType="ItemsControl">
+                                        <Border Background="White">
+                                            <ItemsPresenter/>
+                                        </Border>
+                                    </ControlTemplate>
+                                </ItemsControl.Template>
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Border BorderBrush="#E6E8EC" BorderThickness="0,0,0,1"
+                                                Padding="10,4,10,4" Background="White"
+                                                MouseLeftButtonUp="OnPendingRowClick">
+                                            <StackPanel>
+                                                <DockPanel LastChildFill="True">
+                                                    <Button DockPanel.Dock="Right"
+                                                            Content="&#x21B6;"
+                                                            Click="OnUndoPendingClick"
+                                                            Background="Transparent" BorderThickness="0"
+                                                            FontSize="12" Foreground="#5b6471"
+                                                            Cursor="Hand" Padding="4,0"
+                                                            ToolTip="Undo this pending edit"/>
+                                                    <Border DockPanel.Dock="Right" Margin="6,0,0,0"
+                                                            Background="#e3edfc" BorderBrush="#1f6feb" BorderThickness="1"
+                                                            Padding="3,0" CornerRadius="2"
+                                                            VerticalAlignment="Center"
+                                                            Visibility="{Binding WillBeOverwrittenByBulk, Converter={StaticResource BoolToVis}}"
+                                                            ToolTip="Will be overwritten by the active bulk edit">
+                                                        <TextBlock Text="&#x21E2;" FontSize="9" FontWeight="Bold"
+                                                                   Foreground="#0b4fbf"/>
+                                                    </Border>
+                                                    <TextBlock Text="{Binding ShortPath}"
+                                                               FontFamily="Consolas,Courier New" FontSize="10"
+                                                               Foreground="#5b6471"
+                                                               TextTrimming="CharacterEllipsis"
+                                                               VerticalAlignment="Center"/>
+                                                </DockPanel>
+                                                <StackPanel Orientation="Horizontal" Margin="0,1,0,0">
+                                                    <TextBlock Text="{Binding OriginalValue}"
+                                                               FontFamily="Consolas,Courier New" FontSize="10"
+                                                               Foreground="#8a929d"
+                                                               TextDecorations="Strikethrough"/>
+                                                    <TextBlock Text=" &#x2192; " FontSize="10" Foreground="#e0a93a"/>
+                                                    <Border Background="#fde7a8" Padding="3,0">
+                                                        <TextBlock Text="{Binding PendingValue}"
+                                                                   FontFamily="Consolas,Courier New" FontSize="10"
+                                                                   FontWeight="SemiBold"
+                                                                   Foreground="#6b4a0a"/>
+                                                    </Border>
+                                                </StackPanel>
+                                            </StackPanel>
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </StackPanel>
+                    </ScrollViewer>
+                </DockPanel>
+            </Border>
+        </Grid>
+    </DockPanel>
+
+    <!-- Scripted cursor overlay. Drawn by capture scripts to show where
+         a click/type is happening in a still frame — otherwise text fields
+         fill "magically" in the resulting GIF. Never shown in interactive
+         mode. Positioned in window coords via Canvas.Left/Top. Z-order
+         above InlineOverlay so it reads on top of any autocomplete popup. -->
+    <Canvas x:Name="CursorOverlay" Panel.ZIndex="2000"
+            IsHitTestVisible="False" Visibility="Collapsed">
+        <!-- Classic arrow cursor (24x24 viewbox). Hotspot at (1,1) so the
+             reported x/y align with where a real click would happen. -->
+        <Path x:Name="CursorShape"
+              Data="M 1,1 L 1,17 L 5,13 L 8,20 L 11,19 L 8,12 L 14,12 Z"
+              Fill="White" Stroke="Black" StrokeThickness="1.3"
+              StrokeLineJoin="Round">
+            <Path.Effect>
+                <DropShadowEffect Color="Black" BlurRadius="3"
+                                  ShadowDepth="1" Opacity="0.5"/>
+            </Path.Effect>
+        </Path>
+    </Canvas>
+
+    <!-- Dialog-root inline-autocomplete overlay. Positioned imperatively
+         by BulkChangeDialog code-behind whenever an inline cell enters
+         edit mode. Lives outside the ListView so its z-order sits above
+         all rows (including the one below the active cell). -->
+    <Border x:Name="InlineOverlay" Panel.ZIndex="1000"
+            Background="White" BorderBrush="#666" BorderThickness="1"
+            HorizontalAlignment="Left" VerticalAlignment="Top"
+            Visibility="Collapsed" MaxHeight="200">
+        <ListBox x:Name="InlineOverlayList" Background="White"
+                 BorderThickness="0" MaxHeight="200"
+                 VirtualizingStackPanel.IsVirtualizing="True"
+                 ItemContainerStyle="{StaticResource SuggestionItemStyle}"
+                 SelectionChanged="OnInlineOverlaySuggestionSelected">
+            <ListBox.ItemTemplate>
+                <DataTemplate>
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="{Binding DisplayName}" Width="120" FontWeight="SemiBold" FontSize="11"/>
+                        <TextBlock Text="{Binding Value}" Width="35" Foreground="#555" FontSize="11"/>
+                        <TextBlock Text="{Binding Comment}" Foreground="#888" FontSize="11" TextTrimming="CharacterEllipsis"/>
+                    </StackPanel>
+                </DataTemplate>
+            </ListBox.ItemTemplate>
+        </ListBox>
+    </Border>
+    </Grid>
+</Window>

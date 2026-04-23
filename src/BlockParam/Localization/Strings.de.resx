@@ -1,0 +1,242 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <xsd:schema id="root" xmlns="" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:msdata="urn:schemas-microsoft-com:xml-msdata">
+    <xsd:element name="root" msdata:IsDataSet="true">
+      <xsd:complexType>
+        <xsd:choice maxOccurs="unbounded">
+          <xsd:element name="data">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+                <xsd:element name="comment" type="xsd:string" minOccurs="0" msdata:Ordinal="2" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" />
+              <xsd:attribute name="type" type="xsd:string" />
+              <xsd:attribute name="mimetype" type="xsd:string" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="resheader">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" />
+            </xsd:complexType>
+          </xsd:element>
+        </xsd:choice>
+      </xsd:complexType>
+    </xsd:element>
+  </xsd:schema>
+  <resheader name="resmimetype"><value>text/microsoft-resx</value></resheader>
+  <resheader name="version"><value>2.0</value></resheader>
+  <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value></resheader>
+  <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value></resheader>
+  <!-- Kontextmenü -->
+  <data name="MenuTitle_BulkChange" xml:space="preserve"><value>BlockParam...</value></data>
+  <data name="MenuTitle_SetAll" xml:space="preserve"><value>Alle {0} in '{1}' setzen</value></data>
+  <!-- Dialog -->
+  <data name="Dialog_Title" xml:space="preserve"><value>BlockParam: {0}</value></data>
+  <data name="Dialog_NewValue" xml:space="preserve"><value>Neuer Wert:</value></data>
+  <data name="Dialog_Scope" xml:space="preserve"><value>Bereich:</value></data>
+  <data name="Dialog_Apply" xml:space="preserve"><value>Anwenden</value></data>
+  <data name="Dialog_Cancel" xml:space="preserve"><value>Abbrechen</value></data>
+  <data name="Dialog_ErrorDuringBulk" xml:space="preserve"><value>Während der Massenoperation ist ein Fehler aufgetreten. Alle Änderungen rückgängig machen?</value></data>
+  <data name="Dialog_SelectedMember" xml:space="preserve"><value>Ausgewähltes Element</value></data>
+  <data name="Dialog_ApplyAndClose" xml:space="preserve"><value>Anwenden &amp; Schließen</value></data>
+  <data name="Dialog_Close" xml:space="preserve"><value>Schließen</value></data>
+  <data name="Dialog_RuleFilterBanner" xml:space="preserve"><value>Der Regelfilter blendet {0} Element(e) aus.</value></data>
+  <data name="Dialog_RuleFilterBanner_Link" xml:space="preserve"><value>Regeln prüfen...</value></data>
+  <data name="Dialog_ShowSetpointsOnly" xml:space="preserve"><value>Nur Einstellwerte</value></data>
+  <data name="Dialog_UpdateComments" xml:space="preserve"><value>Kommentare im Bereich aktualisieren</value></data>
+  <data name="Dialog_CleanupStructs" xml:space="preserve"><value>Ungenutzte Struct-Elemente bereinigen...</value></data>
+  <data name="Dialog_SearchHits" xml:space="preserve"><value>{0} Treffer</value></data>
+  <!-- Fehler -->
+  <data name="Error_InvalidValue" xml:space="preserve"><value>'{0}' ist kein gültiger {1}-Wert.</value></data>
+  <data name="Error_OutOfRange" xml:space="preserve"><value>Wert muss zwischen {0} und {1} liegen.</value></data>
+  <data name="Error_LimitReached" xml:space="preserve"><value>Tageslimit erreicht ({0}/{1}). Upgrade für unbegrenzte Nutzung.</value></data>
+  <data name="Error_NotADataBlock" xml:space="preserve"><value>Das ausgewählte Element ist kein Datenbaustein.</value></data>
+  <data name="Error_ProtectedBlock" xml:space="preserve"><value>Dieser Datenbaustein ist schreib- oder Know-how-geschützt.</value></data>
+  <!-- Logging -->
+  <data name="Log_ValueChanged" xml:space="preserve"><value>'{0}' geändert von '{1}' auf '{2}'</value></data>
+  <data name="Log_BulkOperationComplete" xml:space="preserve"><value>Massenoperation abgeschlossen: {0} Werte geändert in '{1}'</value></data>
+  <!-- Bereinigung -->
+  <data name="Cleanup_ConfirmDelete" xml:space="preserve"><value>{0} ungenutzte Struct-Elemente löschen? (Hinweis: Querverweise aus anderen Bausteinen werden nicht geprüft)</value></data>
+  <data name="Cleanup_NoneFound" xml:space="preserve"><value>Keine ungenutzten Struct-Elemente gefunden.</value></data>
+  <data name="Cleanup_Removed" xml:space="preserve"><value>{0} ungenutzte Struct-Elemente aus '{1}' entfernt</value></data>
+  <data name="Cleanup_Title" xml:space="preserve"><value>Struct-Bereinigung</value></data>
+  <data name="Cleanup_DetailMessage" xml:space="preserve"><value>{0} potenziell ungenutzte Struct-Elemente gefunden:
+
+{1}
+
+Hinweis: Querverweise aus anderen Bausteinen werden NICHT geprüft.
+Nur löschen wenn sichergestellt ist, dass diese Elemente ungenutzt sind.
+
+Diese Elemente löschen?</value></data>
+  <!-- Kommentare -->
+  <data name="Comments_Updated" xml:space="preserve"><value>{0} Kommentare in '{1}' aktualisiert</value></data>
+  <!-- Rollback -->
+  <data name="Rollback_Question" xml:space="preserve"><value>Während der Massenoperation ist ein Fehler aufgetreten:
+
+{0}
+
+Möchten Sie alle Änderungen rückgängig machen?
+Ja = Ursprünglichen Datenbaustein wiederherstellen
+Nein = Aktuelles (möglicherweise unvollständiges) Ergebnis behalten</value></data>
+  <data name="Rollback_Complete" xml:space="preserve"><value>Rückgängig abgeschlossen — ursprünglicher Datenbaustein wiederhergestellt.</value></data>
+  <data name="Rollback_Failed" xml:space="preserve"><value>Rückgängig fehlgeschlagen: {0}</value></data>
+  <data name="Rollback_Title" xml:space="preserve"><value>BlockParam – Fehler</value></data>
+  <!-- Status -->
+  <data name="Status_SingleOccurrence" xml:space="preserve"><value>Dieses Element kommt nur einmal vor — keine Massenoperation möglich.</value></data>
+  <data name="Status_Changed" xml:space="preserve"><value>{0} Werte in '{1}' geändert</value></data>
+  <data name="Status_Error" xml:space="preserve"><value>Fehler: {0}</value></data>
+  <data name="Status_ErrorComments" xml:space="preserve"><value>Fehler beim Aktualisieren der Kommentare: {0}</value></data>
+  <data name="Status_ErrorCleanup" xml:space="preserve"><value>Fehler bei der Bereinigung: {0}</value></data>
+  <data name="Status_ErrorPartialKept" xml:space="preserve"><value>Fehler aufgetreten, teilweise Änderungen beibehalten: {0}</value></data>
+  <data name="Status_ErrorNoBackup" xml:space="preserve"><value>Fehler: {0} (kein Backup für Rückgängig verfügbar)</value></data>
+  <data name="Status_LimitReached" xml:space="preserve"><value>Tageslimit erreicht. Upgrade für unbegrenzte Nutzung.</value></data>
+  <data name="Status_Remaining" xml:space="preserve"><value>Verbleibend: {0}/{1} kostenlose Operationen</value></data>
+  <data name="Status_RemainingBoth" xml:space="preserve"><value>Massenbearbeitung: {0}/{1}  |  Inline-Änderungen: {2}/{3}</value></data>
+  <data name="Status_InlineLimitReached" xml:space="preserve"><value>Tägliches Inline-Limit erreicht. Upgrade für unbegrenzte Nutzung.</value></data>
+  <data name="Status_Ready" xml:space="preserve"><value>Bereit</value></data>
+  <!-- Lizenzierung -->
+  <data name="Status_Pro" xml:space="preserve"><value>Pro-Lizenz — Unbegrenzte Operationen</value></data>
+  <data name="License_EnterKey" xml:space="preserve"><value>Lizenzschlüssel eingeben</value></data>
+  <data name="License_Activated" xml:space="preserve"><value>Lizenz erfolgreich aktiviert</value></data>
+  <data name="License_Invalid" xml:space="preserve"><value>Ungültiger Lizenzschlüssel</value></data>
+  <data name="License_TooManySessions" xml:space="preserve"><value>Zu viele gleichzeitige Sitzungen ({0}/{1})</value></data>
+  <data name="License_ServerError" xml:space="preserve"><value>Lizenzserver nicht erreichbar. Verwende zwischengespeicherte Lizenz.</value></data>
+  <data name="License_GraceExpired" xml:space="preserve"><value>Offline-Karenzzeit abgelaufen. Wechsel zum kostenlosen Modus.</value></data>
+  <data name="License_Tier_Free" xml:space="preserve"><value>Kostenlos</value></data>
+  <data name="License_Tier_Pro" xml:space="preserve"><value>Pro</value></data>
+  <data name="License_DialogTitle" xml:space="preserve"><value>Lizenzverwaltung</value></data>
+  <data name="License_CurrentTier" xml:space="preserve"><value>Aktueller Tarif: {0}</value></data>
+  <data name="License_Activate" xml:space="preserve"><value>Aktivieren</value></data>
+  <data name="License_ActivateTooltip_Empty" xml:space="preserve"><value>Lizenzschlüssel eingeben, um zu aktivieren</value></data>
+  <data name="License_ActivateTooltip_Activating" xml:space="preserve"><value>Aktivierung läuft…</value></data>
+  <data name="License_ActivateTooltip_AlreadyPro" xml:space="preserve"><value>Pro bereits aktiviert — „Lizenz entfernen" zum Abmelden</value></data>
+  <data name="License_RemoveKey" xml:space="preserve"><value>Lizenz entfernen</value></data>
+  <data name="License_ManageKey" xml:space="preserve"><value>Lizenz verwalten</value></data>
+  <data name="License_KeyPlaceholder" xml:space="preserve"><value>PRO-XXXX-XXXX-XXXX</value></data>
+  <data name="License_BuyPro" xml:space="preserve"><value>Lizenz erwerben</value></data>
+  <data name="License_UpgradeToPro" xml:space="preserve"><value>Upgrade auf Pro</value></data>
+  <data name="License_ExpiredHint" xml:space="preserve"><value>Dein Pro-Abo konnte nicht verlängert werden. Verwalte dein Abo um fortzufahren.</value></data>
+  <data name="License_ManageSubscription" xml:space="preserve"><value>Abo verwalten</value></data>
+  <!-- Auswahl -->
+  <data name="Selection_ClickToSelect" xml:space="preserve"><value>Blattelement anklicken zum Auswählen</value></data>
+  <data name="Selection_MemberDisplay" xml:space="preserve"><value>{0} ({1})</value></data>
+  <!-- Spalten -->
+  <data name="Column_Name" xml:space="preserve"><value>Name</value></data>
+  <data name="Column_DataType" xml:space="preserve"><value>Datentyp</value></data>
+  <data name="Column_StartValue" xml:space="preserve"><value>Startwert</value></data>
+  <!-- BulkChangeDialog -->
+  <data name="Dialog_BulkEdit" xml:space="preserve"><value>Massenänderung</value></data>
+  <data name="Dialog_Set" xml:space="preserve"><value>Setzen</value></data>
+  <data name="Dialog_Discard" xml:space="preserve"><value>Verwerfen</value></data>
+  <data name="Dialog_DiscardConfirm_Title" xml:space="preserve"><value>Vorgemerkte Änderungen verwerfen?</value></data>
+  <data name="Dialog_DiscardConfirm_Text" xml:space="preserve"><value>Wirklich {0} vorgemerkte Änderung(en) verwerfen?
+
+Dies kann nicht rückgängig gemacht werden.</value></data>
+  <data name="Dialog_Constants" xml:space="preserve"><value>Konstanten</value></data>
+  <data name="Dialog_RefreshConstants" xml:space="preserve"><value>Konstanten aktualisieren</value></data>
+  <data name="Dialog_SetTooltip" xml:space="preserve"><value>Bulk-Werte als ausstehend markieren (gelb)</value></data>
+  <data name="Dialog_LimitReachedOverlay_Title" xml:space="preserve"><value>Tägliches Gratis-Limit erreicht</value></data>
+  <data name="Dialog_LimitReachedOverlay_Text" xml:space="preserve"><value>Upgrade auf Pro für unbegrenzte Massenänderungen, oder bis morgen warten.</value></data>
+  <!-- Manuelle Mehrfachauswahl -->
+  <data name="Dialog_ManualSelection" xml:space="preserve"><value>Manuelle Auswahl:</value></data>
+  <data name="Dialog_ClearSelection" xml:space="preserve"><value>Zurücksetzen</value></data>
+  <data name="Dialog_ManualSelectionSummary" xml:space="preserve"><value>{0} ausgewählt ({1})</value></data>
+  <data name="Dialog_ManualSelectionMixed" xml:space="preserve"><value>{0} ausgewählt — {1} Datentypen</value></data>
+  <data name="Dialog_SetManualCount" xml:space="preserve"><value>{0} ausgewählte setzen</value></data>
+  <data name="Validation_MixedDatatypes" xml:space="preserve"><value>Auswahl enthält verschiedene Datentypen — auf einen Datentyp einschränken, um einen gemeinsamen Wert zu setzen.</value></data>
+  <data name="Dialog_ApplyTooltip" xml:space="preserve"><value>Es werden nur Startwerte geändert. Aktualwerte müssen separat über 'Startwerte in Aktualwerte kopieren' in TIA Portal aktualisiert werden.</value></data>
+  <data name="Dialog_EditConfig" xml:space="preserve"><value>Konfiguration...</value></data>
+  <data name="Column_Comment" xml:space="preserve"><value>Kommentar</value></data>
+  <!-- ConfigEditorDialog -->
+  <data name="ConfigEditor_Title" xml:space="preserve"><value>Regel-Konfiguration</value></data>
+  <data name="ConfigEditor_SharedDir" xml:space="preserve"><value>Gemeinsames Regelverzeichnis</value></data>
+  <data name="ConfigEditor_Browse" xml:space="preserve"><value>Durchsuchen...</value></data>
+  <data name="ConfigEditor_RuleFiles" xml:space="preserve"><value>Regeldateien</value></data>
+  <data name="ConfigEditor_NewRule" xml:space="preserve"><value>Neue Regel</value></data>
+  <data name="ConfigEditor_Delete" xml:space="preserve"><value>Löschen</value></data>
+  <data name="ConfigEditor_Duplicate" xml:space="preserve"><value>Duplizieren</value></data>
+  <data name="ConfigEditor_Duplicate_Tooltip" xml:space="preserve"><value>Dupliziert die ausgewählte Regel (kopiert alle Felder; die Kopie kann anschließend bearbeitet werden).</value></data>
+  <data name="ConfigEditor_SearchPlaceholder" xml:space="preserve"><value>Regeln filtern...</value></data>
+  <data name="ConfigEditor_OverrideInfo" xml:space="preserve"><value>Diese Regel</value></data>
+  <data name="ConfigEditor_ResetToBase" xml:space="preserve"><value>Auf Basisregel zurücksetzen</value></data>
+  <data name="ConfigEditor_Help_Override" xml:space="preserve"><value>Diese Regel existiert in mehreren Quellen (Projekt/Lokal/Shared). Nur die Version mit höchster Priorität ist aktiv. Zurücksetzen löscht diese Überschreibung und stellt die Basisregel wieder her.</value></data>
+  <data name="ConfigEditor_Save" xml:space="preserve"><value>Speichern</value></data>
+  <data name="ConfigEditor_SaveAndClose" xml:space="preserve"><value>Speichern &amp; Schließen</value></data>
+  <data name="ConfigEditor_PathPattern" xml:space="preserve"><value>Pfad-Muster:</value></data>
+  <data name="ConfigEditor_FileName" xml:space="preserve"><value>Datei:</value></data>
+  <data name="ConfigEditor_Datatype" xml:space="preserve"><value>Datentyp:</value></data>
+  <data name="ConfigEditor_TagTable" xml:space="preserve"><value>Tag-Tabelle:</value></data>
+  <data name="ConfigEditor_RequireValue" xml:space="preserve"><value>Wert erforderlich:</value></data>
+  <data name="ConfigEditor_MinMax" xml:space="preserve"><value>Min / Max:</value></data>
+  <data name="ConfigEditor_AllowedValues" xml:space="preserve"><value>Erlaubte Werte:</value></data>
+  <data name="ConfigEditor_CommentTemplate" xml:space="preserve"><value>Kommentar-Vorlage:</value></data>
+  <data name="ConfigEditor_CommentLanguage" xml:space="preserve"><value>Kommentar-Sprache:</value></data>
+  <data name="ConfigEditor_Exclude" xml:space="preserve"><value>Ausschließen:</value></data>
+  <data name="ConfigEditor_ExcludeCheckbox" xml:space="preserve"><value>Im Startwert-Filter ausblenden</value></data>
+  <data name="ConfigEditor_SaveTo" xml:space="preserve"><value>Speichern in:</value></data>
+  <data name="ConfigEditor_Project" xml:space="preserve"><value>Projekt</value></data>
+  <data name="ConfigEditor_Local" xml:space="preserve"><value>Lokal</value></data>
+  <data name="ConfigEditor_Shared" xml:space="preserve"><value>Gemeinsam</value></data>
+  <!-- Inline-Hilfe Tooltips für ConfigEditor-Felder -->
+  <data name="ConfigEditor_Help_PathPattern" xml:space="preserve"><value>Regex-Muster für den Elementpfad innerhalb des DB.
+Beispiele:
+  .*\.messageId$  — jedes Element das auf .messageId endet
+  .*{udt:messageConfig_UDT}\.messageId$  — nur innerhalb eines bestimmten UDT
+Tokens: {udt:Name} = UDT-Typ, {childUdt:Name} = Kind-UDT.
+Platzhalter: .* (beliebig), .+ (mindestens eins). Anker: ^ (Anfang), $ (Ende).</value></data>
+  <data name="ConfigEditor_Help_Datatype" xml:space="preserve"><value>Optional: Regel auf einen bestimmten TIA-Datentyp einschränken.
+Leer lassen für beliebige Typen. Aus Liste wählen oder eigenen UDT-Namen eingeben (z.B. "UDT_Motor").</value></data>
+  <data name="ConfigEditor_Help_TagTable" xml:space="preserve"><value>Optional: TIA-Variablentabelle für Autovervollständigung referenzieren.
+Platzhalter möglich: MES_* findet alle Tabellen die mit MES_ beginnen.</value></data>
+  <data name="ConfigEditor_Help_RequireValue" xml:space="preserve"><value>Wenn aktiviert, muss der Startwert einem Eintrag aus der referenzierten Variablentabelle entsprechen. Leere Werte werden abgelehnt.</value></data>
+  <data name="ConfigEditor_Help_MinMax" xml:space="preserve"><value>Optionale numerische Bereichseinschränkung. Werte außerhalb werden bei der Validierung abgelehnt.
+Gilt nur für numerische Datentypen (Int, Real, etc.).</value></data>
+  <data name="ConfigEditor_Help_AllowedValues" xml:space="preserve"><value>Kommagetrennte Liste erlaubter Werte. Wenn gesetzt, werden nur diese exakten Werte akzeptiert.
+Beispiel: 0, 1, 2 oder true, false</value></data>
+  <data name="ConfigEditor_Help_CommentTemplate" xml:space="preserve"><value>Vorlage für automatisch generierte Element-Kommentare. Verfügbare Platzhalter:
+  {db} — DB-Name
+  {parent} — Name des übergeordneten Elements
+  {self} — Name des aktuellen Elements
+  {memberName} — Wert eines anderen Elements
+  {memberName.comment} — Kommentar eines anderen Elements
+  {memberName.name} — Name eines anderen Elements</value></data>
+  <data name="ConfigEditor_Help_CommentLanguage" xml:space="preserve"><value>TIA Portal Kommentarsprach-Code für den generierten Kommentar.
+Beispiele: en-US, de-DE. Leer lassen für Standardsprache.</value></data>
+  <data name="ConfigEditor_Help_Exclude" xml:space="preserve"><value>Wenn aktiviert, werden Elemente die dieser Regel entsprechen aus der Massenänderungs-Ansicht ausgeblendet. Ein Banner zeigt an, wie viele Elemente aktuell ausgeblendet sind, und führt zur Regel-Konfiguration. Verwenden für interne/strukturelle Elemente die keine nutzerrelevanten Parameter sind.</value></data>
+  <data name="Column_File" xml:space="preserve"><value>Datei</value></data>
+  <data name="Column_Source" xml:space="preserve"><value>Quelle</value></data>
+  <data name="Column_Type" xml:space="preserve"><value>Typ</value></data>
+  <data name="Column_Status" xml:space="preserve"><value>Status</value></data>
+  <!-- DiffPreviewDialog -->
+  <data name="DiffPreview_ApplyChanges" xml:space="preserve"><value>Änderungen übernehmen</value></data>
+  <data name="Column_Path" xml:space="preserve"><value>Pfad</value></data>
+  <data name="Column_Old" xml:space="preserve"><value>Alt</value></data>
+  <data name="Column_New" xml:space="preserve"><value>Neu</value></data>
+  <!-- Typ-Validierung -->
+  <data name="TypeValidation_Bool" xml:space="preserve"><value>Ungültiger Bool-Wert. Erwartet: true, false, 0 oder 1</value></data>
+  <data name="TypeValidation_Integer" xml:space="preserve"><value>Ungültiger {0}-Wert. Erwartet: Ganzzahl zwischen {1} und {2}</value></data>
+  <data name="TypeValidation_Float" xml:space="preserve"><value>Ungültiger {0}-Wert. Erwartet: Dezimalzahl (z.B. 3.14, -0.5, 1.0e3)</value></data>
+  <data name="TypeValidation_String" xml:space="preserve"><value>Ungültiger String-Wert. Muss in einfache Anführungszeichen eingeschlossen sein: 'Ihr Text'</value></data>
+  <data name="TypeValidation_Char" xml:space="preserve"><value>Ungültiger Char-Wert. Erwartet: einzelnes Zeichen in Anführungszeichen (z.B. 'A')</value></data>
+  <data name="TypeValidation_Time" xml:space="preserve"><value>Ungültiger {0}-Wert. Erwartetes Format: {1}</value></data>
+  <data name="TypeValidation_Date" xml:space="preserve"><value>Ungültiger Date-Wert. Erwartetes Format: D#2024-01-15</value></data>
+  <data name="TypeValidation_TimeOfDay" xml:space="preserve"><value>Ungültiger TimeOfDay-Wert. Erwartetes Format: TOD#12:30:00</value></data>
+  <data name="TypeValidation_DateTime" xml:space="preserve"><value>Ungültiger DateTime-Wert. Erwartetes Format: DT#2024-01-15-12:30:00</value></data>
+  <data name="ConfigEditor_Help_MinMaxDisabled" xml:space="preserve"><value>Min/Max-Einschränkungen sind nur für numerische Datentypen verfügbar (Int, Real, Byte, etc.).</value></data>
+  <!-- Baum auf-/zuklappen -->
+  <data name="Dialog_ExpandAll" xml:space="preserve"><value>Alle aufklappen</value></data>
+  <data name="Dialog_CollapseAll" xml:space="preserve"><value>Alle zuklappen</value></data>
+  <data name="Context_ExpandAllChildren" xml:space="preserve"><value>Alle Unterelemente aufklappen</value></data>
+  <data name="Context_CollapseAllChildren" xml:space="preserve"><value>Alle Unterelemente zuklappen</value></data>
+  <!-- Inkonsistente UDT Kompilier-Abfrage (#27) -->
+  <data name="Udt_InconsistentPromptTitle" xml:space="preserve"><value>BlockParam — Kompilierung erforderlich</value></data>
+  <data name="Udt_InconsistentPrompt" xml:space="preserve"><value>{0} UDT(s) können nicht exportiert werden, da sie inkonsistent sind:
+
+{1}
+
+Jetzt kompilieren? Andernfalls bleiben die Kommentare dieser UDT-Mitglieder in der Anzeige leer.</value></data>
+</root>

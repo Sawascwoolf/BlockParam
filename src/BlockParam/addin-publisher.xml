@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<PackageConfiguration xmlns="http://www.siemens.com/automation/Openness/AddIn/Publisher/V20">
+  <Author>Sawascwoolf</Author>
+  <Description>Edit Data Block start values and parameters in TIA Portal — single and in bulk</Description>
+  <AddInVersion>1.0.0</AddInVersion>
+  <Product>
+    <Name>BlockParam</Name>
+    <Id>BlockParam</Id>
+    <Version>0.14.5</Version>
+  </Product>
+  <FeatureAssembly>
+    <AssemblyInfo>
+      <Assembly>BlockParam.dll</Assembly>
+    </AssemblyInfo>
+  </FeatureAssembly>
+  <AdditionalAssemblies>
+    <AssemblyInfo><Assembly>Newtonsoft.Json.dll</Assembly></AssemblyInfo>
+    <AssemblyInfo><Assembly>Serilog.dll</Assembly></AssemblyInfo>
+    <AssemblyInfo><Assembly>Serilog.Sinks.File.dll</Assembly></AssemblyInfo>
+    <AssemblyInfo><Assembly>System.Diagnostics.DiagnosticSource.dll</Assembly></AssemblyInfo>
+    <AssemblyInfo><Assembly>Microsoft.Bcl.HashCode.dll</Assembly></AssemblyInfo>
+    <AssemblyInfo><Assembly>System.Buffers.dll</Assembly></AssemblyInfo>
+    <AssemblyInfo><Assembly>System.Memory.dll</Assembly></AssemblyInfo>
+    <AssemblyInfo><Assembly>System.Numerics.Vectors.dll</Assembly></AssemblyInfo>
+    <AssemblyInfo><Assembly>System.Runtime.CompilerServices.Unsafe.dll</Assembly></AssemblyInfo>
+  </AdditionalAssemblies>
+  <RequiredPermissions>
+    <TIAPermissions>
+      <TIA.ReadWrite/>
+    </TIAPermissions>
+    <UnrestrictedPermissions>
+      <System.UnrestrictedAccess>
+        <JustificationComment>Required for XML export/import, WPF dialog, and file system access</JustificationComment>
+      </System.UnrestrictedAccess>
+    </UnrestrictedPermissions>
+  </RequiredPermissions>
+</PackageConfiguration>

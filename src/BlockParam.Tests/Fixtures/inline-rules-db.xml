@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Document>
+  <DocumentInfo>
+    <Created>2024-01-01T00:00:00</Created>
+    <ExportSetting>WithDefaults</ExportSetting>
+  </DocumentInfo>
+  <SW.Blocks.GlobalDB ID="0">
+    <AttributeList>
+      <Interface>
+        <Sections xmlns="http://www.siemens.com/automation/Openness/SW/Interface/v5">
+          <Section Name="Static">
+            <Member Name="moduleId" Datatype="Int" Remanence="NonRetain" Accessibility="Public">
+              <StartValue>0</StartValue>
+              <Comment>
+                <MultiLanguageText Lang="en-GB">Module identifier {bp_varTable=MOD_}</MultiLanguageText>
+                <MultiLanguageText Lang="de-DE">Modul-ID</MultiLanguageText>
+              </Comment>
+            </Member>
+            <Member Name="temperature" Datatype="Real" Remanence="NonRetain" Accessibility="Public">
+              <StartValue>20.0</StartValue>
+              <Comment>
+                <MultiLanguageText Lang="en-GB">Process temperature {bp_min=0}{bp_max=100}</MultiLanguageText>
+              </Comment>
+            </Member>
+            <Member Name="enable" Datatype="Bool" Remanence="NonRetain" Accessibility="Public">
+              <StartValue>true</StartValue>
+              <Comment>
+                <MultiLanguageText Lang="en-GB">Plain comment, no rule</MultiLanguageText>
+              </Comment>
+            </Member>
+            <Member Name="debug" Datatype="Bool" Remanence="NonRetain" Accessibility="Public">
+              <StartValue>false</StartValue>
+              <Comment>
+                <MultiLanguageText Lang="en-GB">Hidden from bulk {bp_exclude=true}</MultiLanguageText>
+              </Comment>
+            </Member>
+          </Section>
+        </Sections>
+      </Interface>
+      <MemoryLayout>Optimized</MemoryLayout>
+      <Name>InlineRulesDB</Name>
+      <Number>1</Number>
+      <ProgrammingLanguage>DB</ProgrammingLanguage>
+    </AttributeList>
+  </SW.Blocks.GlobalDB>
+</Document>

@@ -1,0 +1,2541 @@
+using System.Collections.ObjectModel;
+using System.Diagnostics;
+using System.IO;
+using System.Linq;
+using System.Threading;
+using System.Windows;
+using System.Windows.Input;
+using System.Windows.Threading;
+using Serilog;
+using BlockParam.Config;
+using BlockParam.Licensing;
+using BlockParam.Localization;
+using BlockParam.Models;
+using BlockParam.Services;
+using BlockParam.SimaticML;
+
+namespace BlockParam.UI;
+
+/// <summary>
+/// Main ViewModel for the BulkChange dialog.
+/// Uses a flat list (via FlatTreeManager) for proper column alignment in ListView/GridView.
+/// </summary>
+public class BulkChangeViewModel : ViewModelBase
+{
+    private static readonly ILogger Log = Serilog.Log.Logger;
+
+    private readonly HierarchyAnalyzer _analyzer;
+    private readonly BulkChangeService _bulkChangeService;
+    private readonly IUsageTracker _usageTracker;
+    private readonly ConfigLoader _configLoader;
+    private readonly Action<string>? _onApply;
+    private readonly Func<string>? _onBackup;   // callback to create backup, returns backup path
+    private readonly Action<string>? _onRestore; // callback to restore from backup path
+    private readonly FlatTreeManager _flatTreeManager = new();
+    private readonly SimaticMLWriter _writer = new();
+    private readonly MemberSearchService _searchService = new();
+    private readonly IMessageBoxService _messageBox;
+    private readonly Action? _onRefreshTagTables;
+    private readonly string? _tagTableDir;
+    private readonly Action? _onRefreshUdtTypes;
+    private readonly string? _udtDir;
+    private UdtSetPointResolver? _udtResolver;
+    private UdtCommentResolver? _commentResolver;
+    private AutocompleteProvider? _autocompleteProvider;
+    private TagTableCache? _tagTableCache;
+
+    private DataBlockInfo _dataBlockInfo;
+    private MemberNodeViewModel? _selectedFlatMember;
+    private ScopeLevel? _selectedScope;
+    private string _newValue = "";
+    private readonly HashSet<string> _manualSelectedPaths = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _bulkErrorPaths = new(StringComparer.Ordinal);
+    // True once the user has typed in the NewValue textbox. Prefills from the
+    // current selection are skipped while this is true, so user-entered input
+    // isn't clobbered by selection changes.
+    private bool _newValueTouched;
+    private GlobSuggestionProvider? _suggestionProvider;
+    private IReadOnlyList<AutocompleteSuggestion> _suggestions = Array.Empty<AutocompleteSuggestion>();
+    private IReadOnlyList<AutocompleteSuggestion> _filteredSuggestions = Array.Empty<AutocompleteSuggestion>();
+    private string _statusText = "";
+    private string _validationError = "";
+    private string _constraintInfo = "";
+    private string _searchQuery = "";
+    private int _searchHitCount;
+    private Timer? _searchDebounceTimer;
+    private Timer? _valueDebounceTimer;
+    private int _hiddenByRuleCount;
+    private bool _showSetpointsOnly;
+    private bool _showConstants;
+    private bool _constantsForced;
+    private string _tagTableAge = "";
+    private bool _isRefreshing;
+    private bool _suppressSuggestions;
+    private bool _lastApplySucceeded;
+    private bool _hasPendingChanges;
+    private bool _isInspectorCollapsed;
+    private bool _isBulkEditExpanded = true;
+    private bool _isBulkPreviewExpanded = true;
+    private bool _isPendingExpanded = true;
+    private string _currentXml;
+    private readonly IReadOnlyList<string> _projectLanguages;
+    private readonly CommentLanguagePolicy _commentLanguagePolicy;
+    private readonly Dispatcher _dispatcher;
+    private readonly ILicenseService? _licenseService;
+
+    public BulkChangeViewModel(
+        DataBlockInfo dataBlockInfo,
+        string currentXml,
+        HierarchyAnalyzer analyzer,
+        BulkChangeService bulkChangeService,
+        IUsageTracker usageTracker,
+        ConfigLoader configLoader,
+        Action<string>? onApply = null,
+        Func<string>? onBackup = null,
+        Action<string>? onRestore = null,
+        IMessageBoxService? messageBox = null,
+        TagTableCache? tagTableCache = null,
+        Action? onRefreshTagTables = null,
+        string? tagTableDir = null,
+        IReadOnlyList<string>? projectLanguages = null,
+        ILicenseService? licenseService = null,
+        Action? onRefreshUdtTypes = null,
+        string? udtDir = null,
+        UdtSetPointResolver? udtResolver = null,
+        UdtCommentResolver? commentResolver = null,
+        string? editingLanguage = null,
+        string? referenceLanguage = null)
+    {
+        _dispatcher = Dispatcher.CurrentDispatcher;
+        _projectLanguages = projectLanguages is { Count: > 0 } ? projectLanguages : new[] { "en-GB" };
+        _commentLanguagePolicy = new CommentLanguagePolicy(editingLanguage, referenceLanguage, _projectLanguages);
+        _dataBlockInfo = dataBlockInfo;
+        _currentXml = currentXml;
+        _analyzer = analyzer;
+        _bulkChangeService = bulkChangeService;
+        _usageTracker = usageTracker;
+        _configLoader = configLoader;
+        _onApply = onApply;
+        _onBackup = onBackup;
+        _onRestore = onRestore;
+        _messageBox = messageBox ?? new WpfMessageBoxService();
+        _tagTableCache = tagTableCache;
+        _onRefreshTagTables = onRefreshTagTables;
+        _tagTableDir = tagTableDir;
+        _onRefreshUdtTypes = onRefreshUdtTypes;
+        _udtDir = udtDir;
+        _udtResolver = udtResolver;
+        _commentResolver = commentResolver;
+        _licenseService = licenseService;
+        _autocompleteProvider = tagTableCache != null
+            ? new AutocompleteProvider(configLoader, tagTableCache)
+            : null;
+
+        UpdateTagTableAge();
+
+        Log.Information("BulkChangeViewModel created: TagTableCache={HasCache}, AutocompleteProvider={HasProvider}, ConfigPath={ConfigExists}",
+            tagTableCache != null, _autocompleteProvider != null, configLoader.GetConfig() != null);
+
+        {
+            var config = configLoader.GetConfig();
+            if (config != null)
+            {
+                Log.Information("Config loaded: {RuleCount} rules, rulesDirectory={RulesDir}",
+                    config.Rules.Count, config.RulesDirectory ?? "(none)");
+                foreach (var r in config.Rules)
+                    Log.Debug("  Rule: pathPattern={Pattern} datatype={Datatype} tagTable={TagTable}",
+                        r.PathPattern ?? "(none)", r.Datatype ?? "(none)",
+                        r.TagTableReference?.TableName ?? "(none)");
+            }
+        }
+
+        var version = typeof(BulkChangeViewModel).Assembly.GetName().Version;
+        Title = $"BlockParam v{version}: {dataBlockInfo.Name}";
+
+        InlineRuleExtractor.ApplyTo(configLoader.GetConfig(), dataBlockInfo);
+
+        BulkPreview = new ObservableCollection<BulkPreviewEntry>();
+        PendingEdits = new ObservableCollection<PendingEditEntry>();
+
+        // Build tree view models
+        RootMembers = new ObservableCollection<MemberNodeViewModel>();
+        foreach (var member in dataBlockInfo.Members)
+        {
+            var vm = new MemberNodeViewModel(member, null, _commentLanguagePolicy);
+            SubscribeStartValueEdited(vm);
+            RootMembers.Add(vm);
+        }
+
+        AvailableScopes = new ObservableCollection<ScopeLevel>();
+
+        SetPendingCommand = new RelayCommand(ExecuteSetPending, CanExecuteSetPending);
+        ApplyCommand = new RelayCommand(ExecuteApply, CanExecuteApply);
+        ApplyAndCloseCommand = new RelayCommand(ExecuteApplyAndClose, CanExecuteApply);
+        UpdateCommentsCommand = new RelayCommand(ExecuteUpdateComments, CanExecuteUpdateComments);
+        DiscardPendingCommand = new RelayCommand(ExecuteDiscardPending, () => PendingInlineEditCount > 0);
+
+        EditConfigCommand = new RelayCommand(ExecuteEditConfig);
+        RefreshConstantsCommand = new RelayCommand(ExecuteRefreshConstants);
+        EnterLicenseKeyCommand = new RelayCommand(ExecuteEnterLicenseKey);
+        UpgradeToProCommand = new RelayCommand(ExecuteUpgradeToPro);
+        ExpandAllCommand = new RelayCommand(ExecuteExpandAll);
+        CollapseAllCommand = new RelayCommand(ExecuteCollapseAll);
+        ToggleInspectorCommand = new RelayCommand(() => IsInspectorCollapsed = !IsInspectorCollapsed);
+        ToggleBulkEditCommand = new RelayCommand(() => IsBulkEditExpanded = !IsBulkEditExpanded);
+        ToggleBulkPreviewCommand = new RelayCommand(() => IsBulkPreviewExpanded = !IsBulkPreviewExpanded);
+        TogglePendingCommand = new RelayCommand(() => IsPendingExpanded = !IsPendingExpanded);
+        ClearManualSelectionCommand = new RelayCommand(ExecuteClearManualSelection,
+            () => _manualSelectedPaths.Count > 0);
+
+        if (_licenseService != null)
+        {
+            _licenseService.LicenseStateChanged += (_, __) =>
+                _dispatcher.BeginInvoke(new Action(() => UpdateUsageStatus()));
+        }
+
+        // Apply initial filter and build flat list
+        ApplyAllFilters();
+        RefreshFlatList();
+        UpdateUsageStatus();
+    }
+
+    // --- Properties ---
+
+    public string Title { get; }
+    public ObservableCollection<MemberNodeViewModel> RootMembers { get; }
+    public ObservableCollection<ScopeLevel> AvailableScopes { get; }
+
+    /// <summary>
+    /// Live preview of the rows that would be staged if the user clicked "Set".
+    /// Rebuilt reactively whenever target / scope / value changes — it does
+    /// NOT itself mutate any node. On Set, entries are transferred to
+    /// pending and the collection is cleared.
+    /// </summary>
+    public ObservableCollection<BulkPreviewEntry> BulkPreview { get; }
+
+    /// <summary>
+    /// Aggregated view of every node that currently has a pending inline edit.
+    /// Rebuilt whenever <c>PendingInlineEditCount</c> changes.
+    /// </summary>
+    public ObservableCollection<PendingEditEntry> PendingEdits { get; }
+
+    public bool HasBulkPreview => BulkPreview.Count > 0;
+    public int BulkPreviewCount => BulkPreview.Count;
+    public bool HasPendingEdits => PendingEdits.Count > 0;
+
+    /// <summary>Preview rows whose node already has a pending edit — they'd overwrite it on Set.</summary>
+    public int BulkPreviewConflictCount => BulkPreview.Count(e => e.HasPendingConflict);
+
+    public bool HasBulkPreviewConflict => BulkPreviewConflictCount > 0;
+
+    public string BulkPreviewConflictWarning
+    {
+        get
+        {
+            int n = BulkPreviewConflictCount;
+            if (n == 0) return "";
+            return n == 1
+                ? "\u26A0 1 overlap with pending edits \u2014 will be overwritten."
+                : $"\u26A0 {n} overlap with pending edits \u2014 will be overwritten.";
+        }
+    }
+
+    /// <summary>
+    /// Summary shown in the section header, e.g. "90 ⇢ 85" when all rows share
+    /// the same original value, or "{count} targets" otherwise.
+    /// </summary>
+    public string BulkPreviewSummary
+    {
+        get
+        {
+            if (BulkPreview.Count == 0) return "";
+            var firstOrig = BulkPreview[0].OriginalValue;
+            bool homogeneous = BulkPreview.All(e =>
+                string.Equals(e.OriginalValue, firstOrig, StringComparison.Ordinal));
+            if (homogeneous && !string.IsNullOrEmpty(firstOrig))
+                return $"{firstOrig} \u21E2 {_newValue}";
+            return $"{BulkPreview.Count} targets";
+        }
+    }
+
+    /// <summary>Flat list for the ListView (proper column alignment).</summary>
+    public ObservableCollection<MemberNodeViewModel> FlatMembers => _flatTreeManager.FlatList;
+
+    public event Action? RequestClose;
+
+    /// <summary>True if Apply was used but changes not yet committed to TIA.</summary>
+    public bool HasPendingChanges
+    {
+        get => _hasPendingChanges;
+        private set => SetProperty(ref _hasPendingChanges, value);
+    }
+
+    /// <summary>
+    /// Commits all pending changes to TIA Portal (import + compile).
+    /// Returns true on success, false if the user cancelled (e.g. declined the
+    /// compile prompt on an inconsistent block). Throws nothing for user-cancel;
+    /// genuine failures are shown via <see cref="IMessageBoxService"/> and return false.
+    /// </summary>
+    public bool CommitChanges()
+    {
+        if (!_hasPendingChanges) return true;
+        Log.Information("CommitChanges: importing modified XML for {Db}", _dataBlockInfo.Name);
+        try
+        {
+            _onApply?.Invoke(_currentXml);
+            HasPendingChanges = false;
+            Log.Information("CommitChanges: import succeeded for {Db}", _dataBlockInfo.Name);
+            return true;
+        }
+        catch (OperationCanceledException)
+        {
+            // User declined the compile prompt on an inconsistent block. Keep pending
+            // state so they can Apply again after compiling in TIA, or Discard to drop.
+            Log.Information("CommitChanges: apply cancelled by user for {Db}", _dataBlockInfo.Name);
+            StatusText = Res.Get("Status_Ready");
+            return false;
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "CommitChanges: TIA import failed for {Db}", _dataBlockInfo.Name);
+            HasPendingChanges = false;
+            _messageBox.ShowError(
+                $"TIA Portal import failed:\n\n{ex.InnerException?.Message ?? ex.Message}",
+                "Import Error");
+            return false;
+        }
+    }
+
+    /// <summary>Selected item in the flat ListView.</summary>
+    public MemberNodeViewModel? SelectedFlatMember
+    {
+        get => _selectedFlatMember;
+        set
+        {
+            if (_isRefreshing) return; // Don't re-trigger during flat list rebuild
+            if (SetProperty(ref _selectedFlatMember, value))
+            {
+                OnMemberSelected(value);
+                OnPropertyChanged(nameof(HasSelection));
+                OnPropertyChanged(nameof(SelectedMemberDisplay));
+            }
+        }
+    }
+
+    public ScopeLevel? SelectedScope
+    {
+        get => _selectedScope;
+        set
+        {
+            if (SetProperty(ref _selectedScope, value))
+            {
+                UpdateHighlighting();
+                OnPropertyChanged(nameof(HasScope));
+                OnPropertyChanged(nameof(CanEdit));
+                OnPropertyChanged(nameof(SetButtonText));
+            }
+        }
+    }
+
+    public string NewValue
+    {
+        get => _newValue;
+        set
+        {
+            if (SetProperty(ref _newValue, value))
+            {
+                // WPF two-way binding routes user keystrokes through this setter,
+                // so mark the textbox as touched. Programmatic prefills bypass the
+                // setter (write _newValue directly) to avoid triggering this.
+                _newValueTouched = true;
+                // Debounce expensive operations (filter 2000+ suggestions, highlight tree)
+                _valueDebounceTimer?.Dispose();
+                _valueDebounceTimer = new Timer(_ =>
+                {
+                    _dispatcher.BeginInvoke(new Action(() =>
+                    {
+                        ValidateValue();
+                        UpdateFilteredSuggestions();
+                        UpdateHighlighting();
+                    }));
+                }, null, 150, Timeout.Infinite);
+            }
+        }
+    }
+
+    public string SearchQuery
+    {
+        get => _searchQuery;
+        set
+        {
+            if (SetProperty(ref _searchQuery, value))
+            {
+                OnPropertyChanged(nameof(HasSearchQuery));
+                // Debounce search: WPF Binding.Delay uses DispatcherTimer which
+                // doesn't work reliably when hosted inside TIA Portal (WinForms host
+                // without Application.Current). Use Threading.Timer + Dispatcher instead.
+                _searchDebounceTimer?.Dispose();
+                _searchDebounceTimer = new Timer(_ =>
+                {
+                    _dispatcher.BeginInvoke(new Action(() =>
+                    {
+                        ApplyAllFilters();
+                        RefreshFlatList();
+                    }));
+                }, null, 200, Timeout.Infinite);
+            }
+        }
+    }
+
+    public int SearchHitCount
+    {
+        get => _searchHitCount;
+        private set => SetProperty(ref _searchHitCount, value);
+    }
+
+    public bool HasSearchQuery => !string.IsNullOrWhiteSpace(_searchQuery);
+
+    /// <summary>
+    /// Number of leaf members currently hidden by <c>excludeFromSetpoints</c> rules.
+    /// Rules are always applied — the banner surfaces their effect so users understand
+    /// why entries are missing and can open the Config Editor to review them (#23).
+    /// </summary>
+    public int HiddenByRuleCount
+    {
+        get => _hiddenByRuleCount;
+        private set
+        {
+            if (SetProperty(ref _hiddenByRuleCount, value))
+            {
+                OnPropertyChanged(nameof(ShowRuleFilterBanner));
+                OnPropertyChanged(nameof(RuleFilterBannerText));
+            }
+        }
+    }
+
+    /// <summary>True when at least one rule is currently hiding a leaf member.</summary>
+    public bool ShowRuleFilterBanner => _hiddenByRuleCount > 0;
+
+    /// <summary>Localized banner text: "Rule filter is hiding N member(s) — review rules in Config Editor".</summary>
+    public string RuleFilterBannerText => Res.Format("Dialog_RuleFilterBanner", _hiddenByRuleCount);
+
+    /// <summary>
+    /// When on, hide every leaf that is not a UDT-resolved SetPoint. AND-combined
+    /// with the always-on rule filter. If UDT types are missing when toggled on,
+    /// the VM transparently exports them from TIA Portal and re-parses the DB.
+    /// </summary>
+    public bool ShowSetpointsOnly
+    {
+        get => _showSetpointsOnly;
+        set
+        {
+            // On OFF→ON we revalidate the UDT cache against TIA's ModifiedDate stamps.
+            // The check is cheap when nothing changed; stale entries get re-exported.
+            if (value && !_showSetpointsOnly && _onRefreshUdtTypes != null)
+                TryRefreshUdtCache();
+
+            if (SetProperty(ref _showSetpointsOnly, value))
+            {
+                ApplyAllFilters();
+                RefreshFlatList();
+            }
+        }
+    }
+
+    /// <summary>
+    /// The checkbox is enabled unless we are certain the filter cannot work —
+    /// i.e. the DB references UDTs that are not cached AND no refresh path is wired.
+    /// When a refresh callback exists, clicking triggers a fresh export automatically.
+    /// </summary>
+    public bool CanShowSetpointsOnly
+        => _dataBlockInfo.UnresolvedUdts.Count == 0 || _onRefreshUdtTypes != null;
+
+    /// <summary>Tooltip shown on the checkbox.</summary>
+    public string ShowSetpointsOnlyTooltip
+    {
+        get
+        {
+            if (_dataBlockInfo.UnresolvedUdts.Count == 0)
+                return "Only show members marked as SetPoint (Einstellwert) in the UDT type definition.";
+
+            if (_onRefreshUdtTypes != null)
+                return "Only show members marked as SetPoint. UDT types will be re-exported from TIA Portal when enabled.";
+
+            var missing = string.Join(", ", _dataBlockInfo.UnresolvedUdts);
+            return $"Disabled: UDT type definitions are missing ({missing}) and no PLC connection is available to export them.";
+        }
+    }
+
+
+    public string StatusText
+    {
+        get => _statusText;
+        set => SetProperty(ref _statusText, value);
+    }
+
+    public string ValidationError
+    {
+        get => _validationError;
+        set
+        {
+            SetProperty(ref _validationError, value);
+            OnPropertyChanged(nameof(HasValidationError));
+        }
+    }
+
+    public string ConstraintInfo
+    {
+        get => _constraintInfo;
+        set => SetProperty(ref _constraintInfo, value);
+    }
+
+    public string UsageStatusText { get; private set; } = "";
+
+    public bool HasSelection => _selectedFlatMember is { IsLeaf: true };
+    public bool HasScope => _selectedScope != null && !IsManualMode;
+    public bool HasValidationError => !string.IsNullOrEmpty(_validationError);
+    public string SetButtonText
+    {
+        get
+        {
+            if (IsManualMode)
+                return Res.Format("Dialog_SetManualCount", _manualSelectedPaths.Count);
+            return _selectedScope != null
+                ? $"Set {_selectedScope.MatchCount} in '{_selectedScope.AncestorName}'"
+                : "Set";
+        }
+    }
+
+    /// <summary>True when 2+ leaf members are manually selected (Ctrl+Click).</summary>
+    public bool IsManualMode => _manualSelectedPaths.Count >= 2;
+
+    /// <summary>Number of manually selected leaf members (includes ones hidden by filter).</summary>
+    public int ManualSelectionCount => _manualSelectedPaths.Count;
+
+    /// <summary>Read-only view of manually selected member paths (for code-behind rehydration).</summary>
+    public IReadOnlyCollection<string> ManualSelectedPaths => _manualSelectedPaths;
+
+    /// <summary>
+    /// Bulk panel is visible when the user can edit — either scope mode (single selection)
+    /// or manual mode (2+ selected).
+    /// </summary>
+    public bool CanEdit => HasScope || IsManualMode;
+
+    /// <summary>Summary text shown instead of the scope dropdown when in manual mode.</summary>
+    public string ManualSelectionSummary
+    {
+        get
+        {
+            if (!IsManualMode) return "";
+            var types = GetSelectedDatatypes();
+            if (types.Count == 1)
+                return Res.Format("Dialog_ManualSelectionSummary", _manualSelectedPaths.Count, types.First());
+            return Res.Format("Dialog_ManualSelectionMixed", _manualSelectedPaths.Count, types.Count);
+        }
+    }
+
+    /// <summary>True when all manually selected members share the same datatype.</summary>
+    public bool IsSelectionTypeHomogeneous
+    {
+        get
+        {
+            if (!IsManualMode) return true;
+            return GetSelectedDatatypes().Count == 1;
+        }
+    }
+
+    public string SelectedMemberDisplay
+    {
+        get
+        {
+            if (IsManualMode) return ManualSelectionSummary;
+            return _selectedFlatMember is { IsLeaf: true }
+                ? Res.Format("Selection_MemberDisplay", _selectedFlatMember.Name, _selectedFlatMember.Datatype)
+                : Res.Get("Selection_ClickToSelect");
+        }
+    }
+
+    public ICommand SetPendingCommand { get; }
+    public ICommand ApplyCommand { get; }
+    public ICommand ApplyAndCloseCommand { get; }
+    public ICommand UpdateCommentsCommand { get; }
+    public ICommand DiscardPendingCommand { get; }
+
+    public ICommand EditConfigCommand { get; }
+    public ICommand EnterLicenseKeyCommand { get; }
+    public ICommand UpgradeToProCommand { get; }
+    public ICommand ExpandAllCommand { get; }
+    public ICommand CollapseAllCommand { get; }
+    public ICommand ClearManualSelectionCommand { get; }
+    public ICommand ToggleInspectorCommand { get; }
+
+    public bool IsInspectorCollapsed
+    {
+        get => _isInspectorCollapsed;
+        set
+        {
+            if (_isInspectorCollapsed == value) return;
+            _isInspectorCollapsed = value;
+            OnPropertyChanged(nameof(IsInspectorCollapsed));
+            OnPropertyChanged(nameof(IsInspectorExpanded));
+        }
+    }
+
+    public bool IsInspectorExpanded => !_isInspectorCollapsed;
+
+    public bool IsBulkEditExpanded
+    {
+        get => _isBulkEditExpanded;
+        set { if (_isBulkEditExpanded != value) { _isBulkEditExpanded = value; OnPropertyChanged(nameof(IsBulkEditExpanded)); } }
+    }
+
+    public bool IsBulkPreviewExpanded
+    {
+        get => _isBulkPreviewExpanded;
+        set { if (_isBulkPreviewExpanded != value) { _isBulkPreviewExpanded = value; OnPropertyChanged(nameof(IsBulkPreviewExpanded)); } }
+    }
+
+    public bool IsPendingExpanded
+    {
+        get => _isPendingExpanded;
+        set { if (_isPendingExpanded != value) { _isPendingExpanded = value; OnPropertyChanged(nameof(IsPendingExpanded)); } }
+    }
+
+    public ICommand ToggleBulkEditCommand { get; }
+    public ICommand ToggleBulkPreviewCommand { get; }
+    public ICommand TogglePendingCommand { get; }
+
+    /// <summary>
+    /// Raised after the flat list has been refreshed so the view can rehydrate
+    /// the ListView's multi-selection from <see cref="ManualSelectedPaths"/>.
+    /// </summary>
+    public event Action? FlatListRefreshed;
+
+    public string LicenseTierText { get; private set; } = "";
+
+    /// <summary>
+    /// Show the license dialog opener whenever a license service is available — users need
+    /// access even when Pro (to view status, remove / re-activate on a new machine, etc.).
+    /// </summary>
+    public bool ShowLicenseKeyButton => _licenseService != null;
+
+    /// <summary>Label on the license dialog opener — adapts to tier.</summary>
+    public string LicenseKeyButtonText =>
+        _licenseService?.IsProActive == true
+            ? Res.Get("License_ManageKey")
+            : Res.Get("License_EnterKey");
+    public bool IsLimitReached => _usageTracker.GetStatus().IsLimitReached
+                               || _usageTracker.GetInlineStatus().IsLimitReached;
+
+    /// <summary>Number of individual inline edits waiting to be applied.</summary>
+    public int PendingInlineEditCount => CountPendingInlineEdits(RootMembers);
+
+    /// <summary>Status text showing pending inline edits count.</summary>
+    public string? PendingStatusText
+    {
+        get
+        {
+            var count = PendingInlineEditCount;
+            return count > 0 ? $"{count} pending inline edit{(count == 1 ? "" : "s")}" : null;
+        }
+    }
+
+    /// <summary>Suggestion provider for autocomplete (null = no suggestions).</summary>
+    public GlobSuggestionProvider? SuggestionProvider
+    {
+        get => _suggestionProvider;
+        private set => SetProperty(ref _suggestionProvider, value);
+    }
+
+    /// <summary>All autocomplete suggestions for the current member.</summary>
+    public IReadOnlyList<AutocompleteSuggestion> Suggestions
+    {
+        get => _suggestions;
+        private set => SetProperty(ref _suggestions, value);
+    }
+
+    /// <summary>Filtered suggestions based on current text input.</summary>
+    public IReadOnlyList<AutocompleteSuggestion> FilteredSuggestions
+    {
+        get => _filteredSuggestions;
+        private set
+        {
+            if (SetProperty(ref _filteredSuggestions, value))
+                OnPropertyChanged(nameof(HasFilteredSuggestions));
+        }
+    }
+
+    public bool HasFilteredSuggestions => _filteredSuggestions.Count > 0;
+
+    /// <summary>Returns filtered suggestions for a specific member (used by inline autocomplete).</summary>
+    public IReadOnlyList<AutocompleteSuggestion> GetSuggestionsForMember(MemberNodeViewModel memberVm, string filter)
+    {
+        if (!memberVm.IsLeaf) return Array.Empty<AutocompleteSuggestion>();
+
+        EnsureTagTableCache();
+        if (_tagTableCache == null) return Array.Empty<AutocompleteSuggestion>();
+
+        var config = _configLoader.GetConfig();
+        var rule = config?.GetRule(memberVm.Model);
+
+        IReadOnlyList<AutocompleteSuggestion> all;
+        if (rule?.TagTableReference != null && _autocompleteProvider != null)
+            all = _autocompleteProvider.GetSuggestions(memberVm.Model, "");
+        else if (_showConstants)
+            all = _tagTableCache.GetTableNames()
+                .SelectMany(name => _tagTableCache.GetEntries(name))
+                .Select(e => new AutocompleteSuggestion(e.Value, e.Name, e.Comment))
+                .ToList();
+        else
+            return Array.Empty<AutocompleteSuggestion>();
+
+        if (string.IsNullOrWhiteSpace(filter))
+            return all;
+
+        var terms = filter.Trim().Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+        return all.Where(s => terms.All(term =>
+            s.DisplayName.IndexOf(term, StringComparison.OrdinalIgnoreCase) >= 0 ||
+            s.Value.IndexOf(term, StringComparison.OrdinalIgnoreCase) >= 0 ||
+            (s.Comment != null && s.Comment.IndexOf(term, StringComparison.OrdinalIgnoreCase) >= 0)))
+            .ToList();
+    }
+
+    /// <summary>Accept a suggestion: set value and close the list.</summary>
+    public void AcceptSuggestion(string value)
+    {
+        _newValue = value; // Set backing field to avoid re-triggering filter
+        OnPropertyChanged(nameof(NewValue));
+        ValidateValue();
+        FilteredSuggestions = Array.Empty<AutocompleteSuggestion>();
+        UpdateHighlighting();
+    }
+
+    /// <summary>Show suggestions filtered by current text (always opens).</summary>
+    public void ShowAllSuggestions()
+    {
+        if (_suggestions.Count == 0) return;
+
+        var filter = _newValue?.Trim() ?? "";
+        if (string.IsNullOrEmpty(filter))
+        {
+            FilteredSuggestions = _suggestions.ToList();
+            return;
+        }
+
+        var terms = filter.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+        FilteredSuggestions = _suggestions
+            .Where(s => terms.All(term =>
+                s.DisplayName.IndexOf(term, StringComparison.OrdinalIgnoreCase) >= 0 ||
+                s.Value.IndexOf(term, StringComparison.OrdinalIgnoreCase) >= 0 ||
+                (s.Comment != null && s.Comment.IndexOf(term, StringComparison.OrdinalIgnoreCase) >= 0)))
+            .ToList();
+    }
+
+    /// <summary>Toggle: show filtered suggestions or hide them.</summary>
+    public void ToggleAllSuggestions()
+    {
+        if (_filteredSuggestions.Count > 0)
+        {
+            FilteredSuggestions = Array.Empty<AutocompleteSuggestion>();
+        }
+        else
+        {
+            // Apply current text as filter (empty = show all)
+            var filter = _newValue?.Trim() ?? "";
+            if (string.IsNullOrEmpty(filter))
+            {
+                FilteredSuggestions = _suggestions.ToList();
+                return;
+            }
+
+            var terms = filter.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+            FilteredSuggestions = _suggestions
+                .Where(s => terms.All(term =>
+                    s.DisplayName.IndexOf(term, StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    s.Value.IndexOf(term, StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    (s.Comment != null && s.Comment.IndexOf(term, StringComparison.OrdinalIgnoreCase) >= 0)))
+                .ToList();
+        }
+    }
+
+    /// <summary>Whether to show constant suggestions. Forced on when a rule with tagTableReference matches.</summary>
+    public bool ShowConstants
+    {
+        get => _showConstants;
+        set
+        {
+            if (!_constantsForced || value) // Can't uncheck when forced
+            {
+                if (SetProperty(ref _showConstants, value))
+                    ReloadSuggestions();
+            }
+        }
+    }
+
+    /// <summary>True when a config rule forces constants on (checkbox disabled).</summary>
+    public bool ConstantsForced
+    {
+        get => _constantsForced;
+        private set => SetProperty(ref _constantsForced, value);
+    }
+
+    /// <summary>Display string showing how old the tag table data is.</summary>
+    public string TagTableAge
+    {
+        get => _tagTableAge;
+        private set => SetProperty(ref _tagTableAge, value);
+    }
+
+    public ICommand RefreshConstantsCommand { get; }
+
+    public bool HasCommentConfig =>
+        _configLoader.GetConfig()?.Rules.Any(r => !string.IsNullOrEmpty(r.CommentTemplate)) == true;
+
+    // --- Public methods (called from code-behind) ---
+
+    /// <summary>
+    /// Toggles expand/collapse for a node and refreshes the flat list.
+    /// </summary>
+    public void ToggleExpand(MemberNodeViewModel node)
+    {
+        _flatTreeManager.ToggleExpand(node, RootMembers);
+    }
+
+    // --- Private methods ---
+
+    /// <summary>
+    /// True while <see cref="RefreshFlatList"/> is rebuilding <see cref="FlatMembers"/>.
+    /// The view checks this in its SelectionChanged handler to ignore the ghost
+    /// "removed items" events WPF raises when the ItemsSource is mutated.
+    /// </summary>
+    public bool IsRefreshing => _isRefreshing;
+
+    /// <summary>
+    /// For scripted scenarios (DevLauncher screenshot capture, future UI tests):
+    /// cancels the 150ms debounce on <see cref="NewValue"/> and runs highlighting
+    /// synchronously so the next render frame reflects the staged state.
+    /// Not used by the interactive UI.
+    /// </summary>
+    internal void FlushPendingHighlighting()
+    {
+        _valueDebounceTimer?.Dispose();
+        _valueDebounceTimer = null;
+        ValidateValue();
+        UpdateFilteredSuggestions();
+        UpdateHighlighting();
+    }
+
+    /// <summary>
+    /// Scripted-only companion to <see cref="FlushPendingHighlighting"/>:
+    /// cancels the 200ms debounce on <see cref="SearchQuery"/> and runs the
+    /// filter + flat-list refresh synchronously.
+    /// </summary>
+    internal void FlushPendingSearch()
+    {
+        _searchDebounceTimer?.Dispose();
+        _searchDebounceTimer = null;
+        ApplyAllFilters();
+        RefreshFlatList();
+    }
+
+    /// <summary>
+    /// Scripted-only: clears <see cref="NewValue"/> and the internal
+    /// user-touched flag so a subsequent member selection can prefill the
+    /// field via the normal interactive path. The public setter would set
+    /// the touched flag to true, which suppresses prefill.
+    /// </summary>
+    internal void ResetNewValueSilent()
+    {
+        _newValue = "";
+        _newValueTouched = false;
+        OnPropertyChanged(nameof(NewValue));
+    }
+
+    public void RefreshFlatList()
+    {
+        if (_isRefreshing) return;
+        _isRefreshing = true;
+        try
+        {
+            var selectedPath = _selectedFlatMember?.Path;
+            _flatTreeManager.Refresh(RootMembers);
+
+            // Restore selection in the new flat list (same node by path)
+            if (selectedPath != null)
+            {
+                var restored = _flatTreeManager.FlatList
+                    .FirstOrDefault(m => m.Path == selectedPath);
+                // Set backing field directly to avoid re-triggering OnMemberSelected
+                _selectedFlatMember = restored;
+                OnPropertyChanged(nameof(SelectedFlatMember));
+                OnPropertyChanged(nameof(HasSelection));
+                OnPropertyChanged(nameof(SelectedMemberDisplay));
+            }
+
+            Log.Debug("VM.RefreshFlatList: flatCount={N} manualPaths={Set}",
+                _flatTreeManager.FlatList.Count, string.Join(",", _manualSelectedPaths));
+
+            // Rehydrate multi-selection while _isRefreshing is still true so that
+            // cascaded SelectedItem changes (e.g. from SelectedItems.Clear()) do
+            // NOT trigger OnMemberSelected → UpdateHighlighting → recursion.
+            FlatListRefreshed?.Invoke();
+        }
+        finally
+        {
+            _isRefreshing = false;
+        }
+    }
+
+    private void OnMemberSelected(MemberNodeViewModel? memberVm)
+    {
+        Log.Debug("VM.OnMemberSelected: member={Name} isLeaf={Leaf} IsManualMode={Manual} setCount={N}",
+            memberVm?.Name ?? "(null)", memberVm?.IsLeaf, IsManualMode, _manualSelectedPaths.Count);
+
+        AvailableScopes.Clear();
+        _selectedScope = null; // Set backing field to avoid triggering UpdateHighlighting twice
+        OnPropertyChanged(nameof(SelectedScope));
+        OnPropertyChanged(nameof(HasScope));
+        OnPropertyChanged(nameof(CanEdit));
+        ValidationError = "";
+        ConstraintInfo = "";
+        SuggestionProvider = null;
+        Suggestions = Array.Empty<AutocompleteSuggestion>();
+        FilteredSuggestions = Array.Empty<AutocompleteSuggestion>();
+
+        // In manual multi-select mode, scope analysis does not apply.
+        if (IsManualMode)
+        {
+            // Scope highlighting is already cleared by UpdateManualSelection when
+            // we entered manual mode. Do NOT call UpdateHighlighting/RefreshFlatList
+            // here: WPF may be mid-way through processing a Ctrl+Click, and mutating
+            // the flat list + re-rehydrating SelectedItems now causes WPF to
+            // reconcile against stale state and drop the wrong rows.
+            PrefillNewValueFromFeaturedMember(memberVm);
+            ValidateValue();
+            return;
+        }
+
+        if (memberVm == null || !memberVm.IsLeaf)
+        {
+            UpdateHighlighting();
+            // No selection: reset touched so the next click prefills cleanly.
+            _newValueTouched = false;
+            _newValue = "";
+            OnPropertyChanged(nameof(NewValue));
+            return;
+        }
+
+        // Pre-fill with current (or pending) value unless the user has typed.
+        PrefillNewValueFromFeaturedMember(memberVm);
+
+        Log.Debug("OnMemberSelected: {Name} Datatype={Datatype} Path={Path}",
+            memberVm.Name, memberVm.Datatype, memberVm.Model.Path);
+
+        // Determine if constants should be shown (forced by rule or user choice)
+        var acConfig = _configLoader.GetConfig();
+        var rule = acConfig?.GetRule(memberVm.Model);
+        var hasRuleWithTagTable = rule?.TagTableReference != null;
+
+        if (hasRuleWithTagTable)
+        {
+            ConstantsForced = true;
+            _showConstants = true; // Set backing field to avoid triggering ReloadSuggestions twice
+            OnPropertyChanged(nameof(ShowConstants));
+            Log.Debug("Constants forced by rule: tagTable={TagTable}", rule!.TagTableReference!.TableName);
+        }
+        else
+        {
+            ConstantsForced = false;
+            // Keep user's previous ShowConstants choice
+        }
+
+        ReloadSuggestions();
+
+        var result = _analyzer.Analyze(_dataBlockInfo, memberVm.Model);
+
+        if (!result.HasBulkOptions)
+        {
+            StatusText = Res.Get("Status_SingleOccurrence");
+            return;
+        }
+
+        foreach (var scope in result.Scopes.Reverse())
+            AvailableScopes.Add(scope);
+
+        if (AvailableScopes.Count > 0)
+            SelectedScope = AvailableScopes[0];
+
+        var config = _configLoader.GetConfig();
+        var constraint = config?.GetRule(memberVm.Model)?.Constraints;
+        if (constraint != null)
+        {
+            var parts = new List<string>();
+            if (constraint.HasMinMax)
+                parts.Add($"Range: {constraint.Min ?? "..."} — {constraint.Max ?? "..."}");
+            if (constraint.AllowedValues is { Count: > 0 })
+                parts.Add($"Allowed: {string.Join(", ", constraint.AllowedValues)}");
+            ConstraintInfo = string.Join(" | ", parts);
+        }
+
+        StatusText = "";
+
+        // Re-sync selection after flat list rebuilds during click processing
+        _dispatcher.BeginInvoke(new Action(() =>
+        {
+            if (memberVm != null && _selectedFlatMember != memberVm)
+            {
+                _selectedFlatMember = memberVm;
+                OnPropertyChanged(nameof(SelectedFlatMember));
+            }
+        }), System.Windows.Threading.DispatcherPriority.Input);
+    }
+
+    private void UpdateHighlighting()
+    {
+        foreach (var root in RootMembers)
+            root.ClearAffected();
+
+        // Clear all comment previews
+        foreach (var root in RootMembers)
+            ClearCommentPreviews(root);
+
+        // Re-expand search matches and pending edits after ClearAffected collapsed them
+        ReExpandNonAffected();
+
+        // Keep the selected member visible after ClearAffected collapsed smart-expands
+        _selectedFlatMember?.EnsureVisible();
+
+        if (_selectedScope == null && !IsManualMode)
+        {
+            ComputeBulkPreview();
+            RebuildPendingEdits();
+            RefreshFlatList();
+            return;
+        }
+
+        if (_selectedScope != null)
+        {
+            var affectedPaths = new HashSet<string>(
+                _selectedScope.MatchingMembers.Select(m => m.Path));
+
+            foreach (var root in RootMembers)
+                HighlightAffected(root, affectedPaths, _newValue);
+        }
+
+        // Generate comment previews if template is configured
+        UpdateCommentPreviews();
+
+        ComputeBulkPreview();
+        // Pending rows' conflict flag depends on BulkPreview — refresh after compute.
+        RebuildPendingEdits();
+        RefreshFlatList();
+    }
+
+    /// <summary>
+    /// Rebuilds <see cref="BulkPreview"/> from the current (scope or manual
+    /// selection) × NewValue state. Rows whose effective value already equals
+    /// NewValue are skipped. Rows whose effective value differs get an entry
+    /// with <c>HasPendingConflict = true</c> if they currently carry a pending
+    /// inline edit (that edit would be overwritten on Set).
+    /// Does NOT touch <see cref="PendingEdits"/> — callers that also need
+    /// pending refreshed should use <see cref="RefreshPendingAndPreview"/> or
+    /// call <see cref="RebuildPendingEdits"/> explicitly after this.
+    /// </summary>
+    private void ComputeBulkPreview()
+    {
+        bool wasNonEmpty = BulkPreview.Count > 0;
+        BulkPreview.Clear();
+
+        // No input → nothing to compute. Avoid walking scope members on every
+        // inline keystroke when the inspector isn't being driven at all.
+        bool hasInput = !string.IsNullOrEmpty(_newValue)
+                        && (IsManualMode || _selectedScope != null);
+        if (hasInput)
+        {
+            if (IsManualMode)
+            {
+                foreach (var path in _manualSelectedPaths)
+                {
+                    var node = FindNodeByPath(path);
+                    if (node == null || !node.IsLeaf) continue;
+                    TryAddPreviewEntry(node);
+                }
+            }
+            else if (_selectedScope != null)
+            {
+                foreach (var m in _selectedScope.MatchingMembers)
+                {
+                    var node = FindNodeByPath(m.Path);
+                    if (node == null || !node.IsLeaf) continue;
+                    TryAddPreviewEntry(node);
+                }
+            }
+        }
+
+        // Only raise bindings when the result might actually have changed.
+        if (wasNonEmpty || BulkPreview.Count > 0)
+        {
+            OnPropertyChanged(nameof(HasBulkPreview));
+            OnPropertyChanged(nameof(BulkPreviewCount));
+            OnPropertyChanged(nameof(BulkPreviewSummary));
+            OnPropertyChanged(nameof(BulkPreviewConflictCount));
+            OnPropertyChanged(nameof(HasBulkPreviewConflict));
+            OnPropertyChanged(nameof(BulkPreviewConflictWarning));
+        }
+    }
+
+    private void TryAddPreviewEntry(MemberNodeViewModel node)
+    {
+        var effective = node.IsPendingInlineEdit
+            ? (node.EditableStartValue ?? node.StartValue ?? "")
+            : (node.StartValue ?? "");
+        if (string.Equals(effective, _newValue, StringComparison.OrdinalIgnoreCase))
+            return;
+        BulkPreview.Add(new BulkPreviewEntry(
+            node,
+            node.StartValue ?? "",
+            _newValue,
+            node.IsPendingInlineEdit));
+    }
+
+    /// <summary>
+    /// Refreshes BOTH the bulk preview and the pending edits queue plus the
+    /// associated pending-count / status notifications. Use after any change
+    /// that could shift which nodes are pending OR which rows the preview
+    /// would overwrite — the two sides are coupled (preview conflict flags
+    /// depend on pending state, pending overwrite flags depend on preview).
+    /// Call order matters: preview first so <c>RebuildPendingEdits</c> can
+    /// read the just-built BulkPreview paths.
+    /// </summary>
+    private void RefreshPendingAndPreview()
+    {
+        OnPropertyChanged(nameof(PendingInlineEditCount));
+        OnPropertyChanged(nameof(PendingStatusText));
+        ComputeBulkPreview();
+        RebuildPendingEdits();
+    }
+
+    /// <summary>
+    /// Rebuilds <see cref="PendingEdits"/> from the current tree state.
+    /// Call whenever <c>PendingInlineEditCount</c> is expected to have changed.
+    /// </summary>
+    private void RebuildPendingEdits()
+    {
+        PendingEdits.Clear();
+        var bulkPaths = BulkPreview.Count > 0
+            ? new HashSet<string>(BulkPreview.Select(e => e.Path), StringComparer.Ordinal)
+            : null;
+        CollectPendingEntries(RootMembers, bulkPaths);
+        OnPropertyChanged(nameof(HasPendingEdits));
+    }
+
+    private void CollectPendingEntries(IEnumerable<MemberNodeViewModel> nodes,
+        HashSet<string>? bulkPaths)
+    {
+        foreach (var node in nodes)
+        {
+            if (node.IsPendingInlineEdit)
+            {
+                bool overwritten = bulkPaths != null && bulkPaths.Contains(node.Path);
+                PendingEdits.Add(new PendingEditEntry(
+                    node,
+                    node.StartValue ?? "",
+                    node.PendingValue ?? "",
+                    willBeOverwrittenByBulk: overwritten));
+            }
+            CollectPendingEntries(node.Children, bulkPaths);
+        }
+    }
+
+    /// <summary>
+    /// Undoes a single pending edit (per-row ↶ in the pending queue).
+    /// </summary>
+    public void UndoPendingEdit(PendingEditEntry entry)
+    {
+        if (entry?.Node == null) return;
+        entry.Node.ClearPending();
+        RefreshPendingAndPreview();
+        RefreshFlatList();
+    }
+
+    private static void ClearCommentPreviews(MemberNodeViewModel node)
+    {
+        node.PreviewComment = null;
+        foreach (var child in node.Children)
+            ClearCommentPreviews(child);
+    }
+
+    /// <summary>
+    /// Resolves the effective value for a MemberNode: pending value if edited, otherwise StartValue.
+    /// </summary>
+    private string? ResolvePendingValue(MemberNode model)
+    {
+        var vm = FindNodeByPath(model.Path);
+        if (vm != null && vm.IsPendingInlineEdit)
+            return vm.EditableStartValue;
+        return model.StartValue;
+    }
+
+    private void UpdateCommentPreviews()
+    {
+        var config = _configLoader.GetConfig();
+        if (config == null || _selectedScope == null) return;
+        if (!config.Rules.Any(r => !string.IsNullOrEmpty(r.CommentTemplate))) return;
+
+        EnsureTagTableCache();
+        var generator = new TemplateCommentGenerator(config, _tagTableCache);
+        var previews = generator.GenerateForScope(
+            _dataBlockInfo, _selectedScope.MatchingMembers.ToList(),
+            valueResolver: ResolvePendingValue);
+
+        foreach (var (target, comment) in previews)
+        {
+            var vm = FindNodeByPath(target.Path);
+            if (vm != null)
+            {
+                vm.PreviewComment = comment;
+            }
+        }
+    }
+
+    private string ApplyCommentPreviews(string xml)
+    {
+        var commentTargets = new List<MemberNodeViewModel>();
+        CollectPendingCommentNodes(RootMembers, commentTargets);
+
+        if (commentTargets.Count == 0) return xml;
+
+        var config = _configLoader.GetConfig();
+        EnsureTagTableCache();
+        var templateGen = config != null ? new TemplateCommentGenerator(config, _tagTableCache) : null;
+
+        foreach (var node in commentTargets)
+        {
+            var rule = config?.GetCommentRule(node.Model);
+            if (rule?.CommentTemplate == null) continue;
+
+            foreach (var lang in _projectLanguages)
+            {
+                var comment = templateGen!.Generate(_dataBlockInfo, node.Model, rule.CommentTemplate, lang, ResolvePendingValue);
+                xml = _writer.ModifyComment(xml, node.Model, comment, lang);
+                Log.Information("Comment updated: {Path} → {Comment} ({Lang})", node.Model.Path, comment, lang);
+            }
+        }
+
+        return xml;
+    }
+
+    private static void CollectPendingCommentNodes(
+        IEnumerable<MemberNodeViewModel> nodes,
+        List<MemberNodeViewModel> result)
+    {
+        foreach (var node in nodes)
+        {
+            if (node.PreviewComment != null && node.CommentState != "unchanged")
+                result.Add(node);
+            CollectPendingCommentNodes(node.Children, result);
+        }
+    }
+
+    private MemberNodeViewModel? FindNodeByPath(string path)
+    {
+        foreach (var root in RootMembers)
+        {
+            var found = FindNodeByPathRecursive(root, path);
+            if (found != null) return found;
+        }
+        return null;
+    }
+
+    private static MemberNodeViewModel? FindNodeByPathRecursive(MemberNodeViewModel node, string path)
+    {
+        if (node.Path == path) return node;
+        foreach (var child in node.Children)
+        {
+            var found = FindNodeByPathRecursive(child, path);
+            if (found != null) return found;
+        }
+        return null;
+    }
+
+    private void HighlightAffected(MemberNodeViewModel node, HashSet<string> affectedPaths, string newValue)
+    {
+        if (affectedPaths.Contains(node.Path))
+        {
+            var effectiveValue = node.IsPendingInlineEdit
+                ? (node.EditableStartValue ?? node.StartValue ?? "")
+                : (node.StartValue ?? "");
+            var alreadyHasValue = !string.IsNullOrEmpty(newValue)
+                && string.Equals(effectiveValue, newValue, StringComparison.OrdinalIgnoreCase);
+
+            if (alreadyHasValue)
+                node.IsAlreadyMatching = true;
+            else
+                node.IsAffected = true;
+
+            node.EnsureVisible();
+            Log.Debug("Highlight: {Path} already={Already} affected={Affected} parentExpanded={ParentExp}",
+                node.Path, node.IsAlreadyMatching, node.IsAffected, node.Parent?.IsExpanded);
+        }
+
+        foreach (var child in node.Children)
+            HighlightAffected(child, affectedPaths, newValue);
+
+        node.RaisePropertyChanged(nameof(node.AffectedBadge));
+    }
+
+    private void ApplyAllFilters()
+    {
+        HashSet<string>? searchPaths = null;
+        if (!string.IsNullOrWhiteSpace(_searchQuery))
+        {
+            var searchResult = _searchService.Search(_dataBlockInfo, _searchQuery);
+            searchPaths = new HashSet<string>(searchResult.Matches.Select(m => m.Path));
+            SearchHitCount = searchResult.HitCount;
+        }
+        else
+        {
+            SearchHitCount = 0;
+        }
+
+        var config = _configLoader.GetConfig();
+        var excludeSet = BuildExcludeSet(config);
+
+        HiddenByRuleCount = excludeSet == null
+            ? 0
+            : _dataBlockInfo.AllMembers().Count(m => m.IsLeaf && excludeSet.Contains(m.Path));
+
+        foreach (var root in RootMembers)
+            root.ApplyFilter(ruleFilterActive: true, searchPaths, excludeSet, _showSetpointsOnly);
+
+        // Smart-expand parents of search matches
+        if (searchPaths != null)
+        {
+            foreach (var root in RootMembers)
+                SmartExpandSearchMatches(root, searchPaths);
+        }
+
+        // Smart-expand parents of pending inline edits so they stay visible
+        foreach (var root in RootMembers)
+            SmartExpandPendingEdits(root);
+    }
+
+    private void SmartExpandSearchMatches(MemberNodeViewModel node, HashSet<string> searchPaths)
+    {
+        if (searchPaths.Contains(node.Path))
+            node.EnsureVisible();
+
+        foreach (var child in node.Children)
+            SmartExpandSearchMatches(child, searchPaths);
+    }
+
+    private void SmartExpandPendingEdits(MemberNodeViewModel node)
+    {
+        if (node.IsPendingInlineEdit || node.HasInlineError)
+        {
+            Log.Debug("SmartExpandPending: {Path} IsVisible={Vis} ParentExpanded={ParExp}",
+                node.Path, node.IsVisible, node.Parent?.IsExpanded);
+            node.EnsureVisible();
+            Log.Debug("SmartExpandPending: after EnsureVisible: IsVisible={Vis} ParentExpanded={ParExp}",
+                node.IsVisible, node.Parent?.IsExpanded);
+        }
+
+        foreach (var child in node.Children)
+            SmartExpandPendingEdits(child);
+    }
+
+    /// <summary>
+    /// Re-expands search matches and pending edits.
+    /// Called after ClearAffected which collapses all smart-expanded nodes.
+    /// </summary>
+    private void ReExpandNonAffected()
+    {
+        if (!string.IsNullOrWhiteSpace(_searchQuery))
+        {
+            var searchResult = _searchService.Search(_dataBlockInfo, _searchQuery);
+            var searchPaths = new HashSet<string>(searchResult.Matches.Select(m => m.Path));
+            foreach (var root in RootMembers)
+                SmartExpandSearchMatches(root, searchPaths);
+        }
+
+        foreach (var root in RootMembers)
+            SmartExpandPendingEdits(root);
+    }
+
+    private void ValidateValue()
+    {
+        // Reset row highlights from any previous manual-mode validation before
+        // we re-evaluate. Pending inline edits keep their own error state.
+        ClearBulkRowHighlights();
+
+        // Manual mode: block on mixed types, otherwise validate each selected
+        // member against its own rule (different members may reference different
+        // tag tables / constraints).
+        if (IsManualMode)
+        {
+            if (!IsSelectionTypeHomogeneous)
+            {
+                ValidationError = Res.Get("Validation_MixedDatatypes");
+                return;
+            }
+
+            if (string.IsNullOrEmpty(_newValue))
+            {
+                ValidationError = "";
+                return;
+            }
+
+            string? firstError = null;
+            string? firstErrorName = null;
+            foreach (var path in _manualSelectedPaths)
+            {
+                var node = FindNodeByPath(path);
+                if (node == null || !node.IsLeaf) continue;
+                var memberError = ValidateValueForMember(node, _newValue);
+                if (memberError != null)
+                {
+                    // Paint the offending row red (unless it already has a
+                    // pending inline edit, which owns HasInlineError).
+                    if (!node.IsPendingInlineEdit)
+                    {
+                        node.HasInlineError = true;
+                        node.InlineErrorMessage = memberError;
+                        _bulkErrorPaths.Add(path);
+                    }
+                    if (firstError == null)
+                    {
+                        firstError = memberError;
+                        firstErrorName = node.Name;
+                    }
+                }
+            }
+
+            ValidationError = firstError != null ? $"{firstErrorName}: {firstError}" : "";
+            return;
+        }
+
+        if (string.IsNullOrEmpty(_newValue) || _selectedFlatMember == null)
+        {
+            ValidationError = "";
+            return;
+        }
+
+        ValidationError = ValidateValueForMember(_selectedFlatMember, _newValue) ?? "";
+    }
+
+    /// <summary>
+    /// Clears row-level error highlights set by manual-mode bulk validation,
+    /// without touching rows that have their own pending inline edit error.
+    /// </summary>
+    private void ClearBulkRowHighlights()
+    {
+        if (_bulkErrorPaths.Count == 0) return;
+        foreach (var path in _bulkErrorPaths)
+        {
+            var n = FindNodeByPath(path);
+            if (n != null && !n.IsPendingInlineEdit)
+            {
+                n.HasInlineError = false;
+                n.InlineErrorMessage = null;
+            }
+        }
+        _bulkErrorPaths.Clear();
+    }
+
+    /// <summary>
+    /// Runs the full validation pipeline for a single member: datatype format,
+    /// rule constraints (min/max, allowedValues), and requireTagTableValue.
+    /// Returns null on success, otherwise an error message.
+    /// </summary>
+    private string? ValidateValueForMember(MemberNodeViewModel memberVm, string value)
+    {
+        if (string.IsNullOrEmpty(value)) return null;
+
+        var config = _configLoader.GetConfig();
+        var rule = config?.GetRule(memberVm.Model);
+        var datatype = memberVm.Model.Datatype;
+        var constants = _tagTableCache?.GetAllConstantNames();
+
+        var typeError = TiaDataTypeValidator.Validate(value, datatype, constants);
+        if (typeError != null) return typeError;
+
+        var ruleError = rule?.Constraints?.Validate(value, datatype, constants);
+        if (ruleError != null) return ruleError;
+
+        if (rule?.Constraints?.RequireTagTableValue == true
+            && rule.TagTableReference != null
+            && _tagTableCache != null)
+        {
+            var entries = _tagTableCache.GetEntriesByPattern(rule.TagTableReference.TableName);
+            var isValid = entries.Any(e =>
+                string.Equals(e.Name, value, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(e.Value, value, StringComparison.OrdinalIgnoreCase));
+            if (!isValid)
+                return $"Value must be a constant from {rule.TagTableReference.TableName} tables.";
+        }
+
+        return null;
+    }
+
+    private void UpdateFilteredSuggestions()
+    {
+        if (_suggestions.Count == 0 || _suppressSuggestions)
+        {
+            FilteredSuggestions = Array.Empty<AutocompleteSuggestion>();
+            return;
+        }
+
+        var filter = _newValue?.Trim() ?? "";
+        if (string.IsNullOrEmpty(filter))
+        {
+            // Don't show list when input is empty
+            FilteredSuggestions = Array.Empty<AutocompleteSuggestion>();
+            return;
+        }
+
+        // Split by whitespace → AND: all terms must match somewhere
+        var terms = filter.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+
+        FilteredSuggestions = _suggestions
+            .Where(s => terms.All(term =>
+                s.DisplayName.IndexOf(term, StringComparison.OrdinalIgnoreCase) >= 0 ||
+                s.Value.IndexOf(term, StringComparison.OrdinalIgnoreCase) >= 0 ||
+                (s.Comment != null && s.Comment.IndexOf(term, StringComparison.OrdinalIgnoreCase) >= 0)))
+            .ToList();
+    }
+
+    /// <summary>
+    /// Ensures tag tables are exported and cached. Called lazily on first need.
+    /// </summary>
+    private void EnsureTagTableCache()
+    {
+        if (_tagTableCache != null) return;
+        if (_tagTableDir == null) return;
+
+        _onRefreshTagTables?.Invoke();
+        if (System.IO.Directory.Exists(_tagTableDir))
+        {
+            var tagReader = new XmlFileTagTableReader(_tagTableDir);
+            _tagTableCache = new TagTableCache(tagReader);
+            _autocompleteProvider = new AutocompleteProvider(_configLoader, _tagTableCache);
+            Log.Information("TagTableCache lazy-loaded: {Tables}",
+                string.Join(", ", _tagTableCache.GetTableNames()));
+        }
+        UpdateTagTableAge();
+    }
+
+    /// <summary>
+    /// Reloads suggestions for the currently selected member based on ShowConstants state.
+    /// </summary>
+    private void ReloadSuggestions()
+    {
+        Suggestions = Array.Empty<AutocompleteSuggestion>();
+        FilteredSuggestions = Array.Empty<AutocompleteSuggestion>();
+        SuggestionProvider = null;
+
+        if (_selectedFlatMember == null || !_selectedFlatMember.IsLeaf) return;
+        if (!_showConstants) return;
+
+        EnsureTagTableCache();
+        if (_tagTableCache == null) return;
+
+        var config = _configLoader.GetConfig();
+        var rule = config?.GetRule(_selectedFlatMember.Model);
+
+        IReadOnlyList<AutocompleteSuggestion> suggestions;
+        if (rule?.TagTableReference != null)
+        {
+            // Rule-based: only matching tables
+            suggestions = _autocompleteProvider?.GetSuggestions(_selectedFlatMember.Model, "")
+                ?? Array.Empty<AutocompleteSuggestion>();
+        }
+        else
+        {
+            // Generic: ALL constants from ALL tag tables
+            var allEntries = _tagTableCache.GetTableNames()
+                .SelectMany(name => _tagTableCache.GetEntries(name))
+                .Select(e => new AutocompleteSuggestion(e.Value, e.Name, e.Comment))
+                .ToList();
+            suggestions = allEntries;
+        }
+
+        if (suggestions.Count > 0)
+        {
+            SuggestionProvider = new GlobSuggestionProvider(suggestions);
+            Suggestions = suggestions;
+        }
+    }
+
+    /// <summary>
+    /// Re-export UDT type definitions from TIA Portal and re-parse the DB so the
+    /// SetPoint filter reflects the current project state. Called transparently
+    /// when the user toggles "Show setpoints only" on.
+    /// </summary>
+    private void TryRefreshUdtCache()
+    {
+        if (_onRefreshUdtTypes == null) return;
+        try
+        {
+            Log.Information("Refreshing UDT cache (triggered by SetPoint filter)...");
+            _onRefreshUdtTypes();
+
+            var resolver = new UdtSetPointResolver();
+            var commentResolver = new UdtCommentResolver();
+            if (_udtDir != null)
+            {
+                resolver.LoadFromDirectory(_udtDir);
+                commentResolver.LoadFromDirectory(_udtDir);
+            }
+            Log.Information("UDT cache refreshed: {TypeCount} types loaded", resolver.TypeCount);
+
+            RefreshTree(_currentXml, resolver, commentResolver);
+
+            OnPropertyChanged(nameof(CanShowSetpointsOnly));
+            OnPropertyChanged(nameof(ShowSetpointsOnlyTooltip));
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "UDT cache refresh failed");
+            _messageBox.ShowError(
+                $"Failed to refresh UDT cache:\n\n{ex.Message}",
+                "SetPoint Filter");
+        }
+    }
+
+    private void ExecuteRefreshConstants()
+    {
+        Log.Information("Refreshing tag tables...");
+        _onRefreshTagTables?.Invoke();
+
+        if (_tagTableDir != null && System.IO.Directory.Exists(_tagTableDir))
+        {
+            var tagReader = new XmlFileTagTableReader(_tagTableDir);
+            _tagTableCache = new TagTableCache(tagReader);
+            _autocompleteProvider = new AutocompleteProvider(_configLoader, _tagTableCache);
+            Log.Information("TagTableCache refreshed: {Tables}",
+                string.Join(", ", _tagTableCache.GetTableNames()));
+        }
+
+        UpdateTagTableAge();
+        ReloadSuggestions();
+    }
+
+    private void UpdateTagTableAge()
+    {
+        if (_tagTableDir == null || !System.IO.Directory.Exists(_tagTableDir))
+        {
+            TagTableAge = "no data";
+            return;
+        }
+        var files = System.IO.Directory.GetFiles(_tagTableDir, "*.xml");
+        if (files.Length == 0)
+        {
+            TagTableAge = "no data";
+            return;
+        }
+        var newest = files.Max(f => System.IO.File.GetLastWriteTime(f));
+        var age = DateTime.Now - newest;
+        TagTableAge = age.TotalMinutes < 1 ? "just now"
+            : age.TotalMinutes < 60 ? $"{(int)age.TotalMinutes}m ago"
+            : age.TotalHours < 24 ? $"{(int)age.TotalHours}h ago"
+            : $"{newest:yyyy-MM-dd HH:mm}";
+    }
+
+    private void ExecuteExpandAll()
+    {
+        FlatTreeManager.ExpandAll(RootMembers);
+        RefreshFlatList();
+    }
+
+    private void ExecuteCollapseAll()
+    {
+        FlatTreeManager.CollapseAll(RootMembers);
+        RefreshFlatList();
+    }
+
+    /// <summary>
+    /// Expands a node and all its descendants, then refreshes the flat list.
+    /// </summary>
+    public void ExpandAllChildren(MemberNodeViewModel node)
+    {
+        FlatTreeManager.ExpandAllChildren(node);
+        RefreshFlatList();
+    }
+
+    /// <summary>
+    /// Collapses a node and all its descendants, then refreshes the flat list.
+    /// </summary>
+    public void CollapseAllChildren(MemberNodeViewModel node)
+    {
+        FlatTreeManager.CollapseAllChildren(node);
+        RefreshFlatList();
+    }
+
+    /// <summary>Can stage bulk scope or manual-selection values as pending.</summary>
+    private bool CanExecuteSetPending()
+    {
+        if (string.IsNullOrWhiteSpace(_newValue)
+            || HasValidationError
+            || _usageTracker.GetStatus().IsLimitReached)
+            return false;
+
+        if (IsManualMode)
+        {
+            // Blocked when selection mixes datatypes.
+            if (!IsSelectionTypeHomogeneous) return false;
+
+            // At least one selected member must actually change.
+            return _manualSelectedPaths.Any(p =>
+            {
+                var node = FindNodeByPath(p);
+                if (node == null || !node.IsLeaf) return false;
+                var effective = node.IsPendingInlineEdit
+                    ? (node.EditableStartValue ?? node.StartValue ?? "")
+                    : (node.StartValue ?? "");
+                return !string.Equals(effective, _newValue, StringComparison.OrdinalIgnoreCase);
+            });
+        }
+
+        if (!HasSelection || !HasScope) return false;
+
+        // Disabled when all affected members already have the target value
+        if (_selectedScope != null)
+        {
+            var wouldChange = _selectedScope.MatchingMembers.Any(m =>
+            {
+                var node = FindNodeByPath(m.Path);
+                if (node == null) return true;
+                var effective = node.IsPendingInlineEdit
+                    ? (node.EditableStartValue ?? node.StartValue ?? "")
+                    : (node.StartValue ?? "");
+                return !string.Equals(effective, _newValue, StringComparison.OrdinalIgnoreCase);
+            });
+            if (!wouldChange) return false;
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Stages bulk scope or manual-selection values as pending on each affected node.
+    /// Does NOT modify XML — values turn yellow until Apply is clicked.
+    /// </summary>
+    private void ExecuteSetPending()
+    {
+        if (IsManualMode)
+        {
+            ExecuteSetPendingManual();
+            return;
+        }
+
+        if (_selectedScope == null) return;
+
+        if (!_usageTracker.RecordUsage())
+        {
+            StatusText = Res.Get("Status_LimitReached");
+            UpdateUsageStatus();
+            return;
+        }
+
+        var affectedPaths = new HashSet<string>(
+            _selectedScope.MatchingMembers.Select(m => m.Path));
+        int count = 0;
+
+        foreach (var root in RootMembers)
+            count += SetPendingOnNodes(root, affectedPaths, _newValue);
+
+        Log.Information("SetPending: {Count} values staged from scope '{Scope}'",
+            count, _selectedScope.AncestorName);
+
+        // Clear bulk highlighting (values are now pending/yellow)
+        foreach (var root in RootMembers)
+            root.ClearAffected();
+
+        // Bulk committed — treat NewValue as consumed so the next selection
+        // can prefill from its own member (otherwise the stale value stays).
+        _newValueTouched = false;
+
+        // RefreshPendingAndPreview re-runs ComputeBulkPreview which will clear
+        // the preview (every staged node now has PendingValue == _newValue, so
+        // TryAddPreviewEntry skips them) and raises all the right events.
+        RefreshPendingAndPreview();
+        StatusText = $"{count} values staged — click Apply to commit";
+        RefreshFlatList();
+    }
+
+    /// <summary>
+    /// Stages values as pending on each manually selected leaf member.
+    /// </summary>
+    private void ExecuteSetPendingManual()
+    {
+        if (!_usageTracker.RecordUsage())
+        {
+            StatusText = Res.Get("Status_LimitReached");
+            UpdateUsageStatus();
+            return;
+        }
+
+        int count = 0;
+        foreach (var path in _manualSelectedPaths)
+        {
+            var node = FindNodeByPath(path);
+            if (node == null || !node.IsLeaf) continue;
+            var startsEqualsNew = string.Equals(node.StartValue, _newValue, StringComparison.OrdinalIgnoreCase);
+            if (!startsEqualsNew)
+            {
+                if (!string.Equals(node.PendingValue, _newValue, StringComparison.OrdinalIgnoreCase))
+                {
+                    node.PendingValue = _newValue;
+                    count++;
+                }
+            }
+            else if (node.IsPendingInlineEdit)
+            {
+                node.ClearPending();
+                count++;
+            }
+        }
+
+        Log.Information("SetPending (manual): {Count} values staged from {Total} selected members",
+            count, _manualSelectedPaths.Count);
+
+        foreach (var root in RootMembers)
+            root.ClearAffected();
+
+        _newValueTouched = false;
+
+        RefreshPendingAndPreview();
+        StatusText = $"{count} values staged — click Apply to commit";
+        RefreshFlatList();
+    }
+
+    private static int SetPendingOnNodes(MemberNodeViewModel node,
+        HashSet<string> affectedPaths, string newValue)
+    {
+        int count = 0;
+        if (affectedPaths.Contains(node.Path) && node.IsLeaf)
+        {
+            var startsEqualsNew = string.Equals(node.StartValue, newValue, StringComparison.OrdinalIgnoreCase);
+            if (!startsEqualsNew)
+            {
+                // Target value differs from the original — stage it as pending.
+                // Overrides any prior pending (inline or bulk) for this node.
+                if (!string.Equals(node.PendingValue, newValue, StringComparison.OrdinalIgnoreCase))
+                {
+                    node.PendingValue = newValue;
+                    count++;
+                }
+            }
+            else if (node.IsPendingInlineEdit)
+            {
+                // Bulk targets the original value and there's a stale pending on this
+                // node — clear it so the node reverts to StartValue.
+                node.ClearPending();
+                count++;
+            }
+        }
+        foreach (var child in node.Children)
+            count += SetPendingOnNodes(child, affectedPaths, newValue);
+        return count;
+    }
+
+    /// <summary>Can apply when there are any pending changes (inline or bulk-staged).</summary>
+    private bool CanExecuteApply()
+    {
+        return (PendingInlineEditCount > 0 || HasPendingChanges)
+            && !HasInlineErrors;
+    }
+
+    public bool HasInlineErrors => HasInlineErrorsRecursive(RootMembers);
+
+    private static bool HasInlineErrorsRecursive(IEnumerable<MemberNodeViewModel> nodes)
+    {
+        foreach (var node in nodes)
+        {
+            if (node.HasInlineError) return true;
+            if (HasInlineErrorsRecursive(node.Children)) return true;
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Applies ALL pending changes (bulk-staged + inline edits) to XML.
+    /// </summary>
+    private void ExecuteApply()
+    {
+        _lastApplySucceeded = false;
+        var pendingEdits = CollectPendingInlineEdits(RootMembers);
+
+        if (pendingEdits.Count == 0 && !_hasPendingChanges)
+            return;
+
+        Log.Information("ExecuteApply: {Count} pending changes", pendingEdits.Count);
+
+        // Create backup before modification
+        string? backupPath = null;
+        try
+        {
+            backupPath = _onBackup?.Invoke();
+            Log.Debug("Backup created: {BackupPath}", backupPath);
+        }
+        catch (Exception backupEx)
+        {
+            Log.Warning(backupEx, "Backup failed, continuing without backup");
+        }
+
+        try
+        {
+            int totalChanged = 0;
+
+            // Apply all pending edits to XML
+            foreach (var (member, value) in pendingEdits)
+            {
+                var writeResult = _writer.ModifyStartValues(
+                    _currentXml, new[] { member }, value);
+
+                if (writeResult.IsSuccess)
+                {
+                    _currentXml = writeResult.ModifiedXml;
+                    totalChanged++;
+                    Log.Information("Applied: {Path} → {Value}", member.Path, value);
+                }
+                else
+                {
+                    Log.Warning("Failed for {Path}: {Errors}",
+                        member.Path, string.Join("; ", writeResult.Errors));
+                }
+            }
+
+            // Apply comment previews
+            _currentXml = ApplyCommentPreviews(_currentXml);
+
+            StatusText = Res.Format("Status_Changed", totalChanged, _dataBlockInfo.Name);
+            _lastApplySucceeded = true;
+
+            Log.Information("ExecuteApply: {Changed} values written to XML, importing to TIA...", totalChanged);
+
+            // Import to TIA Portal immediately
+            HasPendingChanges = true;
+            var committed = CommitChanges();
+            if (!committed)
+            {
+                // User cancelled (e.g. declined compile prompt on inconsistent block).
+                // Preserve pending edits in the tree so they can retry — skip RefreshTree
+                // because TIA still holds the pre-Apply state.
+                _lastApplySucceeded = false;
+                UpdateUsageStatus();
+                return;
+            }
+
+            // Re-export from TIA to get the canonical XML after import
+            RefreshTree(_currentXml);
+
+            // RefreshTree rebuilds RootMembers (all PendingValue=null), but computed
+            // properties only refresh their bindings when PropertyChanged is raised.
+            RefreshPendingAndPreview();
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "Apply threw exception");
+            HandleErrorWithRollback(ex, backupPath);
+        }
+
+        UpdateUsageStatus();
+    }
+
+    private void ExecuteApplyAndClose()
+    {
+        ExecuteApply();
+        if (_lastApplySucceeded)
+            RequestClose?.Invoke();
+    }
+
+    /// <summary>
+    /// F-031: Bulk-update all comments in the current scope using the configured
+    /// comment generation rules.
+    /// </summary>
+    private void ExecuteUpdateComments()
+    {
+        var config = _configLoader.GetConfig();
+        if (config == null || _selectedScope == null) return;
+        if (!config.Rules.Any(r => !string.IsNullOrEmpty(r.CommentTemplate))) return;
+
+        if (!_usageTracker.RecordUsage())
+        {
+            StatusText = Res.Get("Status_LimitReached");
+            UpdateUsageStatus();
+            return;
+        }
+
+        try
+        {
+            EnsureTagTableCache();
+            var templateGen = new TemplateCommentGenerator(config, _tagTableCache);
+            var scopeMembers = _selectedScope.MatchingMembers.ToList();
+
+            var modifiedXml = _currentXml;
+            int affectedCount = 0;
+            // Generate comments per language so {member.comment} resolves to the correct translation
+            foreach (var lang in _projectLanguages)
+            {
+                var targets = templateGen.GenerateForScope(_dataBlockInfo, scopeMembers, lang, ResolvePendingValue);
+                if (affectedCount == 0) affectedCount = targets.Count;
+                foreach (var (target, comment) in targets)
+                {
+                    modifiedXml = _writer.ModifyComment(modifiedXml, target, comment, lang);
+                }
+            }
+
+            _currentXml = modifiedXml;
+            StatusText = Res.Format("Comments_Updated", affectedCount, _dataBlockInfo.Name);
+            HasPendingChanges = true;
+            RefreshTree(modifiedXml);
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "UpdateComments failed");
+            StatusText = Res.Format("Status_ErrorComments", ex.Message);
+        }
+
+        UpdateUsageStatus();
+    }
+
+    private bool CanExecuteUpdateComments()
+    {
+        return HasScope && HasCommentConfig && !_usageTracker.GetStatus().IsLimitReached;
+    }
+
+    /// <summary>
+    /// F-072: When an error occurs during bulk operation, ask the user
+    /// Opens the Config Editor dialog. After save, reloads config and refreshes constraints.
+    /// </summary>
+    private void ExecuteEditConfig()
+    {
+        EnsureTagTableCache();
+        var vm = new ConfigEditorViewModel(
+            _configLoader,
+            _tagTableCache?.GetTableNames());
+        var dialog = new ConfigEditorDialog(vm);
+        dialog.ShowDialog();
+
+        // Reload config after editor closes (may have been saved)
+        _configLoader.Invalidate();
+        OnPropertyChanged(nameof(HasCommentConfig));
+        StatusText = Res.Get("Status_Ready");
+    }
+
+    /// <summary>
+    /// F-072: When an error occurs during bulk operation, ask the user
+    /// whether to rollback (restore backup) or keep the partial result.
+    /// </summary>
+    private void HandleErrorWithRollback(Exception ex, string? backupPath)
+    {
+        if (backupPath != null && _onRestore != null)
+        {
+            var message = Res.Format("Rollback_Question", ex.Message);
+
+            if (_messageBox.AskYesNo(message, Res.Get("Rollback_Title")))
+            {
+                try
+                {
+                    _onRestore(backupPath);
+                    Log.Information("Rollback completed from {BackupPath}", backupPath);
+                    StatusText = Res.Get("Rollback_Complete");
+                }
+                catch (Exception restoreEx)
+                {
+                    Log.Error(restoreEx, "Rollback failed from {BackupPath}", backupPath);
+                    StatusText = Res.Format("Rollback_Failed", restoreEx.Message);
+                }
+            }
+            else
+            {
+                Log.Warning("User chose to keep partial result after error: {Error}", ex.Message);
+            StatusText = Res.Format("Status_ErrorPartialKept", ex.Message);
+            }
+        }
+        else
+        {
+            Log.Error(ex, "Error with no backup available");
+            StatusText = Res.Format("Status_ErrorNoBackup", ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// Subscribes to StartValueEdited on a node and all its descendants.
+    /// </summary>
+    private void SubscribeStartValueEdited(MemberNodeViewModel node)
+    {
+        node.StartValueEdited += OnSingleValueEdited;
+        foreach (var child in node.Children)
+            SubscribeStartValueEdited(child);
+    }
+
+    /// <summary>
+    /// Handles direct inline editing of a single start value in the table.
+    /// Stores the value as pending (does NOT modify XML until Apply).
+    /// Validates constraints and updates the pending status display.
+    /// </summary>
+    private void OnSingleValueEdited(MemberNodeViewModel memberVm, string newValue)
+    {
+        if (string.IsNullOrEmpty(newValue))
+        {
+            // Inline revert: the setter already ran ClearPending on the node,
+            // but the aggregated pending queue / preview still need a refresh
+            // — otherwise the row lingers in the sidebar list.
+            RefreshPendingAndPreview();
+            return;
+        }
+
+        // Only count against inline limit if this is a new edit, not a correction of an existing pending value
+        if (!memberVm.IsPendingInlineEdit)
+        {
+            if (_usageTracker.GetInlineStatus().IsLimitReached)
+            {
+                StatusText = Res.Get("Status_InlineLimitReached");
+                UpdateUsageStatus();
+                return;
+            }
+
+            if (!_usageTracker.RecordInlineEdit())
+            {
+                StatusText = Res.Get("Status_InlineLimitReached");
+                UpdateUsageStatus();
+                return;
+            }
+        }
+
+        Log.Information("Inline edit pending: {Path} → {Value}", memberVm.Path, newValue);
+
+        // Validate constraints for the edited member
+        string? error = null;
+        var datatype = memberVm.Model.Datatype;
+        var config = _configLoader.GetConfig();
+        var rule = config?.GetRule(memberVm.Model);
+        var constants = _tagTableCache?.GetAllConstantNames();
+
+        // Data type format validation (even without a rule)
+        error = TiaDataTypeValidator.Validate(newValue, datatype, constants);
+
+        // Rule-based constraint validation with datatype
+        if (error == null && rule?.Constraints != null)
+            error = rule.Constraints.Validate(newValue, datatype, constants);
+
+        // Validate requireTagTableValue: value must be a known constant name or value
+        if (error == null && rule?.Constraints?.RequireTagTableValue == true
+            && rule.TagTableReference != null)
+        {
+            EnsureTagTableCache();
+            if (_tagTableCache != null)
+            {
+                var entries = _tagTableCache.GetEntriesByPattern(rule.TagTableReference.TableName);
+                var isValid = entries.Any(e =>
+                    string.Equals(e.Name, newValue, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(e.Value, newValue, StringComparison.OrdinalIgnoreCase));
+                if (!isValid)
+                    error = $"Value must be from tag table '{rule.TagTableReference.TableName}'";
+            }
+        }
+
+        memberVm.HasInlineError = error != null;
+        memberVm.InlineErrorMessage = error;
+        if (error != null)
+            StatusText = $"{memberVm.Name}: {error}";
+
+        // Ensure pending edit is visible (expand parents if collapsed)
+        // Only refresh if node wasn't already in the flat list (avoids destroying open popups)
+        if (!memberVm.IsVisible || memberVm.Parent is { IsExpanded: false })
+        {
+            memberVm.EnsureVisible();
+            RefreshFlatList();
+        }
+
+        RefreshPendingAndPreview();
+        OnPropertyChanged(nameof(HasInlineErrors));
+    }
+
+    /// <summary>
+    /// Builds a set of member paths excluded by rules with ExcludeFromSetpoints=true.
+    /// </summary>
+    private HashSet<string>? BuildExcludeSet(BulkChangeConfig? config)
+    {
+        if (config == null) return null;
+        var excludeRules = config.Rules.Where(r => r.ExcludeFromSetpoints && !string.IsNullOrEmpty(r.PathPattern)).ToList();
+        if (excludeRules.Count == 0) return null;
+
+        var excluded = new HashSet<string>();
+        foreach (var member in _dataBlockInfo.AllMembers())
+        {
+            foreach (var rule in excludeRules)
+            {
+                if (PathPatternMatcher.IsMatch(member, rule.PathPattern!))
+                {
+                    excluded.Add(member.Path);
+                    break;
+                }
+            }
+        }
+        return excluded.Count > 0 ? excluded : null;
+    }
+
+    /// <summary>Collects all nodes with pending inline edits as (MemberNode, newValue) pairs.</summary>
+    private static List<(MemberNode Member, string Value)> CollectPendingInlineEdits(
+        IEnumerable<MemberNodeViewModel> nodes)
+    {
+        var result = new List<(MemberNode, string)>();
+        foreach (var node in nodes)
+        {
+            if (node.PendingValue != null)
+                result.Add((node.Model, node.PendingValue));
+            result.AddRange(CollectPendingInlineEdits(node.Children));
+        }
+        return result;
+    }
+
+    /// <summary>Counts nodes with pending inline edits.</summary>
+    private static int CountPendingInlineEdits(IEnumerable<MemberNodeViewModel> nodes)
+    {
+        int count = 0;
+        foreach (var node in nodes)
+        {
+            if (node.PendingValue != null) count++;
+            count += CountPendingInlineEdits(node.Children);
+        }
+        return count;
+    }
+
+    /// <summary>Clears all pending inline edits without applying them.</summary>
+    private void ExecuteDiscardPending()
+    {
+        // #21: Confirm before nuking staged edits — a misclick used to silently wipe them all.
+        var count = PendingInlineEditCount;
+        if (count > 0)
+        {
+            var message = Res.Format("Dialog_DiscardConfirm_Text", count);
+            if (!_messageBox.AskYesNo(message, Res.Get("Dialog_DiscardConfirm_Title")))
+                return;
+        }
+
+        DiscardPendingSilent();
+    }
+
+    /// <summary>
+    /// Clears all pending inline edits without prompting. Used by the close-confirm
+    /// flow, which has already asked the user — a second confirm dialog is noise.
+    /// </summary>
+    public void DiscardPendingSilent()
+    {
+        ClearAllPendingInlineEdits(RootMembers);
+        RefreshPendingAndPreview();
+        StatusText = Res.Get("Status_Ready");
+        RefreshFlatList();
+    }
+
+    private static void ClearAllPendingInlineEdits(IEnumerable<MemberNodeViewModel> nodes)
+    {
+        foreach (var node in nodes)
+        {
+            node.ClearPending();
+            ClearAllPendingInlineEdits(node.Children);
+        }
+    }
+
+    private void RefreshTree(
+        string modifiedXml,
+        UdtSetPointResolver? udtResolver = null,
+        UdtCommentResolver? commentResolver = null)
+    {
+        // Save expand states from ALL nodes (recursively, not just flat list)
+        var expandStates = new Dictionary<string, (bool Expanded, bool Smart)>();
+        foreach (var root in RootMembers)
+            CollectExpandStates(root, expandStates);
+
+        var selectedPath = _selectedFlatMember?.Path;
+        var selectedScopeIndex = AvailableScopes.IndexOf(_selectedScope!);
+
+        // Keep the most recent UDT resolvers so later RefreshTree calls (from Apply) don't drop them.
+        if (udtResolver != null) _udtResolver = udtResolver;
+        if (commentResolver != null) _commentResolver = commentResolver;
+        var constantResolver = _tagTableCache != null
+            ? new TagTableConstantResolver(_tagTableCache)
+            : (IConstantResolver?)null;
+        var parser = new SimaticMLParser(constantResolver, _udtResolver, _commentResolver);
+        _dataBlockInfo = parser.Parse(modifiedXml);
+        InlineRuleExtractor.ApplyTo(_configLoader.GetConfig(), _dataBlockInfo);
+
+        RootMembers.Clear();
+        foreach (var member in _dataBlockInfo.Members)
+        {
+            var vm = new MemberNodeViewModel(member, null, _commentLanguagePolicy);
+            SubscribeStartValueEdited(vm);
+            RootMembers.Add(vm);
+        }
+
+        // Restore expand states on ALL new nodes before building flat list
+        foreach (var root in RootMembers)
+            RestoreExpandStates(root, expandStates);
+
+        ApplyAllFilters();
+        RefreshFlatList();
+
+        // Restore selection and re-trigger scope analysis
+        if (selectedPath != null)
+        {
+            var restored = _flatTreeManager.FlatList.FirstOrDefault(m => m.Path == selectedPath);
+            if (restored != null)
+            {
+                _selectedFlatMember = restored;
+                OnPropertyChanged(nameof(SelectedFlatMember));
+                OnPropertyChanged(nameof(HasSelection));
+                OnPropertyChanged(nameof(SelectedMemberDisplay));
+
+                // Re-populate scopes for the restored selection
+                var result = _analyzer.Analyze(_dataBlockInfo, restored.Model);
+                AvailableScopes.Clear();
+                foreach (var scope in result.Scopes)
+                    AvailableScopes.Add(scope);
+                if (selectedScopeIndex >= 0 && selectedScopeIndex < AvailableScopes.Count)
+                    SelectedScope = AvailableScopes[selectedScopeIndex];
+
+                // Update start value display (suppress suggestion popup)
+                _suppressSuggestions = true;
+                NewValue = restored.StartValue ?? "";
+                _suppressSuggestions = false;
+            }
+        }
+    }
+
+    private static void CollectExpandStates(MemberNodeViewModel vm, Dictionary<string, (bool Expanded, bool Smart)> states)
+    {
+        if (vm.IsExpanded)
+            states[vm.Path] = (true, vm.IsSmartExpanded);
+        foreach (var child in vm.Children)
+            CollectExpandStates(child, states);
+    }
+
+    private static void RestoreExpandStates(MemberNodeViewModel vm, Dictionary<string, (bool Expanded, bool Smart)> states)
+    {
+        if (states.TryGetValue(vm.Path, out var state))
+        {
+            vm.IsExpanded = state.Expanded;
+            vm.IsSmartExpanded = state.Smart;
+        }
+        foreach (var child in vm.Children)
+            RestoreExpandStates(child, states);
+    }
+
+    private void UpdateUsageStatus()
+    {
+        if (_licenseService != null && _licenseService.IsProActive)
+        {
+            UsageStatusText = Res.Get("Status_Pro");
+            LicenseTierText = Res.Get("License_Tier_Pro");
+        }
+        else
+        {
+            var status = _usageTracker.GetStatus();
+            var inlineStatus = _usageTracker.GetInlineStatus();
+            UsageStatusText = Res.Format("Status_RemainingBoth",
+                status.RemainingToday, status.DailyLimit,
+                inlineStatus.RemainingToday, inlineStatus.DailyLimit);
+            LicenseTierText = Res.Get("License_Tier_Free");
+        }
+
+        OnPropertyChanged(nameof(UsageStatusText));
+        OnPropertyChanged(nameof(LicenseTierText));
+        OnPropertyChanged(nameof(ShowLicenseKeyButton));
+        OnPropertyChanged(nameof(LicenseKeyButtonText));
+        OnPropertyChanged(nameof(IsLimitReached));
+    }
+
+    private void ExecuteEnterLicenseKey()
+    {
+        if (_licenseService == null) return;
+
+        var dialog = new LicenseKeyDialog(_licenseService);
+        dialog.Owner = Application.Current?.Windows.OfType<Window>().FirstOrDefault(w => w.IsActive);
+        dialog.ShowDialog();
+        UpdateUsageStatus();
+    }
+
+    /// <summary>
+    /// Called by the view when the user's Ctrl+Click selection changes.
+    /// Only leaf members are tracked. <paramref name="isFilterRehydration"/> is true
+    /// when the view is programmatically restoring selection after a refresh —
+    /// removed items in that case are hidden by the filter, not deselected.
+    /// </summary>
+    public void UpdateManualSelection(
+        IEnumerable<MemberNodeViewModel> added,
+        IEnumerable<MemberNodeViewModel> removed,
+        bool isFilterRehydration)
+    {
+        var addedList = added.ToList();
+        var removedList = removed.ToList();
+        bool wasManual = IsManualMode;
+        bool changed = false;
+
+        Log.Debug("VM.UpdateManualSelection ENTER: wasManual={Was} setBefore=[{Set}] add=[{Add}] rem=[{Rem}] rehydrate={Rehy}",
+            wasManual,
+            string.Join(",", _manualSelectedPaths),
+            string.Join(",", addedList.Select(m => m.Name)),
+            string.Join(",", removedList.Select(m => m.Name)),
+            isFilterRehydration);
+
+        foreach (var m in addedList)
+        {
+            if (!m.IsLeaf) continue;
+            if (_manualSelectedPaths.Add(m.Path)) changed = true;
+        }
+
+        if (!isFilterRehydration)
+        {
+            foreach (var m in removedList)
+            {
+                if (_manualSelectedPaths.Remove(m.Path)) changed = true;
+            }
+        }
+
+        Log.Debug("VM.UpdateManualSelection AFTER-SET: setAfter=[{Set}] changed={Ch} isNowManual={Now}",
+            string.Join(",", _manualSelectedPaths), changed, IsManualMode);
+
+        if (!changed) return;
+
+        bool isNowManual = IsManualMode;
+
+        OnPropertyChanged(nameof(IsManualMode));
+        OnPropertyChanged(nameof(ManualSelectionCount));
+        OnPropertyChanged(nameof(ManualSelectionSummary));
+        OnPropertyChanged(nameof(IsSelectionTypeHomogeneous));
+        OnPropertyChanged(nameof(HasScope));
+        OnPropertyChanged(nameof(CanEdit));
+        OnPropertyChanged(nameof(SetButtonText));
+        OnPropertyChanged(nameof(SelectedMemberDisplay));
+
+        // Entering manual mode: the scope-based highlighting from the single
+        // selection no longer applies. Clear the scope state and wipe affected
+        // rows + smart-expanded parents. (OnMemberSelected may have already
+        // run before SelectionChanged fired, so we handle this here too.)
+        if (!wasManual && isNowManual)
+        {
+            Log.Debug("VM.UpdateManualSelection: TRANSITION to manual mode");
+            AvailableScopes.Clear();
+            _selectedScope = null;
+            OnPropertyChanged(nameof(SelectedScope));
+            OnPropertyChanged(nameof(HasScope));
+            // Pin ancestors of manually selected leaves as user-expanded so that
+            // UpdateHighlighting's ClearAffected doesn't collapse them and hide
+            // the first-selected row from the flat list (which would deselect it).
+            PinManuallySelectedVisibility();
+            UpdateHighlighting();
+        }
+        else if (isNowManual)
+        {
+            Log.Debug("VM.UpdateManualSelection: still manual, refreshing flat list");
+            // Already in manual mode: still pin newly-added selections so a later
+            // filter/refresh keeps them visible and selectable.
+            PinManuallySelectedVisibility();
+            RefreshFlatList();
+        }
+        else if (wasManual)
+        {
+            Log.Debug("VM.UpdateManualSelection: TRANSITION out of manual mode — re-run scope analysis");
+            // Transitioning back to scope mode. OnMemberSelected already ran
+            // before this method (with IsManualMode still true) and skipped scope
+            // setup. Re-run it now that the mode has flipped.
+            OnMemberSelected(_selectedFlatMember);
+        }
+
+        ValidateValue();
+    }
+
+    /// <summary>
+    /// Updates the NewValue textbox with the current featured member's value —
+    /// but only if the user hasn't typed in the textbox yet. Once the user has
+    /// edited the textbox, their input is preserved across selection changes
+    /// until they clear the selection entirely.
+    /// </summary>
+    private void PrefillNewValueFromFeaturedMember(MemberNodeViewModel? memberVm)
+    {
+        if (_newValueTouched) return;
+        if (memberVm is not { IsLeaf: true }) return;
+
+        var value = memberVm.IsPendingInlineEdit
+            ? (memberVm.EditableStartValue ?? memberVm.StartValue ?? "")
+            : (memberVm.StartValue ?? "");
+        if (value == _newValue) return;
+
+        // Bypass the public setter so we don't flip _newValueTouched on this
+        // programmatic update.
+        _newValue = value;
+        OnPropertyChanged(nameof(NewValue));
+    }
+
+    private void PinManuallySelectedVisibility()
+    {
+        foreach (var path in _manualSelectedPaths)
+        {
+            var node = FindNodeByPath(path);
+            if (node == null) continue;
+            var p = node.Parent;
+            while (p != null)
+            {
+                if (!p.IsExpanded || p.IsSmartExpanded)
+                {
+                    p.IsExpanded = true;
+                    p.IsSmartExpanded = false; // promote to user-expanded
+                }
+                p = p.Parent;
+            }
+        }
+    }
+
+    private void ExecuteClearManualSelection()
+    {
+        if (_manualSelectedPaths.Count == 0) return;
+        _manualSelectedPaths.Clear();
+        ClearBulkRowHighlights();
+        _newValueTouched = false;
+        _newValue = "";
+        OnPropertyChanged(nameof(NewValue));
+
+        OnPropertyChanged(nameof(IsManualMode));
+        OnPropertyChanged(nameof(ManualSelectionCount));
+        OnPropertyChanged(nameof(ManualSelectionSummary));
+        OnPropertyChanged(nameof(IsSelectionTypeHomogeneous));
+        OnPropertyChanged(nameof(HasScope));
+        OnPropertyChanged(nameof(CanEdit));
+        OnPropertyChanged(nameof(SetButtonText));
+        OnPropertyChanged(nameof(SelectedMemberDisplay));
+
+        ValidateValue();
+        FlatListRefreshed?.Invoke();
+    }
+
+    /// <summary>
+    /// Returns the distinct datatypes (case-insensitive) of currently selected members.
+    /// Ignores paths that no longer resolve to a leaf node.
+    /// </summary>
+    private IReadOnlyCollection<string> GetSelectedDatatypes()
+    {
+        var types = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var path in _manualSelectedPaths)
+        {
+            var node = FindNodeByPath(path);
+            if (node is { IsLeaf: true })
+                types.Add(node.Datatype);
+        }
+        return types;
+    }
+
+    private void ExecuteUpgradeToPro()
+    {
+        try
+        {
+            Process.Start(new ProcessStartInfo(ShopUrls.CheckoutUrl) { UseShellExecute = true });
+        }
+        catch
+        {
+            // Fallback: silently ignore if browser cannot be opened
+        }
+    }
+}
