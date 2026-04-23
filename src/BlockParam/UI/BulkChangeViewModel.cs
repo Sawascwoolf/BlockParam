@@ -2083,10 +2083,13 @@ public class BulkChangeViewModel : ViewModelBase
             // Inline revert / cleared field: drop any stale validation error
             // from the prior value, then refresh the aggregated pending queue
             // / preview — otherwise the row lingers red and a stale message
-            // stays in StatusText.
+            // stays in StatusText. StartsWith matches the exact producer
+            // format ($"{memberVm.Name}: {error}") without accidentally
+            // clearing messages about other members whose name contains this
+            // one as a substring.
             memberVm.HasInlineError = false;
             memberVm.InlineErrorMessage = null;
-            if (StatusText != null && StatusText.Contains(memberVm.Name + ":"))
+            if (StatusText.StartsWith(memberVm.Name + ":"))
                 StatusText = "";
             RefreshPendingAndPreview();
             return;

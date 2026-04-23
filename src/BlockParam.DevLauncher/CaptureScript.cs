@@ -106,14 +106,13 @@ public sealed class Scene
     [JsonProperty("hoverSuggestion")] public string? HoverSuggestion { get; set; }
 
     /// <summary>
-    /// Paints a click ring at the last-known cursor position. Two phases:
+    /// Paints a click ring at the last-known cursor position. Valid values:
     /// "press"   — small tight ring, for the frame where the click target
     ///             is still visible (dropdown open, suggestion row still
     ///             there). Place BEFORE the action frame.
     /// "release" — large expanded ring, for the action frame itself (accept,
     ///             Set, Apply, revert, scope click).
-    /// Any other truthy value (e.g. true) is treated as "release" for
-    /// backward compatibility with earlier scripts.
+    /// Omit the field for frames with no click animation.
     /// </summary>
     [JsonProperty("click")] public string? Click { get; set; }
 
