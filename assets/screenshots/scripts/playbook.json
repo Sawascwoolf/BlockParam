@@ -9,6 +9,7 @@
       "id": "01_hero",
       "filename": "01_hero.png",
       "dialog": "main",
+      "zoom": 1.1,
       "expand": [
         "units[1,2]",
         "units[1,2].modules[1]",

@@ -78,6 +78,8 @@ single action.
 - **English &amp; German UI** (complete translations; i18n architecture ready for more).
 - **ExclusiveAccess mode** for fast bulk operations on large DBs (~1500 variables).
 - **Context menu performance** &lt; 200ms &mdash; no lag when right-clicking.
+- **UI zoom** &mdash; `Ctrl+Scroll`, `Ctrl +/-`, `Ctrl+0` (reset). Default 1.2&times; for high-DPI
+  readability; persisted per workstation.
 
 ## Requirements
 

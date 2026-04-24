@@ -15,6 +15,7 @@ public partial class LicenseKeyDialog : Window
     {
         InitializeComponent();
         WindowIconHelper.SetIcon(this);
+        ZoomHost.Attach(this);
         _licenseService = licenseService;
         UpdateDisplay();
 

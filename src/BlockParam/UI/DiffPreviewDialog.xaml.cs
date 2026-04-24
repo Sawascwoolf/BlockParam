@@ -8,6 +8,7 @@ public partial class DiffPreviewDialog : Window
     {
         InitializeComponent();
         WindowIconHelper.SetIcon(this);
+        ZoomHost.Attach(this);
     }
 
     public DiffPreviewDialog(DiffPreviewViewModel viewModel) : this()
