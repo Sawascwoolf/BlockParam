@@ -127,6 +127,12 @@ For rebuilding the narrated workflow MP4 (`assets/screenshots/workflow/workflow_
   free-form prose. Always include a concrete set of options and **recommend one of
   them** (mark it in the question text) so the user can accept with a single click
   instead of typing a reply.
+- When a PR resolves GitHub issues, put **closing keywords** in the PR body
+  (one per line: `Closes #7`, `Fixes #13`, `Resolves #9`). GitHub auto-closes
+  them on merge — no post-merge `gh issue close` sweep needed. Plain references
+  like `(#7)` in the title do not trigger auto-close. If you forget and the
+  issues stay open after merge, then use
+  `gh issue close <N> -c "Resolved by #<PR>"` to catch up.
 
 ## Project Structure
 
