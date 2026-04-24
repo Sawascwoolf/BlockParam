@@ -242,6 +242,7 @@ public static class SceneApplier
         {
             ResetTreeState(vm);
             dialog.HideInlineOverlayScripted();
+            dialog.HideInlineHintOverlayScripted();
         }
 
         if (scene.Filter != null)
