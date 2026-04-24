@@ -21,6 +21,7 @@ public class MemberNodeViewModel : ViewModelBase
     private bool _hasInlineError;
     private string? _inlineErrorMessage;
     private string? _editableStartValue;
+    private string? _ruleHint;
 
     public MemberNodeViewModel(
         MemberNode model,
@@ -178,6 +179,25 @@ public class MemberNodeViewModel : ViewModelBase
         get => _inlineErrorMessage;
         set => SetProperty(ref _inlineErrorMessage, value);
     }
+
+    /// <summary>
+    /// Human-readable description of the rule constraining this member
+    /// (e.g. "Range: 0 – 100"). Populated by the owning ViewModel at build
+    /// time from <see cref="Services.RuleHintFormatter"/>. Null when the
+    /// member has no rule or the rule exposes no constraints.
+    /// </summary>
+    public string? RuleHint
+    {
+        get => _ruleHint;
+        set
+        {
+            if (SetProperty(ref _ruleHint, value))
+                OnPropertyChanged(nameof(HasRuleHint));
+        }
+    }
+
+    /// <summary>True when <see cref="RuleHint"/> is non-empty.</summary>
+    public bool HasRuleHint => !string.IsNullOrEmpty(_ruleHint);
 
     /// <summary>Has a start value that can be bulk-edited.</summary>
     public bool HasStartValue => !string.IsNullOrEmpty(StartValue);
@@ -357,10 +377,11 @@ public class MemberNodeViewModel : ViewModelBase
     {
         IsAffected = false;
         IsAlreadyMatching = false;
-        if (IsSmartExpanded && !HasPendingDescendant())
+        if (IsSmartExpanded)
         {
             // Collapse nodes that were only auto-expanded by highlighting.
-            // Keep expanded if there are pending inline edits below.
+            // Pending inline edits no longer force expansion (#10) — they are
+            // surfaced in the sidebar, so the tree's shape stays user-driven.
             IsExpanded = false;
             IsSmartExpanded = false;
         }

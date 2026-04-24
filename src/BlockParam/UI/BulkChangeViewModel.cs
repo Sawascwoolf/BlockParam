@@ -165,6 +165,7 @@ public class BulkChangeViewModel : ViewModelBase
             SubscribeStartValueEdited(vm);
             RootMembers.Add(vm);
         }
+        RefreshRuleHints();
 
         AvailableScopes = new ObservableCollection<ScopeLevel>();
 
@@ -965,17 +966,8 @@ public class BulkChangeViewModel : ViewModelBase
         if (AvailableScopes.Count > 0)
             SelectedScope = AvailableScopes[0];
 
-        var config = _configLoader.GetConfig();
-        var constraint = config?.GetRule(memberVm.Model)?.Constraints;
-        if (constraint != null)
-        {
-            var parts = new List<string>();
-            if (constraint.HasMinMax)
-                parts.Add($"Range: {constraint.Min ?? "..."} — {constraint.Max ?? "..."}");
-            if (constraint.AllowedValues is { Count: > 0 })
-                parts.Add($"Allowed: {string.Join(", ", constraint.AllowedValues)}");
-            ConstraintInfo = string.Join(" | ", parts);
-        }
+        // Proactive hint (#7) — single source of truth with the inline-edit tooltip.
+        ConstraintInfo = memberVm.RuleHint ?? "";
 
         StatusText = "";
 
@@ -1127,6 +1119,18 @@ public class BulkChangeViewModel : ViewModelBase
             : null;
         CollectPendingEntries(RootMembers, bulkPaths);
         OnPropertyChanged(nameof(HasPendingEdits));
+        RaiseInvalidPendingChanged();
+    }
+
+    /// <summary>
+    /// Nudges bindings attached to <see cref="InvalidPendingCount"/> and friends.
+    /// Call after any mutation that could flip a pending entry's error state.
+    /// </summary>
+    private void RaiseInvalidPendingChanged()
+    {
+        OnPropertyChanged(nameof(InvalidPendingCount));
+        OnPropertyChanged(nameof(HasInvalidPending));
+        OnPropertyChanged(nameof(InvalidPendingBadge));
     }
 
     private void CollectPendingEntries(IEnumerable<MemberNodeViewModel> nodes,
@@ -1315,9 +1319,8 @@ public class BulkChangeViewModel : ViewModelBase
                 SmartExpandSearchMatches(root, searchPaths);
         }
 
-        // Smart-expand parents of pending inline edits so they stay visible
-        foreach (var root in RootMembers)
-            SmartExpandPendingEdits(root);
+        // Pending inline edits no longer smart-expand (#10) — they're surfaced
+        // in the sidebar, so forcing the tree open was redundant and disruptive.
     }
 
     private void SmartExpandSearchMatches(MemberNodeViewModel node, HashSet<string> searchPaths)
@@ -1329,24 +1332,10 @@ public class BulkChangeViewModel : ViewModelBase
             SmartExpandSearchMatches(child, searchPaths);
     }
 
-    private void SmartExpandPendingEdits(MemberNodeViewModel node)
-    {
-        if (node.IsPendingInlineEdit || node.HasInlineError)
-        {
-            Log.Debug("SmartExpandPending: {Path} IsVisible={Vis} ParentExpanded={ParExp}",
-                node.Path, node.IsVisible, node.Parent?.IsExpanded);
-            node.EnsureVisible();
-            Log.Debug("SmartExpandPending: after EnsureVisible: IsVisible={Vis} ParentExpanded={ParExp}",
-                node.IsVisible, node.Parent?.IsExpanded);
-        }
-
-        foreach (var child in node.Children)
-            SmartExpandPendingEdits(child);
-    }
-
     /// <summary>
-    /// Re-expands search matches and pending edits.
-    /// Called after ClearAffected which collapses all smart-expanded nodes.
+    /// Re-expands search matches after <see cref="MemberNodeViewModel.ClearAffected"/>
+    /// collapsed smart-expanded nodes. Pending inline edits are intentionally not
+    /// re-expanded (#10) — they live in the sidebar.
     /// </summary>
     private void ReExpandNonAffected()
     {
@@ -1357,9 +1346,6 @@ public class BulkChangeViewModel : ViewModelBase
             foreach (var root in RootMembers)
                 SmartExpandSearchMatches(root, searchPaths);
         }
-
-        foreach (var root in RootMembers)
-            SmartExpandPendingEdits(root);
     }
 
     private void ValidateValue()
@@ -1443,38 +1429,40 @@ public class BulkChangeViewModel : ViewModelBase
     }
 
     /// <summary>
-    /// Runs the full validation pipeline for a single member: datatype format,
-    /// rule constraints (min/max, allowedValues), and requireTagTableValue.
-    /// Returns null on success, otherwise an error message.
+    /// Runs the full validation pipeline for a single member via the shared
+    /// <see cref="MemberValidator"/>. Returns null on success.
     /// </summary>
-    private string? ValidateValueForMember(MemberNodeViewModel memberVm, string value)
+    private string? ValidateValueForMember(MemberNodeViewModel memberVm, string value) =>
+        BuildValidator().Validate(memberVm.Model, value);
+
+    /// <summary>
+    /// Builds a validator pinned to the current config + tag-table cache. Fresh
+    /// on each call so rule/cache invalidation is picked up without bookkeeping.
+    /// </summary>
+    private MemberValidator BuildValidator()
     {
-        if (string.IsNullOrEmpty(value)) return null;
+        EnsureTagTableCache();
+        return new MemberValidator(_configLoader.GetConfig(), _tagTableCache);
+    }
 
+    /// <summary>
+    /// Refreshes <see cref="MemberNodeViewModel.RuleHint"/> on every node so
+    /// rule-constrained cells surface the hint proactively (tooltip + inspector).
+    /// Hints read only rule metadata — no tag-table export is forced here; that
+    /// stays lazy and runs on the validation path.
+    /// </summary>
+    private void RefreshRuleHints()
+    {
         var config = _configLoader.GetConfig();
-        var rule = config?.GetRule(memberVm.Model);
-        var datatype = memberVm.Model.Datatype;
-        var constants = _tagTableCache?.GetAllConstantNames();
+        foreach (var root in RootMembers)
+            ApplyRuleHint(root, config);
+    }
 
-        var typeError = TiaDataTypeValidator.Validate(value, datatype, constants);
-        if (typeError != null) return typeError;
-
-        var ruleError = rule?.Constraints?.Validate(value, datatype, constants);
-        if (ruleError != null) return ruleError;
-
-        if (rule?.Constraints?.RequireTagTableValue == true
-            && rule.TagTableReference != null
-            && _tagTableCache != null)
-        {
-            var entries = _tagTableCache.GetEntriesByPattern(rule.TagTableReference.TableName);
-            var isValid = entries.Any(e =>
-                string.Equals(e.Name, value, StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(e.Value, value, StringComparison.OrdinalIgnoreCase));
-            if (!isValid)
-                return $"Value must be a constant from {rule.TagTableReference.TableName} tables.";
-        }
-
-        return null;
+    private static void ApplyRuleHint(MemberNodeViewModel node, BulkChangeConfig? config)
+    {
+        node.RuleHint = RuleHintFormatter.Format(config?.GetRule(node.Model), node.Model.Datatype);
+        foreach (var child in node.Children)
+            ApplyRuleHint(child, config);
     }
 
     private void UpdateFilteredSuggestions()
@@ -1859,6 +1847,25 @@ public class BulkChangeViewModel : ViewModelBase
     }
 
     /// <summary>
+    /// Count of pending entries whose staged value fails validation (#11).
+    /// Derived from the tree so it stays in sync with inline-edit validation.
+    /// </summary>
+    public int InvalidPendingCount => PendingEdits.Count(e => e.Node.HasInlineError);
+
+    public bool HasInvalidPending => InvalidPendingCount > 0;
+
+    /// <summary>"N of M invalid" summary shown on the sidebar header badge.</summary>
+    public string InvalidPendingBadge
+    {
+        get
+        {
+            var total = PendingEdits.Count;
+            var invalid = InvalidPendingCount;
+            return invalid == 0 ? "" : Res.Format("Pending_InvalidBadge", invalid, total);
+        }
+    }
+
+    /// <summary>
     /// Applies ALL pending changes (bulk-staged + inline edits) to XML.
     /// </summary>
     private void ExecuteApply()
@@ -2115,51 +2122,23 @@ public class BulkChangeViewModel : ViewModelBase
 
         Log.Information("Inline edit pending: {Path} → {Value}", memberVm.Path, newValue);
 
-        // Validate constraints for the edited member
-        string? error = null;
-        var datatype = memberVm.Model.Datatype;
-        var config = _configLoader.GetConfig();
-        var rule = config?.GetRule(memberVm.Model);
-        var constants = _tagTableCache?.GetAllConstantNames();
-
-        // Data type format validation (even without a rule)
-        error = TiaDataTypeValidator.Validate(newValue, datatype, constants);
-
-        // Rule-based constraint validation with datatype
-        if (error == null && rule?.Constraints != null)
-            error = rule.Constraints.Validate(newValue, datatype, constants);
-
-        // Validate requireTagTableValue: value must be a known constant name or value
-        if (error == null && rule?.Constraints?.RequireTagTableValue == true
-            && rule.TagTableReference != null)
-        {
-            EnsureTagTableCache();
-            if (_tagTableCache != null)
-            {
-                var entries = _tagTableCache.GetEntriesByPattern(rule.TagTableReference.TableName);
-                var isValid = entries.Any(e =>
-                    string.Equals(e.Name, newValue, StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(e.Value, newValue, StringComparison.OrdinalIgnoreCase));
-                if (!isValid)
-                    error = $"Value must be from tag table '{rule.TagTableReference.TableName}'";
-            }
-        }
+        // Shared validator → same rule language as the bulk inspector (#7).
+        var error = BuildValidator().Validate(memberVm.Model, newValue);
 
         memberVm.HasInlineError = error != null;
         memberVm.InlineErrorMessage = error;
         if (error != null)
             StatusText = $"{memberVm.Name}: {error}";
+        else if (StatusText.StartsWith(memberVm.Name + ":"))
+            StatusText = "";
 
-        // Ensure pending edit is visible (expand parents if collapsed)
-        // Only refresh if node wasn't already in the flat list (avoids destroying open popups)
-        if (!memberVm.IsVisible || memberVm.Parent is { IsExpanded: false })
-        {
-            memberVm.EnsureVisible();
-            RefreshFlatList();
-        }
+        // Pending edits no longer smart-expand ancestors (#10): they surface in the
+        // sidebar, which is where the user looks for them. The tree's expansion
+        // state stays under the user's control.
 
         RefreshPendingAndPreview();
         OnPropertyChanged(nameof(HasInlineErrors));
+        RaiseInvalidPendingChanged();
     }
 
     /// <summary>
@@ -2258,8 +2237,12 @@ public class BulkChangeViewModel : ViewModelBase
         foreach (var root in RootMembers)
             CollectExpandStates(root, expandStates);
 
+        // Preserve selection + scope by stable identity (#8). Index-based lookup
+        // broke because OnMemberSelected adds scopes reversed while RefreshTree
+        // used plain order — indices didn't line up after Apply.
         var selectedPath = _selectedFlatMember?.Path;
-        var selectedScopeIndex = AvailableScopes.IndexOf(_selectedScope!);
+        var selectedScopeAncestorPath = _selectedScope?.AncestorPath;
+        var selectedScopeDepth = _selectedScope?.Depth;
 
         // Keep the most recent UDT resolvers so later RefreshTree calls (from Apply) don't drop them.
         if (udtResolver != null) _udtResolver = udtResolver;
@@ -2278,6 +2261,7 @@ public class BulkChangeViewModel : ViewModelBase
             SubscribeStartValueEdited(vm);
             RootMembers.Add(vm);
         }
+        RefreshRuleHints();
 
         // Restore expand states on ALL new nodes before building flat list
         foreach (var root in RootMembers)
@@ -2297,17 +2281,29 @@ public class BulkChangeViewModel : ViewModelBase
                 OnPropertyChanged(nameof(HasSelection));
                 OnPropertyChanged(nameof(SelectedMemberDisplay));
 
-                // Re-populate scopes for the restored selection
+                // Re-populate scopes for the restored selection using the same
+                // ordering as OnMemberSelected so index/position stay stable.
                 var result = _analyzer.Analyze(_dataBlockInfo, restored.Model);
                 AvailableScopes.Clear();
-                foreach (var scope in result.Scopes)
+                foreach (var scope in result.Scopes.Reverse())
                     AvailableScopes.Add(scope);
-                if (selectedScopeIndex >= 0 && selectedScopeIndex < AvailableScopes.Count)
-                    SelectedScope = AvailableScopes[selectedScopeIndex];
 
-                // Update start value display (suppress suggestion popup)
+                // #8: Match the previously selected scope by ancestor path, not
+                // by index. Keeps the dropdown sticky through Apply even when
+                // the scope count/order drifts.
+                var restoredScope = AvailableScopes.FirstOrDefault(s =>
+                    string.Equals(s.AncestorPath, selectedScopeAncestorPath, StringComparison.Ordinal)
+                    && s.Depth == selectedScopeDepth);
+                if (restoredScope != null)
+                    SelectedScope = restoredScope;
+
+                // Value is reset after Apply: the just-committed value would
+                // misrepresent the current state (#8). Clear touched so the
+                // next selection can prefill cleanly.
                 _suppressSuggestions = true;
-                NewValue = restored.StartValue ?? "";
+                _newValueTouched = false;
+                _newValue = "";
+                OnPropertyChanged(nameof(NewValue));
                 _suppressSuggestions = false;
             }
         }
