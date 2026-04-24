@@ -326,8 +326,9 @@ public partial class BulkChangeDialog : Window
             // HasInlineError can flip on each keystroke — keep the hint overlay
             // in sync so a cell that starts valid but becomes invalid (or vice
             // versa) surfaces the right feedback without needing a refocus.
+            // Do NOT reposition here: if the user dragged the overlay out of
+            // the way, re-anchoring on every keystroke would snap it back.
             UpdateInlineHintVisibility(memberVm);
-            PositionInlineHintOverlay(tb);
         }
     }
 
@@ -776,7 +777,13 @@ public partial class BulkChangeDialog : Window
     private void PositionInlineHintOverlay(TextBox tb)
     {
         if (InlineHintOverlay.Visibility != Visibility.Visible) return;
-        if (!tb.IsDescendantOf(this)) return;
+        if (!tb.IsDescendantOf(this))
+        {
+            // Anchor was virtualized / detached while the overlay was open —
+            // drop references rather than computing coords against a ghost.
+            _inlineHintAnchor = null;
+            return;
+        }
         // Right of the TextBox so the autocomplete overlay below the cell stays clear.
         var topRight = tb.TranslatePoint(new System.Windows.Point(tb.ActualWidth, 0), this);
         InlineHintOverlay.Margin = new Thickness(topRight.X + 8, topRight.Y, 0, 0);
@@ -787,6 +794,12 @@ public partial class BulkChangeDialog : Window
         InlineHintOverlay.Visibility = Visibility.Collapsed;
         InlineHintOverlay.DataContext = null;
         _inlineHintAnchor = null;
+        // Cancel any in-flight drag whose mouse-up we'd otherwise miss.
+        if (_draggingHint)
+        {
+            _draggingHint = false;
+            InlineHintOverlay.ReleaseMouseCapture();
+        }
     }
 
     private TextBox? _inlineHintAnchor;

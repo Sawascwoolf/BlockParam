@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using BlockParam.Config;
 using BlockParam.Localization;
@@ -14,21 +15,19 @@ public static class RuleHintFormatter
 {
     /// <summary>
     /// Returns a single-line hint like "Range: 0 – 100 · One of: OPEN, CLOSED"
-    /// or null when the rule has no user-visible constraint. Includes datatype
-    /// limits (e.g. "Int: -32768 – 32767") as a fallback so typed fields still
-    /// get a useful hint when no rule override is defined.
+    /// or null when the rule has no user-visible constraint. When no rule
+    /// constraint applies at all, falls back to the datatype's implicit range
+    /// (e.g. "Int: -32768 – 32767") so typed fields still get useful guidance.
     /// </summary>
     public static string? Format(MemberRule? rule, string? datatype = null)
     {
         var parts = new List<string>();
 
         var c = rule?.Constraints;
-        bool hasRuleRange = false;
         if (c != null)
         {
             bool hasMin = !IsEmpty(c.Min);
             bool hasMax = !IsEmpty(c.Max);
-            hasRuleRange = hasMin || hasMax;
             if (hasMin && hasMax)
                 parts.Add(Res.Format("Hint_Range", Display(c.Min!), Display(c.Max!)));
             else if (hasMin)
@@ -42,13 +41,14 @@ public static class RuleHintFormatter
                 parts.Add(Res.Format("Hint_AllowedOf", values));
             }
 
-            if (c.RequireTagTableValue && rule?.TagTableReference != null)
+            if (c.RequireTagTableValue && rule!.TagTableReference != null)
                 parts.Add(Res.Format("Hint_TagTable", rule.TagTableReference.TableName));
         }
 
-        // Fallback: when the rule leaves the range unconstrained, show the
-        // implicit datatype range so the user still sees "what's allowed here".
-        if (!hasRuleRange)
+        // Fallback only when no rule-visible constraint was added — a datatype
+        // range appended next to "One of: OPEN, CLOSED" or a tag-table hint
+        // would misleadingly suggest numeric literals are also accepted.
+        if (parts.Count == 0)
         {
             var typeHint = FormatDatatypeHint(datatype);
             if (typeHint != null) parts.Add(typeHint);
@@ -66,26 +66,40 @@ public static class RuleHintFormatter
     {
         if (string.IsNullOrEmpty(datatype)) return null;
         var key = datatype!.Trim('"');
+        // Min/Max rendered with InvariantCulture so the hint matches what the
+        // TIA parser actually accepts — showing "32.767" to a de-DE user would
+        // otherwise read as a valid Int literal (it isn't; TIA uses '.'-less
+        // grouping or none at all, with the decimal dot reserved for Real).
         return key switch
         {
-            "SInt"  => Res.Format("Hint_Datatype_IntRange", key, sbyte.MinValue, sbyte.MaxValue),
-            "Int"   => Res.Format("Hint_Datatype_IntRange", key, short.MinValue, short.MaxValue),
-            "DInt"  => Res.Format("Hint_Datatype_IntRange", key, int.MinValue, int.MaxValue),
-            "LInt"  => Res.Format("Hint_Datatype_IntRange", key, long.MinValue, long.MaxValue),
-            "USInt" => Res.Format("Hint_Datatype_IntRange", key, byte.MinValue, byte.MaxValue),
-            "UInt"  => Res.Format("Hint_Datatype_IntRange", key, ushort.MinValue, ushort.MaxValue),
-            "UDInt" => Res.Format("Hint_Datatype_IntRange", key, uint.MinValue, uint.MaxValue),
-            "ULInt" => Res.Format("Hint_Datatype_IntRange", key, ulong.MinValue, ulong.MaxValue),
-            "Byte"  => Res.Format("Hint_Datatype_IntRange", key, byte.MinValue, byte.MaxValue),
-            "Word"  => Res.Format("Hint_Datatype_IntRange", key, ushort.MinValue, ushort.MaxValue),
-            "DWord" => Res.Format("Hint_Datatype_IntRange", key, uint.MinValue, uint.MaxValue),
-            "LWord" => Res.Format("Hint_Datatype_IntRange", key, ulong.MinValue, ulong.MaxValue),
+            "SInt"  => IntRange(key, sbyte.MinValue, sbyte.MaxValue),
+            "Int"   => IntRange(key, short.MinValue, short.MaxValue),
+            "DInt"  => IntRange(key, int.MinValue, int.MaxValue),
+            "LInt"  => IntRange(key, long.MinValue, long.MaxValue),
+            "USInt" => IntRange(key, byte.MinValue, byte.MaxValue),
+            "UInt"  => IntRange(key, ushort.MinValue, ushort.MaxValue),
+            "UDInt" => IntRange(key, uint.MinValue, uint.MaxValue),
+            "ULInt" => IntRange(key, ulong.MinValue, ulong.MaxValue),
+            "Byte"  => IntRange(key, byte.MinValue, byte.MaxValue),
+            "Word"  => IntRange(key, ushort.MinValue, ushort.MaxValue),
+            "DWord" => IntRange(key, uint.MinValue, uint.MaxValue),
+            "LWord" => IntRange(key, ulong.MinValue, ulong.MaxValue),
             "Real"  => Res.Format("Hint_Datatype_Float", key),
             "LReal" => Res.Format("Hint_Datatype_Float", key),
             "Bool"  => Res.Get("Hint_Datatype_Bool"),
             _       => null,
         };
     }
+
+    private static string IntRange(string type, long min, long max) =>
+        Res.Format("Hint_Datatype_IntRange", type,
+            min.ToString(CultureInfo.InvariantCulture),
+            max.ToString(CultureInfo.InvariantCulture));
+
+    private static string IntRange(string type, ulong min, ulong max) =>
+        Res.Format("Hint_Datatype_IntRange", type,
+            min.ToString(CultureInfo.InvariantCulture),
+            max.ToString(CultureInfo.InvariantCulture));
 
     private static bool IsEmpty(object? value) =>
         value == null || (value is string s && string.IsNullOrEmpty(s));
