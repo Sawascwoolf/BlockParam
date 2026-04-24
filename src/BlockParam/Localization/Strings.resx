@@ -602,6 +602,17 @@ Examples: en-US, de-DE. Leave empty for the default language.</value>
   <data name="Hint_Separator" xml:space="preserve">
     <value> · </value>
   </data>
+  <data name="Hint_Datatype_IntRange" xml:space="preserve">
+    <value>{0}: {1} – {2}</value>
+    <comment>{0} = datatype name, {1} = min, {2} = max — shown as implicit range when no rule override</comment>
+  </data>
+  <data name="Hint_Datatype_Float" xml:space="preserve">
+    <value>{0}: decimal (e.g. 3.14)</value>
+    <comment>{0} = datatype name</comment>
+  </data>
+  <data name="Hint_Datatype_Bool" xml:space="preserve">
+    <value>Bool: true / false / 0 / 1</value>
+  </data>
   <!-- Validation messages used by the shared MemberValidator. -->
   <data name="Validation_RequireTagTable" xml:space="preserve">
     <value>Value must be a constant from the '{0}' tag table.</value>

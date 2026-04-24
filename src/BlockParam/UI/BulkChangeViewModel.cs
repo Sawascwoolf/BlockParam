@@ -1460,7 +1460,7 @@ public class BulkChangeViewModel : ViewModelBase
 
     private static void ApplyRuleHint(MemberNodeViewModel node, BulkChangeConfig? config)
     {
-        node.RuleHint = RuleHintFormatter.Format(config?.GetRule(node.Model));
+        node.RuleHint = RuleHintFormatter.Format(config?.GetRule(node.Model), node.Model.Datatype);
         foreach (var child in node.Children)
             ApplyRuleHint(child, config);
     }
@@ -2129,6 +2129,8 @@ public class BulkChangeViewModel : ViewModelBase
         memberVm.InlineErrorMessage = error;
         if (error != null)
             StatusText = $"{memberVm.Name}: {error}";
+        else if (StatusText.StartsWith(memberVm.Name + ":"))
+            StatusText = "";
 
         // Pending edits no longer smart-expand ancestors (#10): they surface in the
         // sidebar, which is where the user looks for them. The tree's expansion

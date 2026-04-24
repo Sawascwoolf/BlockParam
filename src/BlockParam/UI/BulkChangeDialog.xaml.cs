@@ -323,6 +323,11 @@ public partial class BulkChangeDialog : Window
         {
             var suggestions = vm.GetSuggestionsForMember(memberVm, tb.Text);
             ShowInlineOverlay(tb, memberVm, suggestions);
+            // HasInlineError can flip on each keystroke — keep the hint overlay
+            // in sync so a cell that starts valid but becomes invalid (or vice
+            // versa) surfaces the right feedback without needing a refocus.
+            UpdateInlineHintVisibility(memberVm);
+            PositionInlineHintOverlay(tb);
         }
     }
 
@@ -717,6 +722,7 @@ public partial class BulkChangeDialog : Window
                 && DataContext is BulkChangeViewModel vm)
             {
                 vm.SelectedFlatMember = memberVm;
+                ShowInlineHintOverlay(tb, memberVm);
             }
         }
     }
@@ -734,7 +740,94 @@ public partial class BulkChangeDialog : Window
             // handler hide the overlay itself.
             if (!InlineOverlay.IsKeyboardFocusWithin && !InlineOverlay.IsMouseOver)
                 HideInlineOverlay();
+            // Same pattern for the hint overlay: if the user is interacting
+            // with it (clicking to drag), the TextBox losing focus must not
+            // snatch it away mid-gesture.
+            if (!InlineHintOverlay.IsMouseOver && !_draggingHint)
+                HideInlineHintOverlay();
         }
+    }
+
+    /// <summary>
+    /// Positions the dialog-root <c>InlineHintOverlay</c> to the right of the
+    /// given TextBox so the rule hint / validation error stays visible while
+    /// the cell is focused. Hidden when the member has neither a hint nor an
+    /// error — an empty popup would just be visual noise.
+    /// </summary>
+    private void ShowInlineHintOverlay(TextBox tb, MemberNodeViewModel memberVm)
+    {
+        _inlineHintAnchor = tb;
+        InlineHintOverlay.DataContext = memberVm;
+        UpdateInlineHintVisibility(memberVm);
+        // Focus can fire before the selected row has had its final layout pass
+        // (e.g. when clicking an unrealized virtualized row), so a direct
+        // TranslatePoint would land on stale coords. Defer until WPF finishes
+        // laying out — Render priority runs after Arrange.
+        Dispatcher.BeginInvoke(new Action(() => PositionInlineHintOverlay(tb)),
+            System.Windows.Threading.DispatcherPriority.Render);
+    }
+
+    private void UpdateInlineHintVisibility(MemberNodeViewModel memberVm)
+    {
+        bool hasContent = memberVm.HasInlineError || memberVm.HasRuleHint;
+        InlineHintOverlay.Visibility = hasContent ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private void PositionInlineHintOverlay(TextBox tb)
+    {
+        if (InlineHintOverlay.Visibility != Visibility.Visible) return;
+        if (!tb.IsDescendantOf(this)) return;
+        // Right of the TextBox so the autocomplete overlay below the cell stays clear.
+        var topRight = tb.TranslatePoint(new System.Windows.Point(tb.ActualWidth, 0), this);
+        InlineHintOverlay.Margin = new Thickness(topRight.X + 8, topRight.Y, 0, 0);
+    }
+
+    private void HideInlineHintOverlay()
+    {
+        InlineHintOverlay.Visibility = Visibility.Collapsed;
+        InlineHintOverlay.DataContext = null;
+        _inlineHintAnchor = null;
+    }
+
+    private TextBox? _inlineHintAnchor;
+
+    private bool _draggingHint;
+    private System.Windows.Point _hintDragStart;
+    private System.Windows.Point _hintDragOrigin;
+
+    /// <summary>
+    /// Starts a drag-to-reposition gesture on the hint overlay. The user can
+    /// pull it out of the way when it covers content they want to see. The
+    /// next focus change re-anchors it next to the newly focused cell, so
+    /// the moved position is intentionally session-scoped.
+    /// </summary>
+    private void OnInlineHintMouseDown(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is not FrameworkElement fe) return;
+        _hintDragStart = e.GetPosition(this);
+        _hintDragOrigin = new System.Windows.Point(
+            InlineHintOverlay.Margin.Left, InlineHintOverlay.Margin.Top);
+        _draggingHint = true;
+        fe.CaptureMouse();
+        e.Handled = true;
+    }
+
+    private void OnInlineHintMouseMove(object sender, MouseEventArgs e)
+    {
+        if (!_draggingHint) return;
+        var pos = e.GetPosition(this);
+        InlineHintOverlay.Margin = new Thickness(
+            _hintDragOrigin.X + (pos.X - _hintDragStart.X),
+            _hintDragOrigin.Y + (pos.Y - _hintDragStart.Y),
+            0, 0);
+    }
+
+    private void OnInlineHintMouseUp(object sender, MouseButtonEventArgs e)
+    {
+        if (!_draggingHint) return;
+        _draggingHint = false;
+        if (sender is FrameworkElement fe) fe.ReleaseMouseCapture();
+        e.Handled = true;
     }
 
     private void OnListViewContextMenuOpening(object sender, ContextMenuEventArgs e)

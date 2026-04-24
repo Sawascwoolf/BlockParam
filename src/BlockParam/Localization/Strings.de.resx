@@ -239,6 +239,9 @@ Beispiele: en-US, de-DE. Leer lassen für Standardsprache.</value></data>
   <data name="Hint_AllowedOf" xml:space="preserve"><value>Erlaubt: {0}</value></data>
   <data name="Hint_TagTable" xml:space="preserve"><value>Aus Tag-Tabelle „{0}“</value></data>
   <data name="Hint_Separator" xml:space="preserve"><value> · </value></data>
+  <data name="Hint_Datatype_IntRange" xml:space="preserve"><value>{0}: {1} – {2}</value></data>
+  <data name="Hint_Datatype_Float" xml:space="preserve"><value>{0}: Dezimalzahl (z. B. 3,14)</value></data>
+  <data name="Hint_Datatype_Bool" xml:space="preserve"><value>Bool: true / false / 0 / 1</value></data>
   <!-- Validierungs-Meldung für shared MemberValidator -->
   <data name="Validation_RequireTagTable" xml:space="preserve"><value>Wert muss eine Konstante aus der Tag-Tabelle „{0}“ sein.</value></data>
   <!-- Seitenleiste „Ausstehende Änderungen“ (#11) -->

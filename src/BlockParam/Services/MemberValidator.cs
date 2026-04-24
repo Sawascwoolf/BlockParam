@@ -34,14 +34,13 @@ public class MemberValidator
 
         var datatype = member.Datatype;
         var constants = _tagTableCache?.GetAllConstantNames();
-
-        var typeError = TiaDataTypeValidator.Validate(value!, datatype, constants);
-        if (typeError != null) return typeError;
-
         var rule = _config?.GetRule(member);
-        var ruleError = rule?.Constraints?.Validate(value!, datatype, constants);
-        if (ruleError != null) return ruleError;
 
+        // Tag-table requirement wins over datatype format: when the rule demands
+        // a constant from a specific table, surfacing "Value must be from MOD_*"
+        // is more helpful than "Invalid Int value" for the typical user mistake
+        // (typing a name that isn't in the table). Values that *are* in the
+        // table fall through so later checks can still catch rule violations.
         if (rule?.Constraints?.RequireTagTableValue == true
             && rule.TagTableReference != null
             && _tagTableCache != null)
@@ -54,10 +53,16 @@ public class MemberValidator
                 return Res.Format("Validation_RequireTagTable", rule.TagTableReference.TableName);
         }
 
+        var typeError = TiaDataTypeValidator.Validate(value!, datatype, constants);
+        if (typeError != null) return typeError;
+
+        var ruleError = rule?.Constraints?.Validate(value!, datatype, constants);
+        if (ruleError != null) return ruleError;
+
         return null;
     }
 
     /// <summary>Returns the formatted hint for <paramref name="member"/> or null.</summary>
     public string? GetHint(MemberNode member) =>
-        RuleHintFormatter.Format(_config?.GetRule(member));
+        RuleHintFormatter.Format(_config?.GetRule(member), member.Datatype);
 }

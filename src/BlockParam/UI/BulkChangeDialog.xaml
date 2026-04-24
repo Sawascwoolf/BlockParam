@@ -372,26 +372,7 @@
                                                  GotFocus="OnStartValueGotFocus"
                                                  LostFocus="OnStartValueLostFocus"
                                                  TextChanged="OnInlineTextChanged"
-                                                 Tag="{Binding}"
-                                                 ToolTipService.ShowOnDisabled="True">
-                                            <TextBox.Style>
-                                                <Style TargetType="TextBox">
-                                                    <Style.Triggers>
-                                                        <!-- Error tooltip takes priority over hint (#7/#11) -->
-                                                        <DataTrigger Binding="{Binding HasInlineError}" Value="True">
-                                                            <Setter Property="ToolTip" Value="{Binding InlineErrorMessage}"/>
-                                                        </DataTrigger>
-                                                        <MultiDataTrigger>
-                                                            <MultiDataTrigger.Conditions>
-                                                                <Condition Binding="{Binding HasInlineError}" Value="False"/>
-                                                                <Condition Binding="{Binding HasRuleHint}" Value="True"/>
-                                                            </MultiDataTrigger.Conditions>
-                                                            <Setter Property="ToolTip" Value="{Binding RuleHint}"/>
-                                                        </MultiDataTrigger>
-                                                    </Style.Triggers>
-                                                </Style>
-                                            </TextBox.Style>
-                                        </TextBox>
+                                                 Tag="{Binding}"/>
                                         <Button HorizontalAlignment="Right" VerticalAlignment="Stretch"
                                                 Width="14" Background="Transparent" BorderThickness="0"
                                                 Click="OnInlineDropdownClick" Cursor="Hand"
@@ -1125,6 +1106,47 @@
             </Path.Effect>
         </Path>
     </Canvas>
+
+    <!-- Dialog-root inline hint/error overlay (#7/#11). Positioned imperatively
+         next to the focused inline cell so the user sees the rule constraint
+         and any validation error without hover delay. Lives in the visual tree
+         (not a WPF Popup) so it follows the window when the user drags or
+         resizes the dialog. Content binds to a MemberNodeViewModel DataContext. -->
+    <Border x:Name="InlineHintOverlay" Panel.ZIndex="1001"
+            HorizontalAlignment="Left" VerticalAlignment="Top"
+            Visibility="Collapsed"
+            BorderThickness="1" Padding="6,3" MaxWidth="320"
+            Cursor="SizeAll"
+            PreviewMouseLeftButtonDown="OnInlineHintMouseDown"
+            PreviewMouseMove="OnInlineHintMouseMove"
+            PreviewMouseLeftButtonUp="OnInlineHintMouseUp">
+        <Border.Style>
+            <Style TargetType="Border">
+                <Setter Property="Background" Value="#FFFDF5"/>
+                <Setter Property="BorderBrush" Value="#E0C97F"/>
+                <Style.Triggers>
+                    <DataTrigger Binding="{Binding HasInlineError}" Value="True">
+                        <Setter Property="Background" Value="#FFF4F4"/>
+                        <Setter Property="BorderBrush" Value="#D32F2F"/>
+                    </DataTrigger>
+                </Style.Triggers>
+            </Style>
+        </Border.Style>
+        <TextBlock FontSize="11" TextWrapping="Wrap">
+            <TextBlock.Style>
+                <Style TargetType="TextBlock">
+                    <Setter Property="Text" Value="{Binding RuleHint}"/>
+                    <Setter Property="Foreground" Value="#5b6471"/>
+                    <Style.Triggers>
+                        <DataTrigger Binding="{Binding HasInlineError}" Value="True">
+                            <Setter Property="Text" Value="{Binding InlineErrorMessage}"/>
+                            <Setter Property="Foreground" Value="#B71C1C"/>
+                        </DataTrigger>
+                    </Style.Triggers>
+                </Style>
+            </TextBlock.Style>
+        </TextBlock>
+    </Border>
 
     <!-- Dialog-root inline-autocomplete overlay. Positioned imperatively
          by BulkChangeDialog code-behind whenever an inline cell enters
