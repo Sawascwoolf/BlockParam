@@ -112,6 +112,10 @@ src/BlockParam.DevLauncher/bin/Debug/net48/BlockParam.DevLauncher.exe \
 
 Canonical outputs live in `assets/screenshots/`. To add a new shot, pick a preset DB (export one into `%TEMP%\BlockParam\` from TIA if missing) and add a capture line. For richer states (expanded tree, member selected, dialog open), extend `Program.cs` with a small script hook — do not try to drive the running UI from outside.
 
+### Workflow video
+
+For rebuilding the narrated workflow MP4 (`assets/screenshots/workflow/workflow_inline.mp4`), use the `recreate-workflow-video` skill — it bundles the rebuild-then-capture-then-stitch steps and the rationale for each.
+
 ## Development Guidelines
 
 - Read only the research file relevant to the current task (token efficiency)
