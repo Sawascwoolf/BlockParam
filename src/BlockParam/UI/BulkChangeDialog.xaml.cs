@@ -363,10 +363,10 @@ public partial class BulkChangeDialog : Window
 
     /// <summary>
     /// Scripted-only entry point (DevLauncher capture mode): surfaces the
-    /// inline-autocomplete overlay for the given member path with a typed
-    /// prefix, without going through the interactive focus / TextChanged
-    /// chain. Finds the cell's TextBox via the ListView's container generator
-    /// and positions the dialog-root overlay over it.
+    /// inline-autocomplete overlay AND the hint/error popup for the given
+    /// member path with a typed prefix, without going through the interactive
+    /// focus / TextChanged chain. Finds the cell's TextBox via the ListView's
+    /// container generator and positions the dialog-root overlays over it.
     /// </summary>
     internal void ShowInlineOverlayForScripted(MemberNodeViewModel memberVm, string typed)
     {
@@ -392,10 +392,16 @@ public partial class BulkChangeDialog : Window
 
         var suggestions = vm.GetSuggestionsForMember(memberVm, typed);
         ShowInlineOverlay(tb, memberVm, suggestions);
+        // Also surface the rule-hint / validation-error popup so scripted
+        // frames reflect the same UI a user sees when focusing the cell.
+        ShowInlineHintOverlay(tb, memberVm);
     }
 
     /// <summary>Scripted-only: tears down the inline overlay.</summary>
     internal void HideInlineOverlayScripted() => HideInlineOverlay();
+
+    /// <summary>Scripted-only: tears down the hint/error overlay.</summary>
+    internal void HideInlineHintOverlayScripted() => HideInlineHintOverlay();
 
     /// <summary>
     /// Scripted-only: opens a fake ComboBox dropdown below the real scope
