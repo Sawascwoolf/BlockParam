@@ -77,9 +77,33 @@ public class UiZoomServiceTests
         {
             var writer = new UiZoomService(path);
             writer.SetZoom(1.5);
+            writer.FlushPendingSave(); // save is debounced; flush before reading
 
             var reader = new UiZoomService(path);
             reader.ZoomFactor.Should().Be(1.5);
+        }
+        finally
+        {
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void Save_is_debounced_under_rapid_SetZoom()
+    {
+        var path = TempPath();
+        try
+        {
+            var svc = new UiZoomService(path);
+            for (var i = 0; i < 10; i++) svc.ZoomIn();
+
+            // No flush: file should not exist yet because the debounce window
+            // has not elapsed between rapid-fire calls.
+            File.Exists(path).Should().BeFalse();
+
+            svc.FlushPendingSave();
+            File.Exists(path).Should().BeTrue();
+            File.ReadAllText(path).Should().Contain(svc.ZoomFactor.ToString(System.Globalization.CultureInfo.InvariantCulture));
         }
         finally
         {

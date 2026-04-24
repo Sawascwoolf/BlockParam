@@ -44,6 +44,7 @@
        of the public API — the interactive UI never needs them. -->
   <ItemGroup>
     <InternalsVisibleTo Include="BlockParam.DevLauncher" />
+    <InternalsVisibleTo Include="BlockParam.Tests" />
   </ItemGroup>
 
   <!-- Embedded resources for localization -->

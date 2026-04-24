@@ -15,6 +15,22 @@ namespace BlockParam.UI;
 /// Zoom is shared across all dialogs via <see cref="UiZoomService.Shared"/>
 /// so toggling zoom in one dialog updates every open dialog at once and the
 /// preference persists across restarts (issue #14).
+///
+/// <para>
+/// Requires <see cref="Window.Content"/> to be a <see cref="FrameworkElement"/>.
+/// If the content root is a raw <see cref="UIElement"/> the zoom silently
+/// no-ops on that window — all in-tree dialogs use Grid/DockPanel roots,
+/// so this holds today.
+/// </para>
+///
+/// <para>
+/// WPF caveat: content hosted in a <see cref="System.Windows.Controls.Primitives.Popup"/>
+/// lives in a separate HWND and does <b>not</b> inherit the LayoutTransform.
+/// Help popups and tooltips therefore render unscaled relative to the rest
+/// of the dialog. Overlays used by BulkChangeDialog (autocomplete, hint,
+/// scope) were deliberately reworked to be inline Borders instead of Popups
+/// so they scale correctly.
+/// </para>
 /// </summary>
 internal static class ZoomHost
 {

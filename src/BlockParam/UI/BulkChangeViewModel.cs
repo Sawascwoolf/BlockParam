@@ -701,6 +701,13 @@ public class BulkChangeViewModel : ViewModelBase
             .ToList();
     }
 
+    /// <summary>
+    /// True when a keystroke on <see cref="NewValue"/> has scheduled a
+    /// debounce timer that hasn't fired yet. Test-only seam for verifying
+    /// that <see cref="AcceptSuggestion"/> cancels the trailing timer.
+    /// </summary>
+    internal bool HasPendingValueDebounce => _valueDebounceTimer != null;
+
     /// <summary>Accept a suggestion: set value and close the list.</summary>
     public void AcceptSuggestion(string value)
     {

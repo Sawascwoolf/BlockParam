@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Threading;
 using Newtonsoft.Json;
 using Serilog;
 
@@ -17,9 +18,16 @@ public class UiZoomService
     public const double StepZoom = 0.1;
     public const double DefaultZoom = 1.2;
 
+    // 300ms coalesces a rapid Ctrl+scroll gesture into a single disk write —
+    // without it the service touches ui-settings.json on every wheel tick.
+    private const int SaveDebounceMs = 300;
+
     private readonly string _settingsPath;
+    private readonly object _saveLock = new();
     private double _zoomFactor = DefaultZoom;
     private bool _loaded;
+    private Timer? _saveTimer;
+    private bool _savePending;
 
     public event Action<double>? ZoomChanged;
 
@@ -30,9 +38,10 @@ public class UiZoomService
     /// Replaces the shared singleton. Used by DevLauncher --capture to swap
     /// in an <see cref="CreateEphemeral"/> instance so video captures don't
     /// inherit the developer's personal %APPDATA% zoom.
-    /// Call BEFORE any dialog is constructed.
+    /// Call BEFORE any dialog is constructed. Internal: only capture-mode
+    /// code should mutate the global zoom state.
     /// </summary>
-    public static void ReplaceShared(UiZoomService service) => _shared = service;
+    internal static void ReplaceShared(UiZoomService service) => _shared = service;
 
     /// <summary>
     /// Creates an in-memory-only zoom service that neither reads from nor
@@ -87,8 +96,25 @@ public class UiZoomService
         if (Math.Abs(clamped - _zoomFactor) < 0.0001) return;
 
         _zoomFactor = clamped;
-        Save();
+        ScheduleSave();
         ZoomChanged?.Invoke(_zoomFactor);
+    }
+
+    /// <summary>
+    /// Forces any pending debounced save to flush synchronously. Useful for
+    /// tests and for callers that want to persist the final value before
+    /// spawning a subprocess that reads the same file.
+    /// </summary>
+    public void FlushPendingSave()
+    {
+        lock (_saveLock)
+        {
+            if (!_savePending) return;
+            _saveTimer?.Dispose();
+            _saveTimer = null;
+            _savePending = false;
+        }
+        Save();
     }
 
     private void EnsureLoaded()
@@ -108,6 +134,25 @@ public class UiZoomService
         catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException)
         {
             Log.Logger.Warning(ex, "UiZoomService: cannot read {Path} — using default zoom", _settingsPath);
+        }
+    }
+
+    private void ScheduleSave()
+    {
+        if (!PersistenceEnabled) return;
+        lock (_saveLock)
+        {
+            _savePending = true;
+            _saveTimer?.Dispose();
+            _saveTimer = new Timer(_ =>
+            {
+                lock (_saveLock)
+                {
+                    if (!_savePending) return;
+                    _savePending = false;
+                }
+                Save();
+            }, null, SaveDebounceMs, Timeout.Infinite);
         }
     }
 
