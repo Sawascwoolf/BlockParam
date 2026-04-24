@@ -9,6 +9,7 @@ public partial class ConfigEditorDialog : Window
     {
         InitializeComponent();
         WindowIconHelper.SetIcon(this);
+        ZoomHost.Attach(this);
     }
 
     public ConfigEditorDialog(ConfigEditorViewModel viewModel) : this()

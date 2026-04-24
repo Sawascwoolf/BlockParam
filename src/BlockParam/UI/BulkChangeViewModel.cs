@@ -704,6 +704,12 @@ public class BulkChangeViewModel : ViewModelBase
     /// <summary>Accept a suggestion: set value and close the list.</summary>
     public void AcceptSuggestion(string value)
     {
+        // Cancel any pending debounce from prior keystrokes — otherwise the
+        // timer fires after we clear FilteredSuggestions and repopulates it
+        // from the accepted value, re-opening the overlay.
+        _valueDebounceTimer?.Dispose();
+        _valueDebounceTimer = null;
+
         _newValue = value; // Set backing field to avoid re-triggering filter
         OnPropertyChanged(nameof(NewValue));
         ValidateValue();

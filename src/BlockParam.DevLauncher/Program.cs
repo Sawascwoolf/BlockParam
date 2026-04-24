@@ -52,6 +52,10 @@ class Program
             Thread.CurrentThread.CurrentUICulture = en;
             CultureInfo.DefaultThreadCurrentCulture = en;
             CultureInfo.DefaultThreadCurrentUICulture = en;
+
+            // Force the hardcoded default zoom so captures don't inherit the
+            // developer's personal %APPDATA%\BlockParam\ui-settings.json.
+            UiZoomService.ReplaceShared(UiZoomService.CreateEphemeral());
         }
 
         // 1. Find DB XML. Capture plan fixture wins; bare arg next; else defaults.

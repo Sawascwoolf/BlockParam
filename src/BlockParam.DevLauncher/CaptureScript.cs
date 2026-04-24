@@ -126,6 +126,15 @@ public sealed class Scene
     [JsonProperty("openScopeDropdown")] public bool? OpenScopeDropdown { get; set; }
 
     /// <summary>
+    /// Per-scene override for the UI zoom factor. Omit to use the default
+    /// (UiZoomService.DefaultZoom, currently 1.2). Applied via the ephemeral
+    /// capture-mode UiZoomService so it scales content without resizing the
+    /// window (the scene viewport is authoritative). Reset to default at the
+    /// start of every scene so per-scene overrides don't leak forward.
+    /// </summary>
+    [JsonProperty("zoom")] public double? Zoom { get; set; }
+
+    /// <summary>
     /// AncestorPath of the scope row to pre-select in the open scope overlay,
     /// so the row reads as "mouse is about to click this". Requires
     /// <see cref="OpenScopeDropdown"/> = true.
@@ -235,6 +244,11 @@ public static class SceneApplier
         ClearHoverPreview(vm, dialog);
         dialog.HideScopeDropdownScripted();
 
+        // Reset zoom to the default (or per-scene override) so a previous
+        // scene's override doesn't leak into subsequent frames.
+        BlockParam.Services.UiZoomService.Shared.SetZoom(
+            scene.Zoom ?? BlockParam.Services.UiZoomService.DefaultZoom);
+
         // Reset any expansion/selection/value leaked from a prior scene, so
         // each scene is fully declarative and order-independent — unless the
         // scene opts into preserveState for a multi-step workflow.
@@ -317,8 +331,11 @@ public static class SceneApplier
 
         if (scene.AcceptSuggestion != null)
         {
+            // AcceptSuggestion runs its work synchronously and cancels the
+            // debounce timer — no FlushPendingHighlighting needed, and calling
+            // it here would re-run UpdateFilteredSuggestions and re-open the
+            // overlay.
             vm.AcceptSuggestion(scene.AcceptSuggestion);
-            vm.FlushPendingHighlighting();
         }
 
         if (scene.StageBulk == true)

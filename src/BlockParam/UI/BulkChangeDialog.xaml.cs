@@ -13,6 +13,7 @@ public partial class BulkChangeDialog : Window
     {
         InitializeComponent();
         WindowIconHelper.SetIcon(this);
+        ZoomHost.Attach(this);
     }
 
     private bool _suppressSelectionEvents;
@@ -346,8 +347,10 @@ public partial class BulkChangeDialog : Window
         InlineOverlayList.SelectedItem = null;
         InlineOverlayList.Tag = memberVm;
 
-        // Compute TextBox bottom-left in dialog coords and position the overlay.
-        var bottomLeft = tb.TranslatePoint(new System.Windows.Point(0, tb.ActualHeight), this);
+        // Position relative to the Content root — the overlay is a sibling
+        // of `tb`'s ancestor inside the same LayoutTransform, so using `this`
+        // (outside the transform) would double-scale the margin when zoomed.
+        var bottomLeft = tb.TranslatePoint(new System.Windows.Point(0, tb.ActualHeight), (UIElement)Content);
         InlineOverlay.Width = tb.ActualWidth;
         InlineOverlay.Margin = new Thickness(bottomLeft.X, bottomLeft.Y, 0, 0);
         InlineOverlay.Visibility = Visibility.Visible;
@@ -434,7 +437,7 @@ public partial class BulkChangeDialog : Window
         }
 
         var bottomLeft = ScopeCombo.TranslatePoint(
-            new System.Windows.Point(0, ScopeCombo.ActualHeight), this);
+            new System.Windows.Point(0, ScopeCombo.ActualHeight), (UIElement)Content);
         ScopeOverlay.Width = ScopeCombo.ActualWidth;
         ScopeOverlay.Margin = new Thickness(bottomLeft.X, bottomLeft.Y, 0, 0);
         ScopeOverlay.Visibility = Visibility.Visible;
@@ -618,9 +621,11 @@ public partial class BulkChangeDialog : Window
         else element = null;
 
         if (element == null) return null;
+        // Translate to Content (inside any LayoutTransform) so the returned
+        // point is in the same space Canvas.SetLeft/Top on CursorShape expects.
         var tip = element.TranslatePoint(
             new System.Windows.Point(xInset, element.ActualHeight * 0.5),
-            this);
+            (UIElement)Content);
         // Cursor shape data starts at (1,1); subtract so the tip pixel
         // lands exactly on the computed point.
         return new System.Windows.Point(tip.X - 1, tip.Y - 1);
@@ -791,7 +796,8 @@ public partial class BulkChangeDialog : Window
             return;
         }
         // Right of the TextBox so the autocomplete overlay below the cell stays clear.
-        var topRight = tb.TranslatePoint(new System.Windows.Point(tb.ActualWidth, 0), this);
+        // Translate to Content (inside any LayoutTransform) so the margin isn't double-scaled.
+        var topRight = tb.TranslatePoint(new System.Windows.Point(tb.ActualWidth, 0), (UIElement)Content);
         InlineHintOverlay.Margin = new Thickness(topRight.X + 8, topRight.Y, 0, 0);
     }
 
@@ -823,7 +829,9 @@ public partial class BulkChangeDialog : Window
     private void OnInlineHintMouseDown(object sender, MouseButtonEventArgs e)
     {
         if (sender is not FrameworkElement fe) return;
-        _hintDragStart = e.GetPosition(this);
+        // Measure the drag in Content coords so pixel deltas stay consistent
+        // with Margin at any zoom level.
+        _hintDragStart = e.GetPosition((UIElement)Content);
         _hintDragOrigin = new System.Windows.Point(
             InlineHintOverlay.Margin.Left, InlineHintOverlay.Margin.Top);
         _draggingHint = true;
@@ -834,7 +842,7 @@ public partial class BulkChangeDialog : Window
     private void OnInlineHintMouseMove(object sender, MouseEventArgs e)
     {
         if (!_draggingHint) return;
-        var pos = e.GetPosition(this);
+        var pos = e.GetPosition((UIElement)Content);
         InlineHintOverlay.Margin = new Thickness(
             _hintDragOrigin.X + (pos.X - _hintDragStart.X),
             _hintDragOrigin.Y + (pos.Y - _hintDragStart.Y),
