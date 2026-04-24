@@ -220,6 +220,29 @@ public partial class BulkChangeDialog : Window
         }
     }
 
+    /// <summary>
+    /// #9: GridView columns have no native star sizing, so we compute it here.
+    /// Fixed columns keep their widths; the Comment column soaks up whatever
+    /// space is left so long comments stop truncating when the dialog is wide.
+    /// </summary>
+    private void OnMemberListSizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        if (CommentColumn == null || NameColumn == null
+            || DataTypeColumn == null || StartValueColumn == null) return;
+
+        // Chrome + vertical scrollbar + row padding. Slightly conservative so
+        // we never force a horizontal scrollbar when space is tight.
+        const double Chrome = 32;
+        var available = MemberListView.ActualWidth
+                        - NameColumn.Width
+                        - DataTypeColumn.Width
+                        - StartValueColumn.Width
+                        - Chrome;
+
+        const double MinCommentWidth = 160;
+        CommentColumn.Width = System.Math.Max(MinCommentWidth, available);
+    }
+
     private void OnListViewDoubleClick(object sender, MouseButtonEventArgs e)
     {
         if (MemberListView.SelectedItem is MemberNodeViewModel memberVm && !memberVm.IsLeaf)

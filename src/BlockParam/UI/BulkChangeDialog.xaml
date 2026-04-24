@@ -209,7 +209,9 @@
                       GridViewColumnHeader.Click="OnColumnHeaderClick"
                       MouseDoubleClick="OnListViewDoubleClick"
                       ContextMenuOpening="OnListViewContextMenuOpening"
-                      SelectionChanged="OnListViewSelectionChanged">
+                      SelectionChanged="OnListViewSelectionChanged"
+                      SizeChanged="OnMemberListSizeChanged"
+                      ScrollViewer.HorizontalScrollBarVisibility="Disabled">
                 <ListView.ContextMenu>
                     <ContextMenu/>
                 </ListView.ContextMenu>
@@ -259,7 +261,7 @@
                         <!-- Name column with tree guide lines, indentation, and expand toggle.
                              Indentation is applied ONLY in this column so the other columns
                              stay flush regardless of depth (#45). -->
-                        <GridViewColumn Header="{loc:Loc Column_Name}" Width="280">
+                        <GridViewColumn x:Name="NameColumn" Header="{loc:Loc Column_Name}" Width="280">
                             <GridViewColumn.CellTemplate>
                                 <DataTemplate>
                                     <StackPanel Orientation="Horizontal">
@@ -308,7 +310,7 @@
                         </GridViewColumn>
 
                         <!-- Data type column -->
-                        <GridViewColumn Header="{loc:Loc Column_DataType}" Width="140">
+                        <GridViewColumn x:Name="DataTypeColumn" Header="{loc:Loc Column_DataType}" Width="140">
                             <GridViewColumn.CellTemplate>
                                 <DataTemplate>
                                     <TextBlock Text="{Binding Datatype}">
@@ -338,7 +340,7 @@
                         </GridViewColumn>
 
                         <!-- Start value column (editable with inline autocomplete) -->
-                        <GridViewColumn Header="{loc:Loc Column_StartValue}" Width="120">
+                        <GridViewColumn x:Name="StartValueColumn" Header="{loc:Loc Column_StartValue}" Width="120">
                             <GridViewColumn.CellTemplate>
                                 <DataTemplate>
                                     <Border Margin="-6,-1,-6,-1">
@@ -370,7 +372,26 @@
                                                  GotFocus="OnStartValueGotFocus"
                                                  LostFocus="OnStartValueLostFocus"
                                                  TextChanged="OnInlineTextChanged"
-                                                 Tag="{Binding}"/>
+                                                 Tag="{Binding}"
+                                                 ToolTipService.ShowOnDisabled="True">
+                                            <TextBox.Style>
+                                                <Style TargetType="TextBox">
+                                                    <Style.Triggers>
+                                                        <!-- Error tooltip takes priority over hint (#7/#11) -->
+                                                        <DataTrigger Binding="{Binding HasInlineError}" Value="True">
+                                                            <Setter Property="ToolTip" Value="{Binding InlineErrorMessage}"/>
+                                                        </DataTrigger>
+                                                        <MultiDataTrigger>
+                                                            <MultiDataTrigger.Conditions>
+                                                                <Condition Binding="{Binding HasInlineError}" Value="False"/>
+                                                                <Condition Binding="{Binding HasRuleHint}" Value="True"/>
+                                                            </MultiDataTrigger.Conditions>
+                                                            <Setter Property="ToolTip" Value="{Binding RuleHint}"/>
+                                                        </MultiDataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </TextBox.Style>
+                                        </TextBox>
                                         <Button HorizontalAlignment="Right" VerticalAlignment="Stretch"
                                                 Width="14" Background="Transparent" BorderThickness="0"
                                                 Click="OnInlineDropdownClick" Cursor="Hand"
@@ -383,8 +404,9 @@
                             </GridViewColumn.CellTemplate>
                         </GridViewColumn>
 
-                        <!-- Comment column with color coding and tooltip -->
-                        <GridViewColumn Header="{loc:Loc Column_Comment}" Width="250">
+                        <!-- Comment column — resized dynamically (#9) so it fills
+                             the remaining horizontal space in the grid. -->
+                        <GridViewColumn x:Name="CommentColumn" Header="{loc:Loc Column_Comment}" Width="250">
                             <GridViewColumn.CellTemplate>
                                 <DataTemplate>
                                     <TextBlock Text="{Binding DisplayComment}"
@@ -651,8 +673,29 @@
                                                     </ListBox.ItemTemplate>
                                                 </ListBox>
                                             </Border>
+                                            <!-- Proactive rule hint (#7): shown before any validation error,
+                                                 hidden while an error is active so users see the diagnostic. -->
+                                            <TextBlock Text="{Binding ConstraintInfo}" Foreground="#5b6471"
+                                                       FontSize="10" Margin="0,2,0,0"
+                                                       TextWrapping="Wrap">
+                                                <TextBlock.Style>
+                                                    <Style TargetType="TextBlock">
+                                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                                        <Style.Triggers>
+                                                            <MultiDataTrigger>
+                                                                <MultiDataTrigger.Conditions>
+                                                                    <Condition Binding="{Binding ConstraintInfo, Converter={StaticResource StringToVis}}" Value="Visible"/>
+                                                                    <Condition Binding="{Binding HasValidationError}" Value="False"/>
+                                                                </MultiDataTrigger.Conditions>
+                                                                <Setter Property="Visibility" Value="Visible"/>
+                                                            </MultiDataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </TextBlock.Style>
+                                            </TextBlock>
                                             <TextBlock Text="{Binding ValidationError}" Foreground="Red"
                                                        FontSize="10" Margin="0,2,0,0"
+                                                       TextWrapping="Wrap"
                                                        Visibility="{Binding ValidationError, Converter={StaticResource StringToVis}}"/>
                                         </StackPanel>
 
@@ -873,6 +916,15 @@
                                         <TextBlock Text="{Binding PendingInlineEditCount}"
                                                    FontSize="10" FontWeight="Bold" Foreground="White"/>
                                     </Border>
+                                    <!-- Invalid-count badge (#11): appears when any pending entry fails validation. -->
+                                    <Border DockPanel.Dock="Left" Margin="6,0,0,0" Padding="5,0"
+                                            Background="#D32F2F" CornerRadius="8"
+                                            VerticalAlignment="Center"
+                                            ToolTip="{loc:Loc Pending_InvalidBadgeTooltip}"
+                                            Visibility="{Binding HasInvalidPending, Converter={StaticResource BoolToVis}}">
+                                        <TextBlock Text="{Binding InvalidPendingBadge}"
+                                                   FontSize="10" FontWeight="Bold" Foreground="White"/>
+                                    </Border>
                                     <Button DockPanel.Dock="Right" HorizontalAlignment="Right"
                                             Content="Undo all"
                                             Command="{Binding DiscardPendingCommand}"
@@ -932,9 +984,24 @@
                                 </ItemsControl.Template>
                                 <ItemsControl.ItemTemplate>
                                     <DataTemplate>
+                                        <!-- Invalid pending entries (#11): red left edge + pale fill +
+                                             tooltip with the validation message. Valid entries stay white. -->
                                         <Border BorderBrush="#E6E8EC" BorderThickness="0,0,0,1"
-                                                Padding="10,4,10,4" Background="White"
+                                                Padding="10,4,10,4"
                                                 MouseLeftButtonUp="OnPendingRowClick">
+                                            <Border.Style>
+                                                <Style TargetType="Border">
+                                                    <Setter Property="Background" Value="White"/>
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding Node.HasInlineError}" Value="True">
+                                                            <Setter Property="Background" Value="#FFF4F4"/>
+                                                            <Setter Property="BorderBrush" Value="#D32F2F"/>
+                                                            <Setter Property="BorderThickness" Value="3,0,0,1"/>
+                                                            <Setter Property="ToolTip" Value="{Binding Node.InlineErrorMessage}"/>
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </Border.Style>
                                             <StackPanel>
                                                 <DockPanel LastChildFill="True">
                                                     <Button DockPanel.Dock="Right"
@@ -944,6 +1011,16 @@
                                                             FontSize="12" Foreground="#5b6471"
                                                             Cursor="Hand" Padding="4,0"
                                                             ToolTip="Undo this pending edit"/>
+                                                    <!-- Invalid marker (#11). -->
+                                                    <Border DockPanel.Dock="Right" Margin="6,0,0,0"
+                                                            Background="#D32F2F" BorderBrush="#D32F2F" BorderThickness="1"
+                                                            Padding="3,0" CornerRadius="2"
+                                                            VerticalAlignment="Center"
+                                                            ToolTip="{Binding Node.InlineErrorMessage}"
+                                                            Visibility="{Binding Node.HasInlineError, Converter={StaticResource BoolToVis}}">
+                                                        <TextBlock Text="!" FontSize="10" FontWeight="Bold"
+                                                                   Foreground="White"/>
+                                                    </Border>
                                                     <Border DockPanel.Dock="Right" Margin="6,0,0,0"
                                                             Background="#e3edfc" BorderBrush="#1f6feb" BorderThickness="1"
                                                             Padding="3,0" CornerRadius="2"
@@ -965,13 +1042,38 @@
                                                                Foreground="#8a929d"
                                                                TextDecorations="Strikethrough"/>
                                                     <TextBlock Text=" &#x2192; " FontSize="10" Foreground="#e0a93a"/>
-                                                    <Border Background="#fde7a8" Padding="3,0">
+                                                    <Border Padding="3,0">
+                                                        <Border.Style>
+                                                            <Style TargetType="Border">
+                                                                <Setter Property="Background" Value="#fde7a8"/>
+                                                                <Style.Triggers>
+                                                                    <DataTrigger Binding="{Binding Node.HasInlineError}" Value="True">
+                                                                        <Setter Property="Background" Value="#FFCDD2"/>
+                                                                    </DataTrigger>
+                                                                </Style.Triggers>
+                                                            </Style>
+                                                        </Border.Style>
                                                         <TextBlock Text="{Binding PendingValue}"
                                                                    FontFamily="Consolas,Courier New" FontSize="10"
-                                                                   FontWeight="SemiBold"
-                                                                   Foreground="#6b4a0a"/>
+                                                                   FontWeight="SemiBold">
+                                                            <TextBlock.Style>
+                                                                <Style TargetType="TextBlock">
+                                                                    <Setter Property="Foreground" Value="#6b4a0a"/>
+                                                                    <Style.Triggers>
+                                                                        <DataTrigger Binding="{Binding Node.HasInlineError}" Value="True">
+                                                                            <Setter Property="Foreground" Value="#B71C1C"/>
+                                                                        </DataTrigger>
+                                                                    </Style.Triggers>
+                                                                </Style>
+                                                            </TextBlock.Style>
+                                                        </TextBlock>
                                                     </Border>
                                                 </StackPanel>
+                                                <!-- Inline validation message (#11) — surfaces why the entry is invalid. -->
+                                                <TextBlock Text="{Binding Node.InlineErrorMessage}"
+                                                           FontSize="10" Foreground="#B71C1C"
+                                                           TextWrapping="Wrap" Margin="0,2,0,0"
+                                                           Visibility="{Binding Node.HasInlineError, Converter={StaticResource BoolToVis}}"/>
                                             </StackPanel>
                                         </Border>
                                     </DataTemplate>

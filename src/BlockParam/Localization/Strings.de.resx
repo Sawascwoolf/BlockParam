@@ -232,6 +232,18 @@ Beispiele: en-US, de-DE. Leer lassen für Standardsprache.</value></data>
   <data name="Dialog_CollapseAll" xml:space="preserve"><value>Alle zuklappen</value></data>
   <data name="Context_ExpandAllChildren" xml:space="preserve"><value>Alle Unterelemente aufklappen</value></data>
   <data name="Context_CollapseAllChildren" xml:space="preserve"><value>Alle Unterelemente zuklappen</value></data>
+  <!-- Regel-Hinweise (#7) — proaktiv im Inspector und Inline-Tooltip angezeigt. -->
+  <data name="Hint_Range" xml:space="preserve"><value>Bereich: {0} – {1}</value></data>
+  <data name="Hint_Min" xml:space="preserve"><value>Min: {0}</value></data>
+  <data name="Hint_Max" xml:space="preserve"><value>Max: {0}</value></data>
+  <data name="Hint_AllowedOf" xml:space="preserve"><value>Erlaubt: {0}</value></data>
+  <data name="Hint_TagTable" xml:space="preserve"><value>Aus Tag-Tabelle „{0}“</value></data>
+  <data name="Hint_Separator" xml:space="preserve"><value> · </value></data>
+  <!-- Validierungs-Meldung für shared MemberValidator -->
+  <data name="Validation_RequireTagTable" xml:space="preserve"><value>Wert muss eine Konstante aus der Tag-Tabelle „{0}“ sein.</value></data>
+  <!-- Seitenleiste „Ausstehende Änderungen“ (#11) -->
+  <data name="Pending_InvalidBadge" xml:space="preserve"><value>{0} von {1} ungültig</value></data>
+  <data name="Pending_InvalidBadgeTooltip" xml:space="preserve"><value>Ungültige Einträge korrigieren oder verwerfen, bevor übernommen wird.</value></data>
   <!-- Inkonsistente UDT Kompilier-Abfrage (#27) -->
   <data name="Udt_InconsistentPromptTitle" xml:space="preserve"><value>BlockParam — Kompilierung erforderlich</value></data>
   <data name="Udt_InconsistentPrompt" xml:space="preserve"><value>{0} UDT(s) können nicht exportiert werden, da sie inkonsistent sind:

@@ -580,6 +580,41 @@ Examples: en-US, de-DE. Leave empty for the default language.</value>
   <data name="Context_CollapseAllChildren" xml:space="preserve">
     <value>Collapse All Children</value>
   </data>
+  <!-- Rule hints (#7) — shown proactively in the inspector and inline tooltips. -->
+  <data name="Hint_Range" xml:space="preserve">
+    <value>Range: {0} – {1}</value>
+    <comment>{0} = min, {1} = max</comment>
+  </data>
+  <data name="Hint_Min" xml:space="preserve">
+    <value>Min: {0}</value>
+  </data>
+  <data name="Hint_Max" xml:space="preserve">
+    <value>Max: {0}</value>
+  </data>
+  <data name="Hint_AllowedOf" xml:space="preserve">
+    <value>One of: {0}</value>
+    <comment>{0} = comma-separated allowed values</comment>
+  </data>
+  <data name="Hint_TagTable" xml:space="preserve">
+    <value>From tag table '{0}'</value>
+    <comment>{0} = tag table name</comment>
+  </data>
+  <data name="Hint_Separator" xml:space="preserve">
+    <value> · </value>
+  </data>
+  <!-- Validation messages used by the shared MemberValidator. -->
+  <data name="Validation_RequireTagTable" xml:space="preserve">
+    <value>Value must be a constant from the '{0}' tag table.</value>
+    <comment>{0} = tag table name</comment>
+  </data>
+  <!-- Pending-edits sidebar (#11) -->
+  <data name="Pending_InvalidBadge" xml:space="preserve">
+    <value>{0} of {1} invalid</value>
+    <comment>{0} = invalid count, {1} = total pending count</comment>
+  </data>
+  <data name="Pending_InvalidBadgeTooltip" xml:space="preserve">
+    <value>Fix or undo invalid entries before applying.</value>
+  </data>
   <!-- Inconsistent UDT compile prompt (#27) -->
   <data name="Udt_InconsistentPromptTitle" xml:space="preserve">
     <value>BlockParam — Compilation Required</value>
