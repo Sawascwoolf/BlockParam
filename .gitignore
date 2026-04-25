@@ -37,6 +37,10 @@ AddInPublisherConfiguration.xml
 addin-staging/
 publish/
 
+## Local-only experiments (PermSpike etc.) — never committed.
+## Build artefacts under bin/ and obj/ are already ignored above.
+/spike/
+
 ## OS
 Thumbs.db
 .DS_Store
@@ -54,3 +58,8 @@ Thumbs.db
 ## Workflow video intermediate frames — regenerable via DevLauncher --capture-script.
 ## Only the stitched MP4 + fixtures + scripts are tracked.
 assets/screenshots/workflow/wf*.png
+
+## Chapter cards — per-chapter SVGs are produced by render-chapters.sh from
+## chapter-template.svg + workflow_inline.json. The template, script and
+## transparent logo variant are tracked; the per-chapter outputs are not.
+assets/screenshots/workflow/chapters/chapter-0*.svg

@@ -15,10 +15,20 @@ dotnet build src/BlockParam.DevLauncher -c Debug
 src/BlockParam.DevLauncher/bin/Debug/net48/BlockParam.DevLauncher.exe \
     --capture-script assets/screenshots/scripts/workflow_inline.json
 
+bash assets/screenshots/workflow/chapters/render-chapters.sh
+
 bash assets/screenshots/scripts/build_workflow_video.sh
 ```
 
 Output: `assets/screenshots/workflow/workflow_inline.mp4`. The stitch script auto-opens it in the default player.
+
+## Why three steps
+
+1. **DevLauncher capture** renders all dialog scenes (everything *not* `kind: "chapter"`).
+2. **render-chapters.sh** renders chapter title cards from `chapters/chapter-template.svg` (Inkscape) — driven by the same `workflow_inline.json` (chapter scenes have `kind: "chapter"`, `chapterTitle`, `chapterSubtitle`). Adding a chapter scene to the manifest auto-resizes the progress bar across all cards.
+3. **build_workflow_video.sh** stitches every scene's PNG into the MP4 with per-beat pacing.
+
+Steps 1 and 2 don't conflict — the capture loop now skips chapter scenes — so they can run in either order.
 
 ## Why the build step is not optional
 

@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Chapter card template (1920x1080).
+
+  Filled at render time by render-chapters.sh. Placeholders:
+    {{CHAPTER_NUMBER}}  zero-padded display string, e.g. "01"
+    {{TITLE}}           e.g. "Bulk edits"
+    {{SUBTITLE_TSPANS}} the subtitle text inner content (one or more <tspan>
+                        elements joined by cyan "·" separators — see script).
+    {{PROGRESS_RECTS}}  the progress-bar <rect> elements; the script emits
+                        one rect per chapter, evenly spaced across SPAN=1760,
+                        with a dark fill for chapters up to and including the
+                        current one and a light fill for the rest.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
+     viewBox="0 0 1920 1080" width="1920" height="1080">
+
+  <!-- Background -->
+  <rect width="1920" height="1080" fill="#f5f7fa"/>
+
+  <!-- Hero logo (right side) -->
+  <image xlink:href="blockparam-logo-transparent.svg" href="blockparam-logo-transparent.svg"
+         x="1230" y="180" width="600" height="600"/>
+
+  <!-- Brand mark (top-left): real logo + wordmark -->
+  <g transform="translate(120, 120)">
+    <image xlink:href="blockparam-logo-transparent.svg" href="blockparam-logo-transparent.svg"
+           x="0" y="0" width="52" height="52"/>
+    <text x="68" y="34" font-family="Segoe UI, Arial, sans-serif"
+          font-size="22" font-weight="600" fill="#0e2140">BlockParam</text>
+  </g>
+
+  <!-- Chapter heading -->
+  <g transform="translate(120, 600)">
+    <text x="0" y="0" font-family="Consolas, 'Courier New', monospace"
+          font-size="20" font-weight="600" fill="#06b6c7" letter-spacing="5">CHAPTER · {{CHAPTER_NUMBER}}</text>
+
+    <text x="0" y="160" font-family="Segoe UI, Arial, sans-serif"
+          font-size="180" font-weight="800" fill="#0e2140" letter-spacing="-5">{{TITLE}}</text>
+
+    <text x="0" y="230" font-family="Segoe UI, Arial, sans-serif"
+          font-size="34" font-weight="500" fill="#5a6678">
+{{SUBTITLE_TSPANS}}
+    </text>
+  </g>
+
+  <!-- Progress bar (one segment per video chapter, generated at render time) -->
+  <g transform="translate(120, 1020)">
+{{PROGRESS_RECTS}}
+  </g>
+</svg>

@@ -228,13 +228,14 @@ class Program
             // Per-scene viewport override takes precedence over the script-level one.
             var effective = scene.Viewport ?? plan.Viewport;
 
-            // Chapter cards render their own visual tree, not the dialog.
+            // Chapter cards are rendered out-of-band by
+            // assets/screenshots/workflow/chapters/render-chapters.sh (SVG
+            // template → Inkscape → wf<NN>_ch_<slug>.png). The capture loop
+            // skips them so it doesn't overwrite the designed PNG with a
+            // dialog snapshot.
             if (string.Equals(scene.Kind, "chapter", StringComparison.OrdinalIgnoreCase))
             {
-                var outPathCard = Path.Combine(plan.OutputDir, scene.Filename);
-                Directory.CreateDirectory(Path.GetDirectoryName(outPathCard)!);
-                CaptureChapterCardToPng(scene, outPathCard, effective, plan.Scale);
-                Log.Information("Scene {Id}: saved chapter card {Path}", scene.Id, outPathCard);
+                Log.Information("Scene {Id}: skipping chapter card (rendered by render-chapters.sh)", scene.Id);
                 continue;
             }
 
@@ -276,72 +277,6 @@ class Program
             Log.Information("Scene {Id}: saved {Path}", scene.Id, outPath);
         }
         dialog.Close();
-    }
-
-    /// <summary>
-    /// Renders a chapter card — centered title (+ optional subtitle) on a white
-    /// background at the scene's viewport — and writes it as a PNG at the same
-    /// DPI as the dialog snapshots. Placeholder visual; swap to a designed
-    /// template later without changing callers.
-    /// </summary>
-    private static void CaptureChapterCardToPng(
-        Scene scene, string outputPath, Viewport? viewport, double scale)
-    {
-        var w = viewport?.Width ?? 1920.0;
-        var h = viewport?.Height ?? 1080.0;
-
-        var stack = new System.Windows.Controls.StackPanel
-        {
-            HorizontalAlignment = System.Windows.HorizontalAlignment.Center,
-            VerticalAlignment = System.Windows.VerticalAlignment.Center,
-        };
-        stack.Children.Add(new System.Windows.Controls.TextBlock
-        {
-            Text = scene.ChapterTitle ?? "",
-            FontSize = 96,
-            FontWeight = System.Windows.FontWeights.SemiBold,
-            Foreground = System.Windows.Media.Brushes.Black,
-            HorizontalAlignment = System.Windows.HorizontalAlignment.Center,
-            TextAlignment = System.Windows.TextAlignment.Center,
-        });
-        if (!string.IsNullOrWhiteSpace(scene.ChapterSubtitle))
-        {
-            stack.Children.Add(new System.Windows.Controls.TextBlock
-            {
-                Text = scene.ChapterSubtitle,
-                FontSize = 32,
-                Margin = new System.Windows.Thickness(0, 24, 0, 0),
-                Foreground = new System.Windows.Media.SolidColorBrush(
-                    System.Windows.Media.Color.FromRgb(0x66, 0x66, 0x66)),
-                HorizontalAlignment = System.Windows.HorizontalAlignment.Center,
-                TextAlignment = System.Windows.TextAlignment.Center,
-            });
-        }
-
-        var root = new System.Windows.Controls.Grid
-        {
-            Width = w,
-            Height = h,
-            Background = System.Windows.Media.Brushes.White,
-        };
-        root.Children.Add(stack);
-
-        // Measure/arrange off-screen so the RenderTargetBitmap has a valid visual.
-        var size = new System.Windows.Size(w, h);
-        root.Measure(size);
-        root.Arrange(new System.Windows.Rect(size));
-        root.UpdateLayout();
-
-        var width = (int)Math.Ceiling(w * scale);
-        var height = (int)Math.Ceiling(h * scale);
-        var dpi = 96.0 * scale;
-        var rtb = new RenderTargetBitmap(width, height, dpi, dpi, PixelFormats.Pbgra32);
-        rtb.Render(root);
-
-        var encoder = new PngBitmapEncoder();
-        encoder.Frames.Add(BitmapFrame.Create(rtb));
-        using var fs = File.Create(outputPath);
-        encoder.Save(fs);
     }
 
     private static void CaptureWindowToPng(Window window, string outputPath, double scale)

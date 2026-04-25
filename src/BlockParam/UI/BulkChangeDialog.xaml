@@ -366,13 +366,29 @@
                                     <Grid>
                                         <TextBox x:Name="InlineStartValue"
                                                  Text="{Binding EditableStartValue, UpdateSourceTrigger=PropertyChanged}"
+                                                 IsReadOnly="{Binding IsLeaf, Converter={StaticResource InvertBool}}"
                                                  BorderThickness="0" Background="Transparent"
                                                  FontFamily="Consolas,Courier New"
                                                  Padding="0,0,14,0" Margin="0"
                                                  GotFocus="OnStartValueGotFocus"
                                                  LostFocus="OnStartValueLostFocus"
                                                  TextChanged="OnInlineTextChanged"
-                                                 Tag="{Binding}"/>
+                                                 Tag="{Binding}">
+                                            <TextBox.Style>
+                                                <Style TargetType="TextBox">
+                                                    <Style.Triggers>
+                                                        <!-- Non-leaves (struct/UDT/array/DB root) carry no
+                                                             start value in TIA — make the cell visibly
+                                                             non-editable: muted text, no caret, not focusable. -->
+                                                        <DataTrigger Binding="{Binding IsLeaf}" Value="False">
+                                                            <Setter Property="Focusable" Value="False"/>
+                                                            <Setter Property="Cursor" Value="Arrow"/>
+                                                            <Setter Property="Foreground" Value="#999"/>
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </TextBox.Style>
+                                        </TextBox>
                                         <Button HorizontalAlignment="Right" VerticalAlignment="Stretch"
                                                 Width="14" Background="Transparent" BorderThickness="0"
                                                 Click="OnInlineDropdownClick" Cursor="Hand"
