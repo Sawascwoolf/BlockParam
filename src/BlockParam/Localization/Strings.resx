@@ -626,6 +626,16 @@ Examples: en-US, de-DE. Leave empty for the default language.</value>
   <data name="Pending_InvalidBadgeTooltip" xml:space="preserve">
     <value>Fix or undo invalid entries before applying.</value>
   </data>
+  <!-- Existing-value validator findings (#26) -->
+  <data name="Issues_Header" xml:space="preserve">
+    <value>ISSUES</value>
+  </data>
+  <data name="Issues_Empty" xml:space="preserve">
+    <value>No rule violations found in current values.</value>
+  </data>
+  <data name="Issues_Tooltip" xml:space="preserve">
+    <value>Existing values that already violate a configured rule. Read-only — fix manually if needed; Apply is not blocked.</value>
+  </data>
   <!-- Inconsistent UDT compile prompt (#27) -->
   <data name="Udt_InconsistentPromptTitle" xml:space="preserve">
     <value>BlockParam — Compilation Required</value>

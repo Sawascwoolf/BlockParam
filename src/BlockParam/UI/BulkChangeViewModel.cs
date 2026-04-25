@@ -75,6 +75,7 @@ public class BulkChangeViewModel : ViewModelBase
     private bool _isBulkEditExpanded = true;
     private bool _isBulkPreviewExpanded = true;
     private bool _isPendingExpanded = true;
+    private bool _isIssuesExpanded = true;
     private string _currentXml;
     private readonly IReadOnlyList<string> _projectLanguages;
     private readonly CommentLanguagePolicy _commentLanguagePolicy;
@@ -147,6 +148,7 @@ public class BulkChangeViewModel : ViewModelBase
 
         BulkPreview = new ObservableCollection<BulkPreviewEntry>();
         PendingEdits = new ObservableCollection<PendingEditEntry>();
+        ExistingIssues = new ObservableCollection<ExistingIssueEntry>();
 
         // Build tree view models
         RootMembers = new ObservableCollection<MemberNodeViewModel>();
@@ -176,6 +178,7 @@ public class BulkChangeViewModel : ViewModelBase
         ToggleBulkEditCommand = new RelayCommand(() => IsBulkEditExpanded = !IsBulkEditExpanded);
         ToggleBulkPreviewCommand = new RelayCommand(() => IsBulkPreviewExpanded = !IsBulkPreviewExpanded);
         TogglePendingCommand = new RelayCommand(() => IsPendingExpanded = !IsPendingExpanded);
+        ToggleIssuesCommand = new RelayCommand(() => IsIssuesExpanded = !IsIssuesExpanded);
         ClearManualSelectionCommand = new RelayCommand(ExecuteClearManualSelection,
             () => _manualSelectedPaths.Count > 0);
 
@@ -189,6 +192,10 @@ public class BulkChangeViewModel : ViewModelBase
         ApplyAllFilters();
         RefreshFlatList();
         UpdateUsageStatus();
+
+        // #26: Surface pre-existing rule violations on dialog load. Runs after
+        // RefreshRuleHints so RuleHint is available for the issue tooltip.
+        RebuildExistingIssues();
     }
 
     // --- Properties ---
@@ -211,9 +218,19 @@ public class BulkChangeViewModel : ViewModelBase
     /// </summary>
     public ObservableCollection<PendingEditEntry> PendingEdits { get; }
 
+    /// <summary>
+    /// Findings produced by running the validator over the *existing* StartValues
+    /// when the dialog opens (and after every tree refresh / inline edit). Read-only —
+    /// these are pre-existing rule violations the user can fix manually, not pending
+    /// edits. They never block Apply (#26).
+    /// </summary>
+    public ObservableCollection<ExistingIssueEntry> ExistingIssues { get; }
+
     public bool HasBulkPreview => BulkPreview.Count > 0;
     public int BulkPreviewCount => BulkPreview.Count;
     public bool HasPendingEdits => PendingEdits.Count > 0;
+    public bool HasExistingIssues => ExistingIssues.Count > 0;
+    public int ExistingIssuesCount => ExistingIssues.Count;
 
     /// <summary>Preview rows whose node already has a pending edit — they'd overwrite it on Set.</summary>
     public int BulkPreviewConflictCount => BulkPreview.Count(e => e.HasPendingConflict);
@@ -595,9 +612,16 @@ public class BulkChangeViewModel : ViewModelBase
         set { if (_isPendingExpanded != value) { _isPendingExpanded = value; OnPropertyChanged(nameof(IsPendingExpanded)); } }
     }
 
+    public bool IsIssuesExpanded
+    {
+        get => _isIssuesExpanded;
+        set { if (_isIssuesExpanded != value) { _isIssuesExpanded = value; OnPropertyChanged(nameof(IsIssuesExpanded)); } }
+    }
+
     public ICommand ToggleBulkEditCommand { get; }
     public ICommand ToggleBulkPreviewCommand { get; }
     public ICommand TogglePendingCommand { get; }
+    public ICommand ToggleIssuesCommand { get; }
 
     /// <summary>
     /// Raised after the flat list has been refreshed so the view can rehydrate
@@ -1459,6 +1483,52 @@ public class BulkChangeViewModel : ViewModelBase
             ApplyRuleHint(child, config);
     }
 
+    /// <summary>
+    /// Runs the shared <see cref="MemberValidator"/> over every leaf member's
+    /// *current* StartValue (independent of any pending edit) and rebuilds
+    /// <see cref="ExistingIssues"/> with one entry per violation. Surfaces
+    /// rule drift and edits made directly in TIA without forcing the user to
+    /// touch the value first (#26).
+    /// </summary>
+    /// <remarks>
+    /// Intentionally does not depend on tag tables having been exported — the
+    /// validator already short-circuits cleanly when the cache is missing
+    /// (no false positives for tag-table rules with no cache yet).
+    /// </remarks>
+    private void RebuildExistingIssues()
+    {
+        ExistingIssues.Clear();
+        var validator = BuildValidator();
+
+        foreach (var root in RootMembers)
+            ScanExistingViolations(root, validator);
+
+        OnPropertyChanged(nameof(HasExistingIssues));
+        OnPropertyChanged(nameof(ExistingIssuesCount));
+    }
+
+    private void ScanExistingViolations(MemberNodeViewModel node, MemberValidator validator)
+    {
+        if (node.IsLeaf && !string.IsNullOrEmpty(node.StartValue))
+        {
+            var error = validator.Validate(node.Model, node.StartValue);
+            if (error != null)
+            {
+                node.HasExistingViolation = true;
+                node.ExistingViolationMessage = error;
+                ExistingIssues.Add(new ExistingIssueEntry(
+                    node, node.StartValue ?? "", error, node.RuleHint));
+            }
+            else if (node.HasExistingViolation)
+            {
+                node.HasExistingViolation = false;
+                node.ExistingViolationMessage = null;
+            }
+        }
+        foreach (var child in node.Children)
+            ScanExistingViolations(child, validator);
+    }
+
     private void UpdateFilteredSuggestions()
     {
         if (_suggestions.Count == 0 || _suppressSuggestions)
@@ -1599,6 +1669,9 @@ public class BulkChangeViewModel : ViewModelBase
 
         UpdateTagTableAge();
         ReloadSuggestions();
+        // Tag-table rules may have flipped from "no cache → no validation" to
+        // "cache loaded → validates" — rerun the existing-value scan (#26).
+        RebuildExistingIssues();
     }
 
     private void UpdateTagTableAge()
@@ -2015,6 +2088,10 @@ public class BulkChangeViewModel : ViewModelBase
         // Reload config after editor closes (may have been saved)
         _configLoader.Invalidate();
         OnPropertyChanged(nameof(HasCommentConfig));
+        // Re-evaluate rule hints + existing-value findings against the
+        // (possibly updated) ruleset (#26).
+        RefreshRuleHints();
+        RebuildExistingIssues();
         StatusText = Res.Get("Status_Ready");
     }
 
@@ -2247,6 +2324,7 @@ public class BulkChangeViewModel : ViewModelBase
             RootMembers.Add(vm);
         }
         RefreshRuleHints();
+        RebuildExistingIssues();
 
         // Restore expand states on ALL new nodes before building flat list
         foreach (var root in RootMembers)
