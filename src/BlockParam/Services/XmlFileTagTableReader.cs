@@ -26,7 +26,6 @@ public class XmlFileTagTableReader : ITagTableReader
         var filePath = Path.Combine(_directory, $"{tableName}.xml");
         if (!File.Exists(filePath))
         {
-            Log.Debug("Tag table file not found: {Path}", filePath);
             return Array.Empty<TagTableEntry>();
         }
 
@@ -64,7 +63,6 @@ public class XmlFileTagTableReader : ITagTableReader
                 entries.Add(new TagTableEntry(name, value, dataType, defaultComment, comments));
             }
 
-            Log.Debug("Read {Count} entries from tag table {Name}", entries.Count, tableName);
             return entries;
         }
         catch (Exception ex)

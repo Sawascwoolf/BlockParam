@@ -1,7 +1,6 @@
 using System;
 using System.Windows;
 using System.Windows.Media.Imaging;
-using Serilog;
 
 namespace BlockParam.UI;
 
@@ -14,9 +13,9 @@ internal static class WindowIconHelper
             var uri = new Uri("pack://application:,,,/BlockParam;component/Resources/BlockParam_logo.ico", UriKind.Absolute);
             window.Icon = BitmapFrame.Create(uri);
         }
-        catch (Exception ex)
+        catch
         {
-            Log.Debug("Could not load window icon: {Message}", ex.Message);
+            // Icon is decorative — silently fall back to the default WPF icon.
         }
     }
 }

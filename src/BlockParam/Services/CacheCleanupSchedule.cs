@@ -1,7 +1,6 @@
 using System;
 using System.Globalization;
 using System.IO;
-using Serilog;
 
 namespace BlockParam.Services;
 
@@ -27,9 +26,9 @@ public static class CacheCleanupSchedule
             if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
             File.WriteAllText(stateFile, nextRun.ToString("o", CultureInfo.InvariantCulture));
         }
-        catch (Exception ex)
+        catch
         {
-            Log.Debug(ex, "CacheCleanupSchedule: could not write {File}", stateFile);
+            // Non-fatal: cleanup will just retry next time the add-in loads.
         }
     }
 
@@ -44,9 +43,8 @@ public static class CacheCleanupSchedule
                 return dt;
             return null;
         }
-        catch (Exception ex)
+        catch
         {
-            Log.Debug(ex, "CacheCleanupSchedule: could not read {File}", stateFile);
             return null;
         }
     }

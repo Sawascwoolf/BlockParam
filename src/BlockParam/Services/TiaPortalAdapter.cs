@@ -71,7 +71,6 @@ public class TiaPortalAdapter : ITiaPortalAdapter
         var compilable = block.GetService<ICompilable>();
         if (compilable != null)
         {
-            Log.Debug("Compiling via block.GetService<ICompilable>");
             var result = compilable.Compile();
             Log.Information("Compiled {Block}: {State}", block.Name, result.State);
             return;
@@ -84,7 +83,6 @@ public class TiaPortalAdapter : ITiaPortalAdapter
             var groupCompilable = group.GetService<ICompilable>();
             if (groupCompilable != null)
             {
-                Log.Debug("Compiling via parent group.GetService<ICompilable>");
                 var result = groupCompilable.Compile();
                 Log.Information("Compiled group for {Block}: {State}", block.Name, result.State);
                 return;
@@ -110,7 +108,6 @@ public class TiaPortalAdapter : ITiaPortalAdapter
     {
         var group = (PlcBlockGroup)blockGroup;
         group.Blocks.Import(new FileInfo(xmlPath), ImportOptions.Override);
-        Log.Debug("Block imported from {Path}", xmlPath);
     }
 
     public string BackupBlock(object dataBlock, string backupDirectory)

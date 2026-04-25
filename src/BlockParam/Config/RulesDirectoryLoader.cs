@@ -32,7 +32,6 @@ public class RulesDirectoryLoader
         if (!Directory.Exists(directoryPath))
         {
             result.Warnings.Add($"Rules directory not found: {directoryPath}");
-            Log.Warning("Rules directory not found: {Path}", directoryPath);
             return result;
         }
 
@@ -55,7 +54,6 @@ public class RulesDirectoryLoader
             var fileName = Path.GetFileName(file);
             if (skipFileNames != null && fileName != null && skipFileNames.Contains(fileName))
             {
-                Log.Debug("Skipping {File} (overridden locally)", fileName);
                 continue;
             }
 

@@ -61,8 +61,6 @@ public class ConfigLoader
                 RulesDirectory = _scriptedRulesDirOverride,
             };
             _cachedConfig.Rules.AddRange(only.Rules);
-            Log.Logger.Information("Config (scripted): {RuleCount} rules from {Dir}",
-                _cachedConfig.Rules.Count, _scriptedRulesDirOverride);
             return _cachedConfig;
         }
 
@@ -87,7 +85,6 @@ public class ConfigLoader
         if (!string.IsNullOrEmpty(sharedRulesDir))
         {
             var resolvedSharedDir = ResolveRulesDirectory(sharedRulesDir);
-            Log.Logger.Information("ConfigLoader: shared rulesDirectory={RulesDir}", resolvedSharedDir);
 
             sharedResult = dirLoader.LoadFromDirectory(resolvedSharedDir,
                 skipFileNames: localFileNames, ruleSource: RuleSource.Shared);
@@ -103,7 +100,6 @@ public class ConfigLoader
             var projectRulesDir = GetTiaProjectRulesDirectory();
             if (projectRulesDir != null && Directory.Exists(projectRulesDir))
             {
-                Log.Logger.Information("ConfigLoader: TIA project rules from {Dir}", projectRulesDir);
                 projectResult = dirLoader.LoadFromDirectory(projectRulesDir,
                     ruleSource: RuleSource.TiaProject);
 
@@ -226,7 +222,6 @@ public class ConfigLoader
             NullValueHandling = NullValueHandling.Ignore
         });
         File.WriteAllText(filePath, json);
-        Log.Logger.Information("Saved rule file: {Path}", filePath);
         Invalidate();
     }
 

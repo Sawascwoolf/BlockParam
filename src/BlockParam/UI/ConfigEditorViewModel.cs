@@ -403,22 +403,16 @@ public class ConfigEditorViewModel : ViewModelBase
     private void ReloadAfterSave()
     {
         var selectedPattern = SelectedFile?.PathPattern;
-        Log.Debug("ReloadAfterSave: scheduling dispatcher callback, pattern={Pattern}", selectedPattern);
         Dispatcher.CurrentDispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() =>
         {
             try
             {
-                Log.Debug("ReloadAfterSave: dispatcher callback started");
                 SelectedFile = null;
-                Log.Debug("ReloadAfterSave: SelectedFile cleared");
                 LoadAllFiles();
-                Log.Debug("ReloadAfterSave: LoadAllFiles done, {Count} rules", RuleFiles.Count);
                 FilteredRuleFiles.Refresh();
-                Log.Debug("ReloadAfterSave: FilteredRuleFiles refreshed");
                 if (selectedPattern != null)
                     SelectedFile = RuleFiles.FirstOrDefault(f =>
                         string.Equals(f.PathPattern, selectedPattern, StringComparison.OrdinalIgnoreCase));
-                Log.Debug("ReloadAfterSave: done, SelectedFile={File}", SelectedFile?.PathPattern);
             }
             catch (Exception ex)
             {
@@ -460,8 +454,6 @@ public class ConfigEditorViewModel : ViewModelBase
                 }
 
                 var targetPath = Path.Combine(targetDir, file.FileName);
-                Log.Debug("SaveAll: saving '{FileName}' to {Dest} ({Path}), old={OldPath}",
-                    file.FileName, file.SaveDestination, targetPath, file.FilePath);
                 var config = file.ToBulkChangeConfig();
                 _configLoader.SaveRuleFile(targetPath, config);
 
