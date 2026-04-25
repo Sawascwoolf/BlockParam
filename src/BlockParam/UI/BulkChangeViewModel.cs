@@ -6,8 +6,8 @@ using System.Threading;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Threading;
-using Serilog;
 using BlockParam.Config;
+using BlockParam.Diagnostics;
 using BlockParam.Licensing;
 using BlockParam.Localization;
 using BlockParam.Models;
@@ -22,8 +22,6 @@ namespace BlockParam.UI;
 /// </summary>
 public class BulkChangeViewModel : ViewModelBase
 {
-    private static readonly ILogger Log = Serilog.Log.Logger;
-
     private readonly HierarchyAnalyzer _analyzer;
     private readonly BulkChangeService _bulkChangeService;
     private readonly IUsageTracker _usageTracker;

@@ -2,6 +2,7 @@ using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using BlockParam.Diagnostics;
 using BlockParam.Localization;
 using BlockParam.Services;
 
@@ -361,14 +362,14 @@ public partial class BulkChangeDialog : Window
         var item = MemberListView.ItemContainerGenerator.ContainerFromItem(memberVm) as ListViewItem;
         if (item == null)
         {
-            Serilog.Log.Logger.Warning("ShowInlineOverlayForScripted: no container for {Path}", memberVm.Path);
+            Log.Warning("ShowInlineOverlayForScripted: no container for {Path}", memberVm.Path);
             return;
         }
 
         var tb = FindDescendant<TextBox>(item, "InlineStartValue");
         if (tb == null)
         {
-            Serilog.Log.Logger.Warning("ShowInlineOverlayForScripted: no TextBox for {Path}", memberVm.Path);
+            Log.Warning("ShowInlineOverlayForScripted: no TextBox for {Path}", memberVm.Path);
             return;
         }
 

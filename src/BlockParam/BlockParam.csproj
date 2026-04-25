@@ -8,7 +8,7 @@
     <Nullable>enable</Nullable>
     <RootNamespace>BlockParam</RootNamespace>
     <AssemblyName>BlockParam</AssemblyName>
-    <Version>0.14.6</Version>
+    <Version>0.15.1</Version>
     <Authors>Sawascwoolf</Authors>
     <Description>TIA Portal Add-In for editing Data Block start values and parameters — single and in bulk</Description>
     <ApplicationIcon>Resources\BlockParam_logo.ico</ApplicationIcon>
@@ -29,8 +29,6 @@
   <ItemGroup>
     <PackageReference Include="Siemens.Collaboration.Net.TiaPortal.Packages.OpennessAddIn" Version="20.0.*" />
     <PackageReference Include="Newtonsoft.Json" Version="13.*" />
-    <PackageReference Include="Serilog" Version="3.*" />
-    <PackageReference Include="Serilog.Sinks.File" Version="5.*" />
     <PackageReference Include="Microsoft.Bcl.HashCode" Version="1.*" />
     <PackageReference Include="PolySharp" Version="1.*">
       <PrivateAssets>all</PrivateAssets>

@@ -4,7 +4,7 @@ using System.IO;
 using System.Windows.Data;
 using System.Windows.Input;
 using System.Windows.Threading;
-using Serilog;
+using BlockParam.Diagnostics;
 using BlockParam.Config;
 
 namespace BlockParam.UI;
@@ -375,13 +375,8 @@ public class ConfigEditorViewModel : ViewModelBase
     {
         try
         {
-            Log.Debug("ExecuteSave: starting");
             if (SaveAll())
-            {
-                Log.Debug("ExecuteSave: SaveAll succeeded, calling ReloadAfterSave");
                 ReloadAfterSave();
-            }
-            Log.Debug("ExecuteSave: done");
         }
         catch (Exception ex)
         {

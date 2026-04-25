@@ -2,7 +2,7 @@ using System;
 using System.IO;
 using System.Threading;
 using Newtonsoft.Json;
-using Serilog;
+using BlockParam.Diagnostics;
 
 namespace BlockParam.Services;
 
@@ -133,7 +133,7 @@ public class UiZoomService
         }
         catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException)
         {
-            Log.Logger.Warning(ex, "UiZoomService: cannot read {Path} — using default zoom", _settingsPath);
+            Log.Warning(ex, "UiZoomService: cannot read {Path} — using default zoom", _settingsPath);
         }
     }
 
@@ -170,7 +170,7 @@ public class UiZoomService
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            Log.Logger.Warning(ex, "UiZoomService: cannot save {Path}", _settingsPath);
+            Log.Warning(ex, "UiZoomService: cannot save {Path}", _settingsPath);
         }
     }
 

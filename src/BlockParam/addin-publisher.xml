@@ -6,7 +6,7 @@
   <Product>
     <Name>BlockParam</Name>
     <Id>BlockParam</Id>
-    <Version>0.14.6</Version>
+    <Version>0.15.1</Version>
   </Product>
   <FeatureAssembly>
     <AssemblyInfo>
@@ -15,9 +15,6 @@
   </FeatureAssembly>
   <AdditionalAssemblies>
     <AssemblyInfo><Assembly>Newtonsoft.Json.dll</Assembly></AssemblyInfo>
-    <AssemblyInfo><Assembly>Serilog.dll</Assembly></AssemblyInfo>
-    <AssemblyInfo><Assembly>Serilog.Sinks.File.dll</Assembly></AssemblyInfo>
-    <AssemblyInfo><Assembly>System.Diagnostics.DiagnosticSource.dll</Assembly></AssemblyInfo>
     <AssemblyInfo><Assembly>Microsoft.Bcl.HashCode.dll</Assembly></AssemblyInfo>
     <AssemblyInfo><Assembly>System.Buffers.dll</Assembly></AssemblyInfo>
     <AssemblyInfo><Assembly>System.Memory.dll</Assembly></AssemblyInfo>
@@ -47,6 +44,9 @@
       <Siemens.Engineering.AddIn.Permissions.ProcessStartPermission>
         <Comment>Launch default browser via Process.Start(UseShellExecute=true) to open shop checkout and customer-portal URLs from the license dialog.</Comment>
       </Siemens.Engineering.AddIn.Permissions.ProcessStartPermission>
+      <System.Security.Permissions.SecurityPermission.UnmanagedCode>
+        <Comment>Required transitively by WPF rendering, HttpClient socket I/O, and Newtonsoft.Json reflection-emit serialization.</Comment>
+      </System.Security.Permissions.SecurityPermission.UnmanagedCode>
     </SecurityPermissions>
   </RequiredPermissions>
 </PackageConfiguration>

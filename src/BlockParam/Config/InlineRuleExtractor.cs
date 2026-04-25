@@ -1,5 +1,5 @@
+using BlockParam.Diagnostics;
 using BlockParam.Models;
-using Serilog;
 
 namespace BlockParam.Config;
 
@@ -34,7 +34,7 @@ public static class InlineRuleExtractor
             added += Walk(root, config.Rules);
 
         if (added > 0)
-            Log.Logger.Information("InlineRuleExtractor: {Count} inline rules extracted from DB {Db}",
+            Log.Information("InlineRuleExtractor: {Count} inline rules extracted from DB {Db}",
                 added, db.Name);
 
         return added;

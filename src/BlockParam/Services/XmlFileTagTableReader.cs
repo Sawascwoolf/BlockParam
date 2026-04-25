@@ -1,6 +1,6 @@
 using System.IO;
 using System.Xml.Linq;
-using Serilog;
+using BlockParam.Diagnostics;
 using BlockParam.Models;
 
 namespace BlockParam.Services;
@@ -11,7 +11,6 @@ namespace BlockParam.Services;
 /// </summary>
 public class XmlFileTagTableReader : ITagTableReader
 {
-    private static readonly ILogger Log = Serilog.Log.Logger;
     private readonly string _directory;
     private readonly string _commentCulture;
 

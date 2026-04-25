@@ -1,7 +1,7 @@
 using System.IO;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Serialization;
-using Serilog;
+using BlockParam.Diagnostics;
 
 namespace BlockParam.Config;
 
@@ -53,7 +53,7 @@ public class ConfigLoader
             var only = loader.LoadFromDirectory(_scriptedRulesDirOverride,
                 ruleSource: RuleSource.Shared);
             foreach (var w in only.Warnings)
-                Log.Logger.Warning("ScriptedRules: {Warning}", w);
+                Log.Warning("ScriptedRules: {Warning}", w);
 
             _cachedConfig = new BulkChangeConfig
             {
@@ -90,7 +90,7 @@ public class ConfigLoader
                 skipFileNames: localFileNames, ruleSource: RuleSource.Shared);
 
             foreach (var w in sharedResult.Warnings)
-                Log.Logger.Warning("SharedRules: {Warning}", w);
+                Log.Warning("SharedRules: {Warning}", w);
         }
 
         // 4. Load TIA project rules (highest specificity)
@@ -104,7 +104,7 @@ public class ConfigLoader
                     ruleSource: RuleSource.TiaProject);
 
                 foreach (var w in projectResult.Warnings)
-                    Log.Logger.Warning("ProjectRules: {Warning}", w);
+                    Log.Warning("ProjectRules: {Warning}", w);
             }
         }
 
@@ -120,7 +120,7 @@ public class ConfigLoader
         _cachedConfig.Rules.AddRange(localResult.Rules);
         _cachedConfig.Rules.AddRange(sharedResult.Rules);
 
-        Log.Logger.Information("Config merged: {RuleCount} rules ({ProjectCount} project, {LocalCount} local, {SharedCount} shared)",
+        Log.Information("Config merged: {RuleCount} rules ({ProjectCount} project, {LocalCount} local, {SharedCount} shared)",
             _cachedConfig.Rules.Count, projectResult.Rules.Count,
             localResult.Rules.Count, sharedResult.Rules.Count);
 
@@ -142,7 +142,7 @@ public class ConfigLoader
         }
         catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException)
         {
-            Log.Logger.Warning(ex, "Cannot read {Context} from {Path}", context, _configPath);
+            Log.Warning(ex, "Cannot read {Context} from {Path}", context, _configPath);
             return null;
         }
     }

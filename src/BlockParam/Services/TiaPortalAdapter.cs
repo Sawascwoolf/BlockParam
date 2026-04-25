@@ -1,5 +1,5 @@
 using System.IO;
-using Serilog;
+using BlockParam.Diagnostics;
 using Siemens.Engineering;
 using Siemens.Engineering.Compiler;
 using Siemens.Engineering.SW.Blocks;

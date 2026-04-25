@@ -1,6 +1,5 @@
 using System.IO;
 using System.Threading;
-using Serilog;
 using Siemens.Engineering;
 using Siemens.Engineering.AddIn.Menu;
 using Siemens.Engineering.Compiler;
@@ -9,6 +8,7 @@ using Siemens.Engineering.SW.Blocks;
 using Siemens.Engineering.SW.Tags;
 using Siemens.Engineering.SW.Types;
 using BlockParam.Config;
+using BlockParam.Diagnostics;
 using BlockParam.Licensing;
 using BlockParam.Localization;
 using BlockParam.Services;
@@ -20,7 +20,6 @@ namespace BlockParam.AddIn;
 public class BulkChangeContextMenu : ContextMenuAddIn
 {
     private readonly TiaPortal _tiaPortal;
-    private static readonly ILogger Log = InitLogger();
     private static int _tempCacheCleanupRan;
 
     /// <summary>
@@ -53,36 +52,9 @@ public class BulkChangeContextMenu : ContextMenuAddIn
         }
     }
 
-    private static ILogger InitLogger()
-    {
-        var logger = CreateLogger();
-        Serilog.Log.Logger = logger;
-        return logger;
-    }
-
     public BulkChangeContextMenu(TiaPortal tiaPortal) : base(BulkChangeAddInProviderInfo.MenuTitle)
     {
         _tiaPortal = tiaPortal;
-    }
-
-    private static ILogger CreateLogger()
-    {
-        var logDir = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-            "BlockParam", "logs");
-        Directory.CreateDirectory(logDir);
-
-        var version = typeof(BulkChangeContextMenu).Assembly.GetName().Version;
-        var prefix = $"bulkchange-v{version}-";
-
-        return new LoggerConfiguration()
-            .MinimumLevel.Debug()
-            .WriteTo.File(
-                Path.Combine(logDir, prefix),
-                rollingInterval: RollingInterval.Day,
-                retainedFileCountLimit: 7,
-                outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss.fff} [{Level:u3}] {Message:lj}{NewLine}{Exception}")
-            .CreateLogger();
     }
 
     protected override void BuildContextMenuItems(ContextMenuAddInRoot addInRootSubmenu)

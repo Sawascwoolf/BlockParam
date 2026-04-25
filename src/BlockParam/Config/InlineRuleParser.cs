@@ -1,5 +1,5 @@
 using System.Text.RegularExpressions;
-using Serilog;
+using BlockParam.Diagnostics;
 
 namespace BlockParam.Config;
 
@@ -82,7 +82,7 @@ public static class InlineRuleParser
 
             if (!TrySet(rule, key, value, out var normalizedKey))
             {
-                Log.Logger.Warning(
+                Log.Warning(
                     "InlineRuleParser: unknown property 'bp_{Key}' (lang={Lang}, value='{Value}')",
                     key, sourceLang ?? "-", value);
                 continue;
@@ -94,7 +94,7 @@ public static class InlineRuleParser
             {
                 if (!string.Equals(prev.Value, value, StringComparison.Ordinal))
                 {
-                    Log.Logger.Warning(
+                    Log.Warning(
                         "InlineRuleParser: conflict on 'bp_{Key}' — '{PrevLang}'='{PrevValue}' wins over '{ThisLang}'='{ThisValue}'",
                         normalizedKey, prev.Lang, prev.Value, sourceLang ?? "-", value);
                 }

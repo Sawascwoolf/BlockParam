@@ -1,6 +1,6 @@
 using System.IO;
 using Newtonsoft.Json;
-using Serilog;
+using BlockParam.Diagnostics;
 using BlockParam.Services;
 
 namespace BlockParam.Config;
@@ -12,8 +12,6 @@ namespace BlockParam.Config;
 /// </summary>
 public class RulesDirectoryLoader
 {
-    private static readonly ILogger Log = Serilog.Log.Logger;
-
     /// <summary>
     /// Loads all .json rule files from the directory.
     /// Tolerates missing/unreachable directories (returns empty with warning).
