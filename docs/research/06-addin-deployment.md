@@ -108,10 +108,35 @@ public sealed class AddInProvider : ProjectTreeAddInProvider
     <SecurityPermissions>
       <System.Security.Permissions.FileIOPermission/>
       <System.Security.Permissions.UIPermission/>
+      <System.Security.Permissions.FileDialogPermission/>
+      <System.Security.Permissions.EnvironmentPermission/>
+      <System.Net.WebPermission/>
+      <Siemens.Engineering.AddIn.Permissions.ProcessStartPermission/>
     </SecurityPermissions>
   </RequiredPermissions>
 </PackageConfiguration>
 ```
+
+### Permission set rationale (BlockParam)
+
+The shipping Add-In was audited against `Siemens.Engineering.AddIn.Publisher.xsd` (the
+canonical schema lists every permission the publisher accepts). `System.UnrestrictedAccess`
+is **not** required — the explicit set above covers every runtime call:
+
+| Permission | Why BlockParam needs it |
+|---|---|
+| `FileIOPermission` | SimaticML XML export/import in `%TEMP%\BlockParam\`; config, profiles, license cache, usage tracker, UI settings in `%APPDATA%\BlockParam\`; reading per-project rules directories. |
+| `UIPermission` | WPF bulk-change dialog, license key dialog, config editor, autocomplete dropdown, inline hint popup, MessageBox prompts. |
+| `FileDialogPermission` | `FolderBrowserDialog` in the config editor for choosing the shared rules directory. |
+| `EnvironmentPermission` | `Environment.GetFolderPath(SpecialFolder.ApplicationData)` for per-user storage paths and `Environment.MachineName` used by the machine-bound license obfuscation. |
+| `WebPermission` | `HttpClient` calls to the BlockParam license server (`OnlineLicenseService`) for activation/validation. |
+| `ProcessStartPermission` (Siemens) | `Process.Start(url, UseShellExecute=true)` to open the default browser for shop checkout and customer-portal links from the license dialog. Siemens provides this as an explicit narrower alternative to `SecurityPermission.UnmanagedCode`. |
+
+Permissions explicitly **not** needed (verified by grep of `src/BlockParam`):
+ODBC/OleDb/SqlClient, EventLog, Printing, Smtp, NetworkInformation, Socket,
+IsolatedStorageFile, KeyContainer, Registry, Store, WebBrowser, Media, and the
+generic `SecurityPermission.UnmanagedCode` (we use the dedicated `ProcessStartPermission`
+instead).
 
 ### Aufruf
 

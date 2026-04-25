@@ -28,10 +28,25 @@
     <TIAPermissions>
       <TIA.ReadWrite/>
     </TIAPermissions>
-    <UnrestrictedPermissions>
-      <System.UnrestrictedAccess>
-        <JustificationComment>Required for XML export/import, WPF dialog, and file system access</JustificationComment>
-      </System.UnrestrictedAccess>
-    </UnrestrictedPermissions>
+    <SecurityPermissions>
+      <System.Security.Permissions.FileIOPermission>
+        <Comment>SimaticML export/import, config/profiles/license cache in %TEMP%\BlockParam and %APPDATA%\BlockParam, project-local rules folder.</Comment>
+      </System.Security.Permissions.FileIOPermission>
+      <System.Security.Permissions.UIPermission>
+        <Comment>WPF bulk-change dialog, license key dialog, autocomplete and inline hint popups.</Comment>
+      </System.Security.Permissions.UIPermission>
+      <System.Security.Permissions.FileDialogPermission>
+        <Comment>FolderBrowserDialog for picking the shared rules directory in the config editor.</Comment>
+      </System.Security.Permissions.FileDialogPermission>
+      <System.Security.Permissions.EnvironmentPermission>
+        <Comment>Resolve SpecialFolder.ApplicationData and MachineName for per-user storage paths and machine-bound license obfuscation.</Comment>
+      </System.Security.Permissions.EnvironmentPermission>
+      <System.Net.WebPermission>
+        <Comment>HttpClient calls to the BlockParam license server for online license activation and validation.</Comment>
+      </System.Net.WebPermission>
+      <Siemens.Engineering.AddIn.Permissions.ProcessStartPermission>
+        <Comment>Launch default browser via Process.Start(UseShellExecute=true) to open shop checkout and customer-portal URLs from the license dialog.</Comment>
+      </Siemens.Engineering.AddIn.Permissions.ProcessStartPermission>
+    </SecurityPermissions>
   </RequiredPermissions>
 </PackageConfiguration>
