@@ -37,6 +37,10 @@ AddInPublisherConfiguration.xml
 addin-staging/
 publish/
 
+## Local-only experiments (PermSpike etc.) — never committed.
+## Build artefacts under bin/ and obj/ are already ignored above.
+/spike/
+
 ## OS
 Thumbs.db
 .DS_Store
