@@ -113,7 +113,9 @@ public class LocalUsageTracker : IUsageTracker
 
     private string TodayString() => _dateProvider().ToString("yyyy-MM-dd");
 
-    private class UsageData
+    // Public so Newtonsoft.Json can reach the constructor under TIA's
+    // partial-trust CAS sandbox — see UiZoomService.UiSettingsDto for context.
+    public class UsageData
     {
         public string Date { get; set; } = "";
         public int Count { get; set; }

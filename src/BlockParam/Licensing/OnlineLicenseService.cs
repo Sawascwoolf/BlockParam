@@ -451,15 +451,17 @@ public class OnlineLicenseService : ILicenseService
     }
 
     // --- Internal models ---
+    // Public so Newtonsoft.Json can reach the constructor under TIA's
+    // partial-trust CAS sandbox — see UiZoomService.UiSettingsDto for context.
 
-    private class LicenseData
+    public class LicenseData
     {
         public string? LicenseKey { get; set; }
         public string? InstanceId { get; set; }
         public DateTime ActivatedAt { get; set; }
     }
 
-    private class CachedLicenseResponse
+    public class CachedLicenseResponse
     {
         public DateTime ReceivedAtUtc { get; set; }
         public DateTime? ExpiresAt { get; set; }

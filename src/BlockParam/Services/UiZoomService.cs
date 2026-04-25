@@ -177,7 +177,11 @@ public class UiZoomService
     private static double Clamp(double v) => Math.Max(MinZoom, Math.Min(MaxZoom, v));
     private static double Round(double v) => Math.Round(v * 20) / 20.0; // snap to 0.05 grid
 
-    private class UiSettingsDto
+    // Public so Newtonsoft.Json can reflect into its constructor and properties
+    // when the addin runs under TIA's partial-trust CAS sandbox — a private
+    // nested type fails JsonConvert.DeserializeObject with MethodAccessException
+    // (no RestrictedMemberAccess in the Siemens publisher XSD).
+    public class UiSettingsDto
     {
         [JsonProperty("zoom")]
         public double Zoom { get; set; }
