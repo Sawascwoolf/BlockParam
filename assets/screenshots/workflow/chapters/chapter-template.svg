@@ -19,12 +19,12 @@
   <rect width="1920" height="1080" fill="#f5f7fa"/>
 
   <!-- Hero logo (right side) -->
-  <image xlink:href="blockparam-logo-transparent.svg" href="blockparam-logo-transparent.svg"
+  <image xlink:href="../../../../src/BlockParam/Resources/BlockParam_logo.svg" href="../../../../src/BlockParam/Resources/BlockParam_logo.svg"
          x="1230" y="180" width="600" height="600"/>
 
   <!-- Brand mark (top-left): real logo + wordmark -->
   <g transform="translate(120, 120)">
-    <image xlink:href="blockparam-logo-transparent.svg" href="blockparam-logo-transparent.svg"
+    <image xlink:href="../../../../src/BlockParam/Resources/BlockParam_logo.svg" href="../../../../src/BlockParam/Resources/BlockParam_logo.svg"
            x="0" y="0" width="52" height="52"/>
     <text x="68" y="34" font-family="Segoe UI, Arial, sans-serif"
           font-size="22" font-weight="600" fill="#0e2140">BlockParam</text>
