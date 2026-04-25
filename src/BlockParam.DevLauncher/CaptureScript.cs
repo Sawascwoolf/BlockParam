@@ -155,16 +155,18 @@ public sealed class Scene
 
     /// <summary>
     /// Scene kind. Default (null or "dialog") renders the BulkChangeDialog.
-    /// "chapter" renders a full-bleed intertitle card at the viewport size
-    /// instead — uses <see cref="ChapterTitle"/> / <see cref="ChapterSubtitle"/>
-    /// and skips all other scene directives.
+    /// "chapter" marks an intertitle card; the capture loop skips these and
+    /// they are rendered out-of-band by
+    /// assets/screenshots/workflow/chapters/render-chapters.sh, which reads
+    /// <see cref="ChapterTitle"/> / <see cref="ChapterSubtitle"/> from this
+    /// same manifest and writes the PNG to the canonical scene filename.
     /// </summary>
     [JsonProperty("kind")] public string? Kind { get; set; }
 
-    /// <summary>Main title text for a chapter card (kind=chapter).</summary>
+    /// <summary>Main title text for a chapter card (kind=chapter). Consumed by render-chapters.sh.</summary>
     [JsonProperty("chapterTitle")] public string? ChapterTitle { get; set; }
 
-    /// <summary>Optional subtitle / step counter under the main title.</summary>
+    /// <summary>Subtitle phrases joined by " • " (U+2022). Consumed by render-chapters.sh.</summary>
     [JsonProperty("chapterSubtitle")] public string? ChapterSubtitle { get; set; }
 }
 
