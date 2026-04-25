@@ -167,7 +167,10 @@ class Program
             dailyLimit: 3);
 
         var serverUrl = configLoader.ReadLicenseServerUrl() ?? OnlineLicenseService.DefaultServerUrl;
-        var licenseService = new OnlineLicenseService(appDataDir, serverUrl);
+        var licenseService = new OnlineLicenseService(
+            appDataDir,
+            serverUrl,
+            sharedLicenseFilePath: OnlineLicenseService.DefaultSharedLicenseFilePath);
         var usageTracker = new LicensedUsageTracker(licenseService, freeTracker);
 
         // 5. Show dialog

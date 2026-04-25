@@ -25,6 +25,7 @@ public class OnlineLicenseService : ILicenseService
 
     private readonly string _storagePath;
     private readonly string? _serverBaseUrl;
+    private readonly string? _sharedLicenseFilePath;
     private readonly Func<DateTime> _utcNow;
     private readonly object _lock = new();
 
@@ -33,19 +34,35 @@ public class OnlineLicenseService : ILicenseService
     private CachedLicenseResponse? _cache;
     private volatile bool _proActive;
     private volatile bool _disposed;
+    private volatile bool _isManagedKey;
     private int _retryCount;
+
+    /// <summary>
+    /// Default machine-wide license file path used by multi-seat deployments
+    /// (#20). IT pushes a key to this path via batch / SCCM / Intune / GPO and
+    /// every seat on the machine adopts it on next start. UNC / network
+    /// paths are explicitly out of scope — only this local path is read.
+    /// </summary>
+    public static string DefaultSharedLicenseFilePath => Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+        "BlockParam", "license.key");
 
     public OnlineLicenseService(
         string storagePath,
         string? serverBaseUrl,
-        Func<DateTime>? utcNow = null)
+        Func<DateTime>? utcNow = null,
+        string? sharedLicenseFilePath = null)
     {
         _storagePath = storagePath;
         _serverBaseUrl = serverBaseUrl?.TrimEnd('/');
+        _sharedLicenseFilePath = string.IsNullOrWhiteSpace(sharedLicenseFilePath)
+            ? null
+            : sharedLicenseFilePath;
         _utcNow = utcNow ?? (() => DateTime.UtcNow);
 
         _licenseData = LoadLicenseData();
         _cache = LoadCache();
+        AdoptSharedLicenseKeyIfPresent();
         EvaluateTier();
     }
 
@@ -66,7 +83,9 @@ public class OnlineLicenseService : ILicenseService
                 MaxConcurrent = _cache?.MaxConcurrent ?? 0,
                 CurrentConcurrent = _cache?.ActiveSessions ?? 0,
                 IsServerReachable = _cache != null && (_utcNow() - _cache.ReceivedAtUtc).TotalMinutes < 5,
-                ErrorMessage = _cache?.ErrorMessage
+                ErrorMessage = _cache?.ErrorMessage,
+                IsManagedKey = _isManagedKey,
+                ManagedKeyFilePath = _isManagedKey ? _sharedLicenseFilePath : null
             };
         }
     }
@@ -304,6 +323,65 @@ public class OnlineLicenseService : ILicenseService
         catch
         {
             // Fire-and-forget: swallow errors
+        }
+    }
+
+    // --- Shared license file (#20: multi-seat deployments) ---
+
+    /// <summary>
+    /// If a managed license file exists at <see cref="_sharedLicenseFilePath"/> and
+    /// holds a key that differs from the per-user cache, replace the cached key.
+    /// IT rolls out / rotates the key by writing this file via deployment tooling
+    /// (batch / SCCM / Intune / GPO); every seat picks up the change on next start
+    /// without user interaction. The cached server response is invalidated when the
+    /// key changes — the heartbeat will re-validate against the server.
+    /// </summary>
+    private void AdoptSharedLicenseKeyIfPresent()
+    {
+        if (_sharedLicenseFilePath == null) return;
+
+        var sharedKey = TryReadSharedLicenseKey(_sharedLicenseFilePath);
+        if (string.IsNullOrEmpty(sharedKey)) return;
+
+        _isManagedKey = true;
+
+        // Same key as already cached → keep existing instanceId and cache so we
+        // don't churn the server-side session on every Add-In start.
+        if (_licenseData != null &&
+            string.Equals(_licenseData.LicenseKey, sharedKey, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        // Key changed (rotation or first-time rollout). Replace the local copy and
+        // drop the stale cache so EvaluateTier doesn't grant Pro on the old key.
+        Log.Information("Adopting managed license key from {Path} (rotation or first rollout)",
+            _sharedLicenseFilePath);
+        _licenseData = new LicenseData
+        {
+            LicenseKey = sharedKey,
+            InstanceId = _licenseData?.InstanceId ?? Guid.NewGuid().ToString(),
+            ActivatedAt = _utcNow()
+        };
+        SaveLicenseData(_licenseData);
+
+        _cache = null;
+        DeleteFile(CachePath);
+    }
+
+    private static string? TryReadSharedLicenseKey(string path)
+    {
+        try
+        {
+            if (!File.Exists(path)) return null;
+            var content = File.ReadAllText(path).Trim();
+            return string.IsNullOrEmpty(content) ? null : content;
+        }
+        catch (Exception ex)
+        {
+            // Unreadable shared file is non-fatal — fall back to user-local cache.
+            Log.Warning(ex, "Cannot read managed license file at {Path}", path);
+            return null;
         }
     }
 

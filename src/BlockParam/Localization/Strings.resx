@@ -244,6 +244,13 @@ No = Keep the current (possibly partial) result</value>
   <data name="License_ManageSubscription" xml:space="preserve">
     <value>Manage Subscription</value>
   </data>
+  <data name="License_ManagedKeyHint" xml:space="preserve">
+    <value>Managed by IT — key from {0}. Contact your administrator to change it.</value>
+    <comment>{0} = absolute path to managed license file (e.g. %PROGRAMDATA%\BlockParam\license.key)</comment>
+  </data>
+  <data name="License_ActivateTooltip_Managed" xml:space="preserve">
+    <value>License is managed by IT and cannot be changed locally</value>
+  </data>
   <!-- Selection -->
   <data name="Selection_ClickToSelect" xml:space="preserve">
     <value>Click a leaf member to select</value>
