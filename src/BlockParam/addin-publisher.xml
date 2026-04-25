@@ -6,7 +6,7 @@
   <Product>
     <Name>BlockParam</Name>
     <Id>BlockParam</Id>
-    <Version>0.15.1</Version>
+    <Version>0.16.0</Version>
   </Product>
   <FeatureAssembly>
     <AssemblyInfo>
@@ -16,10 +16,6 @@
   <AdditionalAssemblies>
     <AssemblyInfo><Assembly>Newtonsoft.Json.dll</Assembly></AssemblyInfo>
     <AssemblyInfo><Assembly>Microsoft.Bcl.HashCode.dll</Assembly></AssemblyInfo>
-    <AssemblyInfo><Assembly>System.Buffers.dll</Assembly></AssemblyInfo>
-    <AssemblyInfo><Assembly>System.Memory.dll</Assembly></AssemblyInfo>
-    <AssemblyInfo><Assembly>System.Numerics.Vectors.dll</Assembly></AssemblyInfo>
-    <AssemblyInfo><Assembly>System.Runtime.CompilerServices.Unsafe.dll</Assembly></AssemblyInfo>
   </AdditionalAssemblies>
   <RequiredPermissions>
     <TIAPermissions>
