@@ -1,6 +1,7 @@
 <Window x:Class="BlockParam.UI.LicenseKeyDialog"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:BlockParam.UI"
         xmlns:loc="clr-namespace:BlockParam.Localization"
         Title="{loc:Loc License_DialogTitle}"
                 Width="420" Height="280"
@@ -67,6 +68,7 @@
 
         <!-- Bottom buttons -->
         <StackPanel Grid.Row="6" Orientation="Horizontal" HorizontalAlignment="Right">
+            <local:ZoomIndicator Margin="0,0,12,0" VerticalAlignment="Center"/>
             <Button x:Name="RemoveButton" Content="{loc:Loc License_RemoveKey}"
                     Width="120" Height="28" Margin="0,0,8,0"
                     Click="OnRemoveClick" Visibility="Collapsed"/>

@@ -638,4 +638,9 @@ Examples: en-US, de-DE. Leave empty for the default language.</value>
 Compile them now? Member comments from these UDTs will otherwise appear blank.</value>
     <comment>{0} = count, {1} = comma-separated list of UDT names</comment>
   </data>
+  <!-- Zoom indicator (#28): tooltip teaches the keyboard shortcuts so the
+       widget makes the existing Ctrl+scroll / Ctrl +/- feature discoverable. -->
+  <data name="Zoom_Tooltip" xml:space="preserve">
+    <value>Zoom (Ctrl + mouse wheel, Ctrl + / Ctrl −, Ctrl + 0 to reset)</value>
+  </data>
 </root>

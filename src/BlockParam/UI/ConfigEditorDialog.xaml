@@ -70,6 +70,7 @@
                        Visibility="{Binding ValidationMessage, Converter={StaticResource StringToVis}}"
                        TextWrapping="Wrap"/>
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                <local:ZoomIndicator Margin="0,0,12,0" VerticalAlignment="Center"/>
                 <Button Content="{loc:Loc ConfigEditor_Save}" Command="{Binding SaveCommand}"
                         Width="80" Height="28" Margin="0,0,8,0"/>
                 <Button Content="{loc:Loc ConfigEditor_SaveAndClose}" Command="{Binding SaveAndCloseCommand}"

@@ -254,4 +254,6 @@ Beispiele: en-US, de-DE. Leer lassen für Standardsprache.</value></data>
 {1}
 
 Jetzt kompilieren? Andernfalls bleiben die Kommentare dieser UDT-Mitglieder in der Anzeige leer.</value></data>
+  <!-- Zoom-Anzeige (#28) -->
+  <data name="Zoom_Tooltip" xml:space="preserve"><value>Zoom (Strg + Mausrad, Strg + / Strg −, Strg + 0 zum Zurücksetzen)</value></data>
 </root>

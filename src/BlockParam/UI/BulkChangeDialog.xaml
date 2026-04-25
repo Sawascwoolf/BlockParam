@@ -80,6 +80,10 @@
         <!-- Bottom bar: action buttons + license/usage info + status -->
         <DockPanel DockPanel.Dock="Bottom" Margin="0,8,0,0">
             <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                <!-- Discoverable zoom widget (#28). Placed left of the action
+                     buttons so the persistent percentage label and shortcut
+                     tooltip stay in the user's peripheral vision. -->
+                <local:ZoomIndicator Margin="0,0,12,0" VerticalAlignment="Center"/>
                 <!-- License / usage summary — clickable to open the license dialog.
                      Single control replaces the old tier badge + separate Manage link. -->
                 <Button Content="{Binding UsageStatusText}" FontSize="10"
