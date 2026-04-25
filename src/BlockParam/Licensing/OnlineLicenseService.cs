@@ -81,12 +81,15 @@ public class OnlineLicenseService : ILicenseService
 
         try
         {
-            var body = new
+            // Dictionary, not anonymous type — under TIA's partial-trust CAS
+            // sandbox Newtonsoft cannot reflect into the compiler-generated
+            // `internal sealed` anonymous type from another assembly.
+            var body = new Dictionary<string, object?>
             {
-                licenseKey,
-                instanceId,
-                machineName = Environment.MachineName,
-                addinVersion = GetAddinVersion()
+                ["licenseKey"] = licenseKey,
+                ["instanceId"] = instanceId,
+                ["machineName"] = Environment.MachineName,
+                ["addinVersion"] = GetAddinVersion(),
             };
 
             var response = await PostAsync("/api/license/activate", body);
@@ -212,10 +215,10 @@ public class OnlineLicenseService : ILicenseService
 
         try
         {
-            var body = new
+            var body = new Dictionary<string, object?>
             {
-                licenseKey = _licenseData.LicenseKey,
-                instanceId = _licenseData.InstanceId
+                ["licenseKey"] = _licenseData.LicenseKey,
+                ["instanceId"] = _licenseData.InstanceId,
             };
 
             var response = await PostAsync("/api/license/heartbeat", body);
@@ -291,7 +294,11 @@ public class OnlineLicenseService : ILicenseService
 
         try
         {
-            var body = new { licenseKey, instanceId };
+            var body = new Dictionary<string, object?>
+            {
+                ["licenseKey"] = licenseKey,
+                ["instanceId"] = instanceId,
+            };
             await PostAsync("/api/license/deactivate", body);
         }
         catch

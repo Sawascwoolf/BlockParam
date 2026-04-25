@@ -1,6 +1,7 @@
 using System;
 using System.Globalization;
 using System.IO;
+using BlockParam.Diagnostics;
 
 namespace BlockParam.Services;
 
@@ -26,9 +27,11 @@ public static class CacheCleanupSchedule
             if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
             File.WriteAllText(stateFile, nextRun.ToString("o", CultureInfo.InvariantCulture));
         }
-        catch
+        catch (Exception ex)
         {
-            // Non-fatal: cleanup will just retry next time the add-in loads.
+            // Non-fatal: cleanup just retries next time the add-in loads.
+            // Logged at Warning so a corrupted state file is diagnosable.
+            Log.Warning(ex, "CacheCleanupSchedule: could not write {File}", stateFile);
         }
     }
 
@@ -43,8 +46,9 @@ public static class CacheCleanupSchedule
                 return dt;
             return null;
         }
-        catch
+        catch (Exception ex)
         {
+            Log.Warning(ex, "CacheCleanupSchedule: could not read {File}", stateFile);
             return null;
         }
     }

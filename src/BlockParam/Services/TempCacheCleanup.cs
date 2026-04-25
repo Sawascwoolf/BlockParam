@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using BlockParam.Diagnostics;
 
 namespace BlockParam.Services;
 
@@ -70,8 +71,9 @@ public static class TempCacheCleanup
         {
             DateTime mt;
             try { mt = File.GetLastWriteTime(file); }
-            catch
+            catch (Exception ex)
             {
+                Log.Warning(ex, "TempCacheCleanup: could not stat {File}", file);
                 continue;
             }
 
@@ -84,9 +86,10 @@ public static class TempCacheCleanup
                     count++;
                     deleted = true;
                 }
-                catch
+                catch (Exception ex)
                 {
                     // Best-effort cleanup; locked or read-only files stay.
+                    Log.Warning(ex, "TempCacheCleanup: could not delete {File}", file);
                 }
             }
 
@@ -115,9 +118,10 @@ public static class TempCacheCleanup
                     count++;
                 }
             }
-            catch
+            catch (Exception ex)
             {
                 // Best-effort: leave non-empty or otherwise undeletable directories alone.
+                Log.Warning(ex, "TempCacheCleanup: could not remove dir {Dir}", dir);
             }
         }
         return count;
@@ -126,8 +130,9 @@ public static class TempCacheCleanup
     private static List<string> SafeList(Func<IEnumerable<string>> source)
     {
         try { return source().ToList(); }
-        catch
+        catch (Exception ex)
         {
+            Log.Warning(ex, "TempCacheCleanup: enumeration failed, skipping");
             return new List<string>();
         }
     }

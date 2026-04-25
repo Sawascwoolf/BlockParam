@@ -275,6 +275,11 @@ public class BulkChangeViewModel : ViewModelBase
         {
             _onApply?.Invoke(_currentXml);
             HasPendingChanges = false;
+            // Pair line for the matching Log.Error path below — without
+            // this, a TIA-side import failure has the error logged but
+            // the success path is silent, so support cannot tell which
+            // happened from the log file alone.
+            Log.Information("CommitChanges: import succeeded for {Db}", _dataBlockInfo.Name);
             return true;
         }
         catch (OperationCanceledException)
@@ -1495,6 +1500,10 @@ public class BulkChangeViewModel : ViewModelBase
             var tagReader = new XmlFileTagTableReader(_tagTableDir);
             _tagTableCache = new TagTableCache(tagReader);
             _autocompleteProvider = new AutocompleteProvider(_configLoader, _tagTableCache);
+            // The "tag autocomplete is empty" support case is impossible to
+            // diagnose without knowing what the cache resolved to.
+            Log.Information("TagTableCache loaded: {Tables}",
+                string.Join(", ", _tagTableCache.GetTableNames()));
         }
         UpdateTagTableAge();
     }
@@ -1584,6 +1593,8 @@ public class BulkChangeViewModel : ViewModelBase
             var tagReader = new XmlFileTagTableReader(_tagTableDir);
             _tagTableCache = new TagTableCache(tagReader);
             _autocompleteProvider = new AutocompleteProvider(_configLoader, _tagTableCache);
+            Log.Information("TagTableCache refreshed: {Tables}",
+                string.Join(", ", _tagTableCache.GetTableNames()));
         }
 
         UpdateTagTableAge();

@@ -24,7 +24,6 @@ public static class Log
 {
     private static readonly object _gate = new();
     private static readonly Regex PlaceholderRegex = new(@"\{[^{}]+\}", RegexOptions.Compiled);
-    private static string? _logPath;
 
     public static void Information(string template, params object?[] args) => Write("INF", null, template, args);
     public static void Warning(string template, params object?[] args) => Write("WRN", null, template, args);
@@ -85,16 +84,17 @@ public static class Log
         }
     }
 
+    // Recomputed on every write so a TIA session that spans midnight rolls
+    // over to the next day's file instead of appending to yesterday's. The
+    // computation is cheap and Directory.CreateDirectory is idempotent.
     private static string ResolveLogPath()
     {
-        if (_logPath != null) return _logPath;
         var dir = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
             "BlockParam", "logs");
         Directory.CreateDirectory(dir);
         var version = typeof(Log).Assembly.GetName().Version;
         var fileName = $"bulkchange-v{version}-{DateTime.Now:yyyy-MM-dd}.log";
-        _logPath = Path.Combine(dir, fileName);
-        return _logPath;
+        return Path.Combine(dir, fileName);
     }
 }
