@@ -24,9 +24,12 @@ class Program
     {
         // Set up console + file logging for dev.
         // WPF has no console, so file sink is the authoritative channel.
-        var logPath = Path.Combine(Path.GetTempPath(), "BlockParam", "devlauncher.log");
+        // Per-process file name (#16): a second concurrent DevLauncher must
+        // not race the first instance for File.Delete on a shared path.
+        var logPath = Path.Combine(
+            Path.GetTempPath(), "BlockParam",
+            $"devlauncher-{System.Diagnostics.Process.GetCurrentProcess().Id}.log");
         Directory.CreateDirectory(Path.GetDirectoryName(logPath)!);
-        if (File.Exists(logPath)) File.Delete(logPath); // fresh per run
 
         Log.Logger = new LoggerConfiguration()
             .MinimumLevel.Debug()

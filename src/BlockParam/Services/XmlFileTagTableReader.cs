@@ -1,6 +1,6 @@
 using System.IO;
 using System.Xml.Linq;
-using Serilog;
+using BlockParam.Diagnostics;
 using BlockParam.Models;
 
 namespace BlockParam.Services;
@@ -11,7 +11,6 @@ namespace BlockParam.Services;
 /// </summary>
 public class XmlFileTagTableReader : ITagTableReader
 {
-    private static readonly ILogger Log = Serilog.Log.Logger;
     private readonly string _directory;
     private readonly string _commentCulture;
 
@@ -26,7 +25,6 @@ public class XmlFileTagTableReader : ITagTableReader
         var filePath = Path.Combine(_directory, $"{tableName}.xml");
         if (!File.Exists(filePath))
         {
-            Log.Debug("Tag table file not found: {Path}", filePath);
             return Array.Empty<TagTableEntry>();
         }
 
@@ -64,7 +62,6 @@ public class XmlFileTagTableReader : ITagTableReader
                 entries.Add(new TagTableEntry(name, value, dataType, defaultComment, comments));
             }
 
-            Log.Debug("Read {Count} entries from tag table {Name}", entries.Count, tableName);
             return entries;
         }
         catch (Exception ex)

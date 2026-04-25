@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using Serilog;
+using BlockParam.Diagnostics;
 
 namespace BlockParam.Services;
 
@@ -73,7 +73,7 @@ public static class TempCacheCleanup
             try { mt = File.GetLastWriteTime(file); }
             catch (Exception ex)
             {
-                Log.Debug(ex, "TempCacheCleanup: could not stat {File}", file);
+                Log.Warning(ex, "TempCacheCleanup: could not stat {File}", file);
                 continue;
             }
 
@@ -88,7 +88,8 @@ public static class TempCacheCleanup
                 }
                 catch (Exception ex)
                 {
-                    Log.Debug(ex, "TempCacheCleanup: skipped file {File}", file);
+                    // Best-effort cleanup; locked or read-only files stay.
+                    Log.Warning(ex, "TempCacheCleanup: could not delete {File}", file);
                 }
             }
 
@@ -119,7 +120,8 @@ public static class TempCacheCleanup
             }
             catch (Exception ex)
             {
-                Log.Debug(ex, "TempCacheCleanup: skipped dir {Dir}", dir);
+                // Best-effort: leave non-empty or otherwise undeletable directories alone.
+                Log.Warning(ex, "TempCacheCleanup: could not remove dir {Dir}", dir);
             }
         }
         return count;
@@ -130,7 +132,7 @@ public static class TempCacheCleanup
         try { return source().ToList(); }
         catch (Exception ex)
         {
-            Log.Debug(ex, "TempCacheCleanup: enumeration failed, skipping");
+            Log.Warning(ex, "TempCacheCleanup: enumeration failed, skipping");
             return new List<string>();
         }
     }

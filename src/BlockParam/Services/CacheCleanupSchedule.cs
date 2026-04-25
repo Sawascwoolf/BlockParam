@@ -1,7 +1,7 @@
 using System;
 using System.Globalization;
 using System.IO;
-using Serilog;
+using BlockParam.Diagnostics;
 
 namespace BlockParam.Services;
 
@@ -29,7 +29,9 @@ public static class CacheCleanupSchedule
         }
         catch (Exception ex)
         {
-            Log.Debug(ex, "CacheCleanupSchedule: could not write {File}", stateFile);
+            // Non-fatal: cleanup just retries next time the add-in loads.
+            // Logged at Warning so a corrupted state file is diagnosable.
+            Log.Warning(ex, "CacheCleanupSchedule: could not write {File}", stateFile);
         }
     }
 
@@ -46,7 +48,7 @@ public static class CacheCleanupSchedule
         }
         catch (Exception ex)
         {
-            Log.Debug(ex, "CacheCleanupSchedule: could not read {File}", stateFile);
+            Log.Warning(ex, "CacheCleanupSchedule: could not read {File}", stateFile);
             return null;
         }
     }

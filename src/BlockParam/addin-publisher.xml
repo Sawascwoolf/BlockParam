@@ -6,7 +6,7 @@
   <Product>
     <Name>BlockParam</Name>
     <Id>BlockParam</Id>
-    <Version>0.15.0</Version>
+    <Version>0.16.2</Version>
   </Product>
   <FeatureAssembly>
     <AssemblyInfo>
@@ -15,23 +15,34 @@
   </FeatureAssembly>
   <AdditionalAssemblies>
     <AssemblyInfo><Assembly>Newtonsoft.Json.dll</Assembly></AssemblyInfo>
-    <AssemblyInfo><Assembly>Serilog.dll</Assembly></AssemblyInfo>
-    <AssemblyInfo><Assembly>Serilog.Sinks.File.dll</Assembly></AssemblyInfo>
-    <AssemblyInfo><Assembly>System.Diagnostics.DiagnosticSource.dll</Assembly></AssemblyInfo>
     <AssemblyInfo><Assembly>Microsoft.Bcl.HashCode.dll</Assembly></AssemblyInfo>
-    <AssemblyInfo><Assembly>System.Buffers.dll</Assembly></AssemblyInfo>
-    <AssemblyInfo><Assembly>System.Memory.dll</Assembly></AssemblyInfo>
-    <AssemblyInfo><Assembly>System.Numerics.Vectors.dll</Assembly></AssemblyInfo>
-    <AssemblyInfo><Assembly>System.Runtime.CompilerServices.Unsafe.dll</Assembly></AssemblyInfo>
   </AdditionalAssemblies>
   <RequiredPermissions>
     <TIAPermissions>
       <TIA.ReadWrite/>
     </TIAPermissions>
-    <UnrestrictedPermissions>
-      <System.UnrestrictedAccess>
-        <JustificationComment>Required for XML export/import, WPF dialog, and file system access</JustificationComment>
-      </System.UnrestrictedAccess>
-    </UnrestrictedPermissions>
+    <SecurityPermissions>
+      <System.Security.Permissions.FileIOPermission>
+        <Comment>SimaticML export/import, config/profiles/license cache in %TEMP%\BlockParam and %APPDATA%\BlockParam, project-local rules folder.</Comment>
+      </System.Security.Permissions.FileIOPermission>
+      <System.Security.Permissions.UIPermission>
+        <Comment>WPF bulk-change dialog, license key dialog, autocomplete and inline hint popups.</Comment>
+      </System.Security.Permissions.UIPermission>
+      <System.Security.Permissions.FileDialogPermission>
+        <Comment>FolderBrowserDialog for picking the shared rules directory in the config editor.</Comment>
+      </System.Security.Permissions.FileDialogPermission>
+      <System.Security.Permissions.EnvironmentPermission>
+        <Comment>Resolve SpecialFolder.ApplicationData and MachineName for per-user storage paths and machine-bound license obfuscation.</Comment>
+      </System.Security.Permissions.EnvironmentPermission>
+      <System.Net.WebPermission>
+        <Comment>HttpClient calls to the BlockParam license server for online license activation and validation.</Comment>
+      </System.Net.WebPermission>
+      <Siemens.Engineering.AddIn.Permissions.ProcessStartPermission>
+        <Comment>Launch default browser via Process.Start(UseShellExecute=true) to open shop checkout and customer-portal URLs from the license dialog.</Comment>
+      </Siemens.Engineering.AddIn.Permissions.ProcessStartPermission>
+      <System.Security.Permissions.SecurityPermission.UnmanagedCode>
+        <Comment>Required transitively by WPF rendering, HttpClient socket I/O, and Newtonsoft.Json reflection-emit serialization.</Comment>
+      </System.Security.Permissions.SecurityPermission.UnmanagedCode>
+    </SecurityPermissions>
   </RequiredPermissions>
 </PackageConfiguration>

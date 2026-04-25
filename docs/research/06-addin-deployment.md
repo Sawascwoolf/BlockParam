@@ -108,10 +108,77 @@ public sealed class AddInProvider : ProjectTreeAddInProvider
     <SecurityPermissions>
       <System.Security.Permissions.FileIOPermission/>
       <System.Security.Permissions.UIPermission/>
+      <System.Security.Permissions.FileDialogPermission/>
+      <System.Security.Permissions.EnvironmentPermission/>
+      <System.Net.WebPermission/>
+      <Siemens.Engineering.AddIn.Permissions.ProcessStartPermission/>
+      <System.Security.Permissions.SecurityPermission.UnmanagedCode/>
     </SecurityPermissions>
   </RequiredPermissions>
 </PackageConfiguration>
 ```
+
+### Permission set rationale (BlockParam)
+
+The shipping Add-In was audited against `Siemens.Engineering.AddIn.Publisher.xsd` (the
+canonical schema lists every permission the publisher accepts). `System.UnrestrictedAccess`
+is **not** required — the explicit set above covers every runtime call:
+
+| Permission | Why BlockParam needs it |
+|---|---|
+| `FileIOPermission` | SimaticML XML export/import in `%TEMP%\BlockParam\`; config, profiles, license cache, usage tracker, UI settings in `%APPDATA%\BlockParam\`; reading per-project rules directories. |
+| `UIPermission` | WPF bulk-change dialog, license key dialog, config editor, autocomplete dropdown, inline hint popup, MessageBox prompts. |
+| `FileDialogPermission` | `FolderBrowserDialog` in the config editor for choosing the shared rules directory. |
+| `EnvironmentPermission` | `Environment.GetFolderPath(SpecialFolder.ApplicationData)` for per-user storage paths and `Environment.MachineName` used by the machine-bound license obfuscation. |
+| `WebPermission` | `HttpClient` calls to the BlockParam license server (`OnlineLicenseService`) for activation/validation. |
+| `ProcessStartPermission` (Siemens) | `Process.Start(url, UseShellExecute=true)` to open the default browser for shop checkout and customer-portal links from the license dialog. Narrower than `UnmanagedCode` for this specific call. |
+| `SecurityPermission.UnmanagedCode` | Required transitively by WPF rendering, `HttpClient` socket I/O, and Newtonsoft.Json's reflection-emit code paths. WPF and HttpClient demand this even after declaring the higher-level WebPermission/UIPermission. |
+
+Permissions explicitly **not** needed (verified by grep of `src/BlockParam`):
+ODBC/OleDb/SqlClient, EventLog, Printing, Smtp, NetworkInformation, Socket,
+IsolatedStorageFile, KeyContainer, Registry, Store, WebBrowser, Media.
+
+### Partial-trust verification — what actually breaks the addin
+
+Declaring `<SecurityPermissions>` instead of `<UnrestrictedPermissions>` switches
+the addin from full trust to partial trust. **Before** the runtime ever consults
+the permission set, the JIT runs IL verification on every loaded assembly. Any
+unverifiable IL throws `System.Security.VerificationException` ("Dieser Vorgang
+kann die Laufzeit destabilisieren.") and TIA silently fails to activate the
+addin. The error lands as a `.dr` zip in
+`C:\ProgramData\Siemens\Automation\Portal V20\Diagnostics\<product-id>\<guid>\`
+— unzip and read `ErrorReport.xml` to see the failing assembly.
+
+This means the question "will the narrow permission set work?" has *two* parts:
+
+1. **Permission grant** — covered by the table above.
+2. **IL verification** — every transitive dependency must be partial-trust safe.
+
+Verified by an isolated spike addin (PermSpike, lives at `/spike/PermSpike` and
+is gitignored — see commit message for "Permission narrowing spike"):
+
+| Dependency | Partial-trust verifies? | Notes |
+|---|---|---|
+| WPF (window, button, TextBox, ScrollViewer, MessageBox) | ✅ Pass | Spike opened a WPF dialog without issue. |
+| Newtonsoft.Json 13.x — **public top-level DTOs** | ✅ Pass | Round-trip of a public top-level class with primitive/array/nested-public-class properties succeeded. |
+| Newtonsoft.Json 13.x — **private nested DTOs** | ❌ Fail | `MethodAccessException` from CAS reflection check (`RestrictedMemberAccess` would be needed). BlockParam does not have any non-public serialized DTOs, so this is not a concern in practice — but watch for it if anyone introduces one. |
+| Serilog 3.x + Serilog.Sinks.File 5.x | ❌ Fail | `VerificationException` from `Serilog.Parsing.PropertyToken.get_IsPositional()` during `LoggerConfiguration.WriteTo.File(...)`. Cannot be remediated by adding more permissions — Serilog's IL itself does not verify under partial trust. **The narrow permission path requires removing Serilog.** |
+
+#### Things that don't help (verified the hard way)
+
+- Adding `SecurityPermission.UnmanagedCode` does not fix Serilog. `UnmanagedCode`
+  controls native interop, not IL verification — those are different stages.
+- The XSD does not list `ReflectionPermission`, so we cannot grant
+  `RestrictedMemberAccess` to make Newtonsoft.Json reach private members. Keep
+  serialized types public and top-level.
+
+#### Why Siemens's bundled examples use UnrestrictedAccess
+
+`C:\Program Files\Siemens\Automation\Portal V20\AddIns\ShowScripts.addin` (the
+sample addin shipped with TIA V20) declares `System.UnrestrictedAccess`. That is
+not a recommendation — it is a workaround for exactly this verification problem.
+Any addin that pulls in a non-trivial managed dependency stack will hit it
+unless every transitive dependency is partial-trust safe.
 
 ### Aufruf
 

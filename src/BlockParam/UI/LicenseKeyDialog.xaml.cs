@@ -1,9 +1,9 @@
 using System.Diagnostics;
 using System.Windows;
 using System.Windows.Media;
+using BlockParam.Diagnostics;
 using BlockParam.Licensing;
 using BlockParam.Localization;
-using Serilog;
 
 namespace BlockParam.UI;
 

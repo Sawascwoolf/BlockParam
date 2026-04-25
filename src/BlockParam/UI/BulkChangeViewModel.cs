@@ -6,8 +6,8 @@ using System.Threading;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Threading;
-using Serilog;
 using BlockParam.Config;
+using BlockParam.Diagnostics;
 using BlockParam.Licensing;
 using BlockParam.Localization;
 using BlockParam.Models;
@@ -22,8 +22,6 @@ namespace BlockParam.UI;
 /// </summary>
 public class BulkChangeViewModel : ViewModelBase
 {
-    private static readonly ILogger Log = Serilog.Log.Logger;
-
     private readonly HierarchyAnalyzer _analyzer;
     private readonly BulkChangeService _bulkChangeService;
     private readonly IUsageTracker _usageTracker;
@@ -133,19 +131,12 @@ public class BulkChangeViewModel : ViewModelBase
 
         UpdateTagTableAge();
 
-        Log.Information("BulkChangeViewModel created: TagTableCache={HasCache}, AutocompleteProvider={HasProvider}, ConfigPath={ConfigExists}",
-            tagTableCache != null, _autocompleteProvider != null, configLoader.GetConfig() != null);
-
         {
             var config = configLoader.GetConfig();
             if (config != null)
             {
                 Log.Information("Config loaded: {RuleCount} rules, rulesDirectory={RulesDir}",
                     config.Rules.Count, config.RulesDirectory ?? "(none)");
-                foreach (var r in config.Rules)
-                    Log.Debug("  Rule: pathPattern={Pattern} datatype={Datatype} tagTable={TagTable}",
-                        r.PathPattern ?? "(none)", r.Datatype ?? "(none)",
-                        r.TagTableReference?.TableName ?? "(none)");
             }
         }
 
@@ -280,11 +271,14 @@ public class BulkChangeViewModel : ViewModelBase
     public bool CommitChanges()
     {
         if (!_hasPendingChanges) return true;
-        Log.Information("CommitChanges: importing modified XML for {Db}", _dataBlockInfo.Name);
         try
         {
             _onApply?.Invoke(_currentXml);
             HasPendingChanges = false;
+            // Pair line for the matching Log.Error path below — without
+            // this, a TIA-side import failure has the error logged but
+            // the success path is silent, so support cannot tell which
+            // happened from the log file alone.
             Log.Information("CommitChanges: import succeeded for {Db}", _dataBlockInfo.Name);
             return true;
         }
@@ -292,7 +286,6 @@ public class BulkChangeViewModel : ViewModelBase
         {
             // User declined the compile prompt on an inconsistent block. Keep pending
             // state so they can Apply again after compiling in TIA, or Discard to drop.
-            Log.Information("CommitChanges: apply cancelled by user for {Db}", _dataBlockInfo.Name);
             StatusText = Res.Get("Status_Ready");
             return false;
         }
@@ -886,9 +879,6 @@ public class BulkChangeViewModel : ViewModelBase
                 OnPropertyChanged(nameof(SelectedMemberDisplay));
             }
 
-            Log.Debug("VM.RefreshFlatList: flatCount={N} manualPaths={Set}",
-                _flatTreeManager.FlatList.Count, string.Join(",", _manualSelectedPaths));
-
             // Rehydrate multi-selection while _isRefreshing is still true so that
             // cascaded SelectedItem changes (e.g. from SelectedItems.Clear()) do
             // NOT trigger OnMemberSelected → UpdateHighlighting → recursion.
@@ -902,9 +892,6 @@ public class BulkChangeViewModel : ViewModelBase
 
     private void OnMemberSelected(MemberNodeViewModel? memberVm)
     {
-        Log.Debug("VM.OnMemberSelected: member={Name} isLeaf={Leaf} IsManualMode={Manual} setCount={N}",
-            memberVm?.Name ?? "(null)", memberVm?.IsLeaf, IsManualMode, _manualSelectedPaths.Count);
-
         AvailableScopes.Clear();
         _selectedScope = null; // Set backing field to avoid triggering UpdateHighlighting twice
         OnPropertyChanged(nameof(SelectedScope));
@@ -942,9 +929,6 @@ public class BulkChangeViewModel : ViewModelBase
         // Pre-fill with current (or pending) value unless the user has typed.
         PrefillNewValueFromFeaturedMember(memberVm);
 
-        Log.Debug("OnMemberSelected: {Name} Datatype={Datatype} Path={Path}",
-            memberVm.Name, memberVm.Datatype, memberVm.Model.Path);
-
         // Determine if constants should be shown (forced by rule or user choice)
         var acConfig = _configLoader.GetConfig();
         var rule = acConfig?.GetRule(memberVm.Model);
@@ -955,7 +939,6 @@ public class BulkChangeViewModel : ViewModelBase
             ConstantsForced = true;
             _showConstants = true; // Set backing field to avoid triggering ReloadSuggestions twice
             OnPropertyChanged(nameof(ShowConstants));
-            Log.Debug("Constants forced by rule: tagTable={TagTable}", rule!.TagTableReference!.TableName);
         }
         else
         {
@@ -1291,8 +1274,6 @@ public class BulkChangeViewModel : ViewModelBase
                 node.IsAffected = true;
 
             node.EnsureVisible();
-            Log.Debug("Highlight: {Path} already={Already} affected={Affected} parentExpanded={ParentExp}",
-                node.Path, node.IsAlreadyMatching, node.IsAffected, node.Parent?.IsExpanded);
         }
 
         foreach (var child in node.Children)
@@ -1519,7 +1500,9 @@ public class BulkChangeViewModel : ViewModelBase
             var tagReader = new XmlFileTagTableReader(_tagTableDir);
             _tagTableCache = new TagTableCache(tagReader);
             _autocompleteProvider = new AutocompleteProvider(_configLoader, _tagTableCache);
-            Log.Information("TagTableCache lazy-loaded: {Tables}",
+            // The "tag autocomplete is empty" support case is impossible to
+            // diagnose without knowing what the cache resolved to.
+            Log.Information("TagTableCache loaded: {Tables}",
                 string.Join(", ", _tagTableCache.GetTableNames()));
         }
         UpdateTagTableAge();
@@ -1577,7 +1560,6 @@ public class BulkChangeViewModel : ViewModelBase
         if (_onRefreshUdtTypes == null) return;
         try
         {
-            Log.Information("Refreshing UDT cache (triggered by SetPoint filter)...");
             _onRefreshUdtTypes();
 
             var resolver = new UdtSetPointResolver();
@@ -1587,7 +1569,6 @@ public class BulkChangeViewModel : ViewModelBase
                 resolver.LoadFromDirectory(_udtDir);
                 commentResolver.LoadFromDirectory(_udtDir);
             }
-            Log.Information("UDT cache refreshed: {TypeCount} types loaded", resolver.TypeCount);
 
             RefreshTree(_currentXml, resolver, commentResolver);
 
@@ -1605,7 +1586,6 @@ public class BulkChangeViewModel : ViewModelBase
 
     private void ExecuteRefreshConstants()
     {
-        Log.Information("Refreshing tag tables...");
         _onRefreshTagTables?.Invoke();
 
         if (_tagTableDir != null && System.IO.Directory.Exists(_tagTableDir))
@@ -1745,9 +1725,6 @@ public class BulkChangeViewModel : ViewModelBase
         foreach (var root in RootMembers)
             count += SetPendingOnNodes(root, affectedPaths, _newValue);
 
-        Log.Information("SetPending: {Count} values staged from scope '{Scope}'",
-            count, _selectedScope.AncestorName);
-
         // Clear bulk highlighting (values are now pending/yellow)
         foreach (var root in RootMembers)
             root.ClearAffected();
@@ -1796,9 +1773,6 @@ public class BulkChangeViewModel : ViewModelBase
                 count++;
             }
         }
-
-        Log.Information("SetPending (manual): {Count} values staged from {Total} selected members",
-            count, _manualSelectedPaths.Count);
 
         foreach (var root in RootMembers)
             root.ClearAffected();
@@ -1896,7 +1870,7 @@ public class BulkChangeViewModel : ViewModelBase
         try
         {
             backupPath = _onBackup?.Invoke();
-            Log.Debug("Backup created: {BackupPath}", backupPath);
+            Log.Information("Backup created: {BackupPath}", backupPath);
         }
         catch (Exception backupEx)
         {
@@ -2132,8 +2106,6 @@ public class BulkChangeViewModel : ViewModelBase
                 return;
             }
         }
-
-        Log.Information("Inline edit pending: {Path} → {Value}", memberVm.Path, newValue);
 
         // Shared validator → same rule language as the bulk inspector (#7).
         var error = BuildValidator().Validate(memberVm.Model, newValue);
@@ -2391,13 +2363,6 @@ public class BulkChangeViewModel : ViewModelBase
         bool wasManual = IsManualMode;
         bool changed = false;
 
-        Log.Debug("VM.UpdateManualSelection ENTER: wasManual={Was} setBefore=[{Set}] add=[{Add}] rem=[{Rem}] rehydrate={Rehy}",
-            wasManual,
-            string.Join(",", _manualSelectedPaths),
-            string.Join(",", addedList.Select(m => m.Name)),
-            string.Join(",", removedList.Select(m => m.Name)),
-            isFilterRehydration);
-
         foreach (var m in addedList)
         {
             if (!m.IsLeaf) continue;
@@ -2411,9 +2376,6 @@ public class BulkChangeViewModel : ViewModelBase
                 if (_manualSelectedPaths.Remove(m.Path)) changed = true;
             }
         }
-
-        Log.Debug("VM.UpdateManualSelection AFTER-SET: setAfter=[{Set}] changed={Ch} isNowManual={Now}",
-            string.Join(",", _manualSelectedPaths), changed, IsManualMode);
 
         if (!changed) return;
 
@@ -2434,7 +2396,6 @@ public class BulkChangeViewModel : ViewModelBase
         // run before SelectionChanged fired, so we handle this here too.)
         if (!wasManual && isNowManual)
         {
-            Log.Debug("VM.UpdateManualSelection: TRANSITION to manual mode");
             AvailableScopes.Clear();
             _selectedScope = null;
             OnPropertyChanged(nameof(SelectedScope));
@@ -2447,7 +2408,6 @@ public class BulkChangeViewModel : ViewModelBase
         }
         else if (isNowManual)
         {
-            Log.Debug("VM.UpdateManualSelection: still manual, refreshing flat list");
             // Already in manual mode: still pin newly-added selections so a later
             // filter/refresh keeps them visible and selectable.
             PinManuallySelectedVisibility();
@@ -2455,7 +2415,6 @@ public class BulkChangeViewModel : ViewModelBase
         }
         else if (wasManual)
         {
-            Log.Debug("VM.UpdateManualSelection: TRANSITION out of manual mode — re-run scope analysis");
             // Transitioning back to scope mode. OnMemberSelected already ran
             // before this method (with IsManualMode still true) and skipped scope
             // setup. Re-run it now that the mode has flipped.

@@ -2,7 +2,7 @@ using System;
 using System.IO;
 using System.Threading;
 using Newtonsoft.Json;
-using Serilog;
+using BlockParam.Diagnostics;
 
 namespace BlockParam.Services;
 
@@ -133,7 +133,7 @@ public class UiZoomService
         }
         catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException)
         {
-            Log.Logger.Warning(ex, "UiZoomService: cannot read {Path} — using default zoom", _settingsPath);
+            Log.Warning(ex, "UiZoomService: cannot read {Path} — using default zoom", _settingsPath);
         }
     }
 
@@ -170,14 +170,18 @@ public class UiZoomService
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            Log.Logger.Warning(ex, "UiZoomService: cannot save {Path}", _settingsPath);
+            Log.Warning(ex, "UiZoomService: cannot save {Path}", _settingsPath);
         }
     }
 
     private static double Clamp(double v) => Math.Max(MinZoom, Math.Min(MaxZoom, v));
     private static double Round(double v) => Math.Round(v * 20) / 20.0; // snap to 0.05 grid
 
-    private class UiSettingsDto
+    // Public so Newtonsoft.Json can reflect into its constructor and properties
+    // when the addin runs under TIA's partial-trust CAS sandbox — a private
+    // nested type fails JsonConvert.DeserializeObject with MethodAccessException
+    // (no RestrictedMemberAccess in the Siemens publisher XSD).
+    public class UiSettingsDto
     {
         [JsonProperty("zoom")]
         public double Zoom { get; set; }

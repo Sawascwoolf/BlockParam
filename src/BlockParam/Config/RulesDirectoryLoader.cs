@@ -1,6 +1,6 @@
 using System.IO;
 using Newtonsoft.Json;
-using Serilog;
+using BlockParam.Diagnostics;
 using BlockParam.Services;
 
 namespace BlockParam.Config;
@@ -12,8 +12,6 @@ namespace BlockParam.Config;
 /// </summary>
 public class RulesDirectoryLoader
 {
-    private static readonly ILogger Log = Serilog.Log.Logger;
-
     /// <summary>
     /// Loads all .json rule files from the directory.
     /// Tolerates missing/unreachable directories (returns empty with warning).
@@ -32,7 +30,6 @@ public class RulesDirectoryLoader
         if (!Directory.Exists(directoryPath))
         {
             result.Warnings.Add($"Rules directory not found: {directoryPath}");
-            Log.Warning("Rules directory not found: {Path}", directoryPath);
             return result;
         }
 
@@ -55,7 +52,6 @@ public class RulesDirectoryLoader
             var fileName = Path.GetFileName(file);
             if (skipFileNames != null && fileName != null && skipFileNames.Contains(fileName))
             {
-                Log.Debug("Skipping {File} (overridden locally)", fileName);
                 continue;
             }
 

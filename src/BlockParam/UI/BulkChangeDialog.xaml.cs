@@ -2,6 +2,7 @@ using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using BlockParam.Diagnostics;
 using BlockParam.Localization;
 using BlockParam.Services;
 
@@ -117,12 +118,6 @@ public partial class BulkChangeDialog : Window
         var addedList = e.AddedItems.OfType<MemberNodeViewModel>().ToList();
         var removedList = e.RemovedItems.OfType<MemberNodeViewModel>().ToList();
         bool refreshing = vmCheck?.IsRefreshing == true;
-        Serilog.Log.Debug(
-            "LV.SelectionChanged: suppressed={Sup} refreshing={Ref} Added=[{Add}] Removed=[{Rem}] SelectedItems.Count={Count}",
-            _suppressSelectionEvents, refreshing,
-            string.Join(",", addedList.Select(m => m.Name)),
-            string.Join(",", removedList.Select(m => m.Name)),
-            MemberListView.SelectedItems.Count);
 
         // Ignore selection changes that are actually caused by the VM mutating
         // the FlatMembers ObservableCollection during a refresh — they are ghost
@@ -135,7 +130,6 @@ public partial class BulkChangeDialog : Window
         var parentsToDrop = addedList.Where(m => !m.IsLeaf).ToList();
         if (parentsToDrop.Count > 0)
         {
-            Serilog.Log.Debug("LV.SelectionChanged: dropping {N} non-leaf items", parentsToDrop.Count);
             _suppressSelectionEvents = true;
             try
             {
@@ -154,11 +148,6 @@ public partial class BulkChangeDialog : Window
         // the item is no longer in SelectedItems.
         var stillSelected = MemberListView.SelectedItems.OfType<MemberNodeViewModel>().ToHashSet();
         var realRemoved = removedList.Where(m => !stillSelected.Contains(m)).ToList();
-        if (realRemoved.Count != removedList.Count)
-        {
-            Serilog.Log.Debug("LV.SelectionChanged: dropped {N} ghost removals still in SelectedItems",
-                removedList.Count - realRemoved.Count);
-        }
 
         var added = addedList.Where(m => m.IsLeaf);
         vm.UpdateManualSelection(added, realRemoved, isFilterRehydration: false);
@@ -172,11 +161,6 @@ public partial class BulkChangeDialog : Window
     private void RehydrateManualSelection()
     {
         if (DataContext is not BulkChangeViewModel vm) return;
-        Serilog.Log.Debug(
-            "Rehydrate ENTER: paths=[{Paths}] currentSelected=[{Sel}] items.Count={Items}",
-            string.Join(",", vm.ManualSelectedPaths),
-            string.Join(",", MemberListView.SelectedItems.OfType<MemberNodeViewModel>().Select(m => m.Name)),
-            MemberListView.Items.Count);
 
         if (vm.ManualSelectedPaths.Count == 0)
         {
@@ -193,17 +177,13 @@ public partial class BulkChangeDialog : Window
         try
         {
             MemberListView.SelectedItems.Clear();
-            int restored = 0;
             foreach (var m in MemberListView.Items.OfType<MemberNodeViewModel>())
             {
                 if (vm.ManualSelectedPaths.Contains(m.Path))
                 {
                     MemberListView.SelectedItems.Add(m);
-                    restored++;
                 }
             }
-            Serilog.Log.Debug("Rehydrate: restored {R}/{Total} selections",
-                restored, vm.ManualSelectedPaths.Count);
         }
         finally
         {
@@ -382,14 +362,14 @@ public partial class BulkChangeDialog : Window
         var item = MemberListView.ItemContainerGenerator.ContainerFromItem(memberVm) as ListViewItem;
         if (item == null)
         {
-            Serilog.Log.Logger.Warning("ShowInlineOverlayForScripted: no container for {Path}", memberVm.Path);
+            Log.Warning("ShowInlineOverlayForScripted: no container for {Path}", memberVm.Path);
             return;
         }
 
         var tb = FindDescendant<TextBox>(item, "InlineStartValue");
         if (tb == null)
         {
-            Serilog.Log.Logger.Warning("ShowInlineOverlayForScripted: no TextBox for {Path}", memberVm.Path);
+            Log.Warning("ShowInlineOverlayForScripted: no TextBox for {Path}", memberVm.Path);
             return;
         }
 

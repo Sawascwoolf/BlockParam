@@ -1,6 +1,5 @@
 using System.IO;
 using System.Threading;
-using Serilog;
 using Siemens.Engineering;
 using Siemens.Engineering.AddIn.Menu;
 using Siemens.Engineering.Compiler;
@@ -9,6 +8,7 @@ using Siemens.Engineering.SW.Blocks;
 using Siemens.Engineering.SW.Tags;
 using Siemens.Engineering.SW.Types;
 using BlockParam.Config;
+using BlockParam.Diagnostics;
 using BlockParam.Licensing;
 using BlockParam.Localization;
 using BlockParam.Services;
@@ -20,7 +20,6 @@ namespace BlockParam.AddIn;
 public class BulkChangeContextMenu : ContextMenuAddIn
 {
     private readonly TiaPortal _tiaPortal;
-    private static readonly ILogger Log = InitLogger();
     private static int _tempCacheCleanupRan;
 
     /// <summary>
@@ -46,8 +45,6 @@ public class BulkChangeContextMenu : ContextMenuAddIn
             if (files > 0 || dirs > 0)
                 Log.Information("TempCacheCleanup: removed {Files} file(s), {Dirs} dir(s); next sweep at {Next:yyyy-MM-dd HH:mm}",
                     files, dirs, nextRun);
-            else
-                Log.Debug("TempCacheCleanup: nothing to remove; next sweep at {Next:yyyy-MM-dd HH:mm}", nextRun);
         }
         catch (Exception ex)
         {
@@ -55,37 +52,9 @@ public class BulkChangeContextMenu : ContextMenuAddIn
         }
     }
 
-    private static ILogger InitLogger()
-    {
-        var logger = CreateLogger();
-        Serilog.Log.Logger = logger;
-        return logger;
-    }
-
     public BulkChangeContextMenu(TiaPortal tiaPortal) : base(BulkChangeAddInProviderInfo.MenuTitle)
     {
         _tiaPortal = tiaPortal;
-        Log.Information("BulkChangeContextMenu created for TIA Portal {Version}", tiaPortal.GetType().Assembly.GetName().Version);
-    }
-
-    private static ILogger CreateLogger()
-    {
-        var logDir = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-            "BlockParam", "logs");
-        Directory.CreateDirectory(logDir);
-
-        var version = typeof(BulkChangeContextMenu).Assembly.GetName().Version;
-        var prefix = $"bulkchange-v{version}-";
-
-        return new LoggerConfiguration()
-            .MinimumLevel.Debug()
-            .WriteTo.File(
-                Path.Combine(logDir, prefix),
-                rollingInterval: RollingInterval.Day,
-                retainedFileCountLimit: 7,
-                outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss.fff} [{Level:u3}] {Message:lj}{NewLine}{Exception}")
-            .CreateLogger();
     }
 
     protected override void BuildContextMenuItems(ContextMenuAddInRoot addInRootSubmenu)
@@ -130,13 +99,11 @@ public class BulkChangeContextMenu : ContextMenuAddIn
             var tempDir = Path.Combine(Path.GetTempPath(), "BlockParam", scope);
 
             // Export DB to XML - handle inconsistent blocks
-            Log.Debug("Exporting DB to {TempDir}", tempDir);
             string xmlPath = null!;
             if (!TryExportWithCompilePrompt(selection, adapter, () => xmlPath = adapter.ExportBlock(selection, tempDir)))
                 return;
 
             var xml = File.ReadAllText(xmlPath);
-            Log.Debug("Exported {Length} chars to {Path}", xml.Length, xmlPath);
 
             var plcSoftware = FindPlcSoftware(selection);
 
@@ -192,7 +159,6 @@ public class BulkChangeContextMenu : ContextMenuAddIn
             if (project != null)
             {
                 configLoader.SetTiaProjectPath(project.Path.FullName);
-                Log.Debug("TIA project path: {Path}", project.Path.FullName);
                 try
                 {
                     var langSettings = project.LanguageSettings;
@@ -200,13 +166,9 @@ public class BulkChangeContextMenu : ContextMenuAddIn
                         .Select(l => l.Culture.Name)
                         .ToList();
                     try { editingLanguage = langSettings.EditingLanguage?.Culture?.Name; }
-                    catch (Exception editEx) { Log.Debug(editEx, "EditingLanguage not available"); }
+                    catch { /* not always exposed; falls back to null */ }
                     try { referenceLanguage = langSettings.ReferenceLanguage?.Culture?.Name; }
-                    catch (Exception refEx) { Log.Debug(refEx, "ReferenceLanguage not available"); }
-                    Log.Information("TIA project languages: active=[{Langs}] editing={Edit} reference={Ref}",
-                        string.Join(", ", projectLanguages),
-                        editingLanguage ?? "(none)",
-                        referenceLanguage ?? "(none)");
+                    catch { /* not always exposed; falls back to null */ }
                 }
                 catch (Exception langEx)
                 {
@@ -232,7 +194,6 @@ public class BulkChangeContextMenu : ContextMenuAddIn
             var tagTableDir = Path.Combine(tempDir, "TagTables");
 
             // Open dialog
-            Log.Debug("Opening BulkChangeDialog");
             var vm = new BulkChangeViewModel(
                 dbInfo, xml, analyzer, bulkService, usageTracker, configLoader,
                 onApply: modifiedXml =>
@@ -261,7 +222,6 @@ public class BulkChangeContextMenu : ContextMenuAddIn
                     if (fresh != null)
                     {
                         selection = fresh;
-                        Log.Debug("Refreshed DataBlock reference after import: {DbName}", dbInfo.Name);
                     }
                     else
                     {
@@ -289,7 +249,6 @@ public class BulkChangeContextMenu : ContextMenuAddIn
             dialog.ShowDialog();
             licenseService.StopHeartbeat();
             licenseService.Dispose();
-            Log.Debug("Dialog closed");
         }
         catch (Exception ex)
         {
@@ -348,7 +307,6 @@ public class BulkChangeContextMenu : ContextMenuAddIn
             var filePath = Path.Combine(exportDir, $"{table.Name}.xml");
             if (File.Exists(filePath)) File.Delete(filePath);
             table.Export(new FileInfo(filePath), ExportOptions.WithDefaults);
-            Log.Information("Exported tag table: {Name} → {Path}", table.Name, filePath);
             count++;
         }
 
@@ -359,7 +317,6 @@ public class BulkChangeContextMenu : ContextMenuAddIn
                 var filePath = Path.Combine(exportDir, $"{subGroup.Name}_{table.Name}.xml");
                 if (File.Exists(filePath)) File.Delete(filePath);
                 table.Export(new FileInfo(filePath), ExportOptions.WithDefaults);
-                Log.Information("Exported tag table: {Group}/{Name} → {Path}", subGroup.Name, table.Name, filePath);
                 count++;
             }
         }
@@ -408,8 +365,6 @@ public class BulkChangeContextMenu : ContextMenuAddIn
         var inconsistent = new List<(string displayName, Func<bool> compile, Func<bool> reExport)>();
 
         var typeGroup = plcSoftware.TypeGroup;
-        Log.Information("TypeGroup: {TypeCount} types, {GroupCount} sub-groups",
-            typeGroup.Types.Count, typeGroup.Groups.Count);
 
         foreach (var (type, groupPath) in EnumerateTypesRecursive(typeGroup, parentPath: null))
         {
@@ -440,7 +395,6 @@ public class BulkChangeContextMenu : ContextMenuAddIn
         foreach (var sub in group.Groups)
         {
             var subPath = parentPath == null ? sub.Name : $"{parentPath}/{sub.Name}";
-            Log.Debug("UDT sub-group: {Path} with {Count} types", subPath, sub.Types.Count);
             foreach (var entry in EnumerateTypesRecursive(sub, subPath))
                 yield return entry;
         }
@@ -459,10 +413,6 @@ public class BulkChangeContextMenu : ContextMenuAddIn
         {
             if (File.Exists(filePath)) File.Delete(filePath);
             type.Export(new FileInfo(filePath), ExportOptions.WithDefaults);
-            if (groupPath == null)
-                Log.Information("Exported UDT: {Name} → {Path}", type.Name, filePath);
-            else
-                Log.Information("Exported UDT: {Group}/{Name} → {Path}", groupPath, type.Name, filePath);
             return true;
         }
         catch (Exception ex) when (IsInconsistencyError(ex))
@@ -561,7 +511,6 @@ public class BulkChangeContextMenu : ContextMenuAddIn
 
             File.Delete(filePath);
             type.Export(new FileInfo(filePath), ExportOptions.WithDefaults);
-            Log.Information("UDT re-exported (stale): {Name} → {Path}", displayName, filePath);
             return 1;
         }
         catch (Exception ex) when (IsInconsistencyError(ex))
@@ -610,7 +559,6 @@ public class BulkChangeContextMenu : ContextMenuAddIn
         {
             if (File.Exists(filePath)) File.Delete(filePath);
             type.Export(new FileInfo(filePath), ExportOptions.WithDefaults);
-            Log.Information("UDT re-exported after compile: {Name} → {Path}", displayName, filePath);
             return true;
         }
         catch (Exception ex)
@@ -699,7 +647,6 @@ public class BulkChangeContextMenu : ContextMenuAddIn
             }
 
             adapter.CompileBlock(block);
-            Log.Information("Compilation done, retrying export for {Name}", block.Name);
             exportAction();
             return true;
         }
