@@ -38,6 +38,13 @@ class Program
             .CreateLogger();
         Log.Information("DevLauncher log: {Path}", logPath);
 
+        // --capture-license <out-dir>             #20: license-dialog visual states
+        if (args.Length >= 2 && args[0] == "--capture-license")
+        {
+            LicenseCapture.Run(Path.GetFullPath(args[1]));
+            return;
+        }
+
         // --- Parse capture arguments ---
         // --capture <out.png> [<dbName>]          one-shot single scene
         // --capture-script <script.json>          multi-scene JSON-driven
@@ -282,7 +289,7 @@ class Program
         dialog.Close();
     }
 
-    private static void CaptureWindowToPng(Window window, string outputPath, double scale)
+    internal static void CaptureWindowToPng(Window window, string outputPath, double scale)
     {
         var width = (int)Math.Ceiling(window.ActualWidth * scale);
         var height = (int)Math.Ceiling(window.ActualHeight * scale);
