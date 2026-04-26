@@ -52,6 +52,17 @@
   <PropertyGroup Condition="'$(TiaVersion)' == '21'">
     <TiaPortalV21Root Condition="'$(TiaPortalV21Root)' == ''">C:\Program Files\Siemens\Automation\Portal V21\PublicAPI\V21\net48</TiaPortalV21Root>
   </PropertyGroup>
+
+  <!-- Fail fast with a friendly message if the V21 SDK is missing, instead of a
+       cascade of CS0006 metadata-not-found errors. Probes the canonical entry
+       assembly; if it's there, all sibling DLLs are too. -->
+  <Target Name="EnsureTiaPortalV21SdkPresent"
+          BeforeTargets="ResolveAssemblyReferences"
+          Condition="'$(TiaVersion)' == '21'">
+    <Error Condition="!Exists('$(TiaPortalV21Root)\Siemens.Engineering.AddIn.Base.dll')"
+           Text="TIA Portal V21 SDK not found at '$(TiaPortalV21Root)'. Install TIA Portal V21, or pass -p:TiaPortalV21Root=&lt;path&gt; pointing at PublicAPI\V21\net48." />
+  </Target>
+
   <ItemGroup Condition="'$(TiaVersion)' == '21'">
     <Reference Include="Siemens.Engineering.AddIn.Base">
       <HintPath>$(TiaPortalV21Root)\Siemens.Engineering.AddIn.Base.dll</HintPath>

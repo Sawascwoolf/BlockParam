@@ -16,7 +16,10 @@
 # V21 deploy target: %APPDATA%\Siemens\Automation\Portal V21\UserAddIns\
 #                    (per-user; Portal V21\AddIns\ does not exist by default)
 
-set -e
+# pipefail: a non-zero exit from the publisher must not be hidden by `tail` in the
+# pipeline below — without this, a failed package would still reach the "Deployed"
+# line and we'd ship a stale .addin while reporting success.
+set -eo pipefail
 
 VERSION="${1:?Usage: $0 <version> [--tia=20|21|both]}"
 TIA_FLAG="${2:---tia=both}"
@@ -27,6 +30,13 @@ case "$TIA_FLAG" in
   --tia=both) BUILD_V20=1; BUILD_V21=1 ;;
   *) echo "Unknown flag: $TIA_FLAG (use --tia=20 | --tia=21 | --tia=both)"; exit 1 ;;
 esac
+
+# %APPDATA% is required for the V21 deploy path. If unset (CI, plain WSL, sudo
+# with sanitised env), the V21 target collapses to '\Siemens\...' and would
+# write to the root of the working drive. Fail fast instead.
+if [ "$BUILD_V21" = "1" ]; then
+  : "${APPDATA:?APPDATA not set — run from Git Bash on Windows, or pass --tia=20 to skip V21}"
+fi
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 CSPROJ="$ROOT/src/BlockParam/BlockParam.csproj"
@@ -41,12 +51,14 @@ ADDIN_TARGET_V21="$APPDATA\\Siemens\\Automation\\Portal V21\\UserAddIns\\BlockPa
 
 echo "=== Bumping version to $VERSION ==="
 
-# Update csproj <Version> only (avoid hitting the per-package <Version> attrs).
+# csproj has one <Version> tag at the project level; PackageReference uses a
+# Version="..." attribute (different syntax) so the regex below only matches
+# the project version and leaves package versions alone.
 sed -i "s|<Version>[^<]*</Version>|<Version>$VERSION</Version>|" "$CSPROJ"
 echo "  Updated $CSPROJ"
 
-# Publisher manifests have a <Product><Version> we update.
-# AddInVersion ('1.0.0' / 'V21') and the xmlns are NOT touched.
+# Publisher manifests have one <Product><Version> tag we update.
+# <AddInVersion> ('1.0.0' / 'V21') uses a different tag name, so it is not touched.
 sed -i "s|<Version>[^<]*</Version>|<Version>$VERSION</Version>|" "$PUBLISHER_XML_V20"
 sed -i "s|<Version>[^<]*</Version>|<Version>$VERSION</Version>|" "$PUBLISHER_XML_V21"
 echo "  Updated addin-publisher-v20.xml and addin-publisher-v21.xml"
