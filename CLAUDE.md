@@ -59,6 +59,7 @@ Detailed technical research is split into token-efficient files:
 | `docs/research/04-publishing-distribution.md` | App Store publishing, signing, licensing options |
 | `docs/research/05-code-patterns.md` | Ready-to-use C# code patterns for Add-In and DB manipulation |
 | `docs/research/06-addin-deployment.md` | V20 deployment: net48 requirement, Publisher, DebugStarter, UserAddIns path |
+| `docs/research/07-tia-cloud-saas.md` | TIA Portal Cloud (V6.1 / V21) SaaS implications, V21 Openness breaking changes, cloud Add-In install open questions |
 
 ## Version Bump & Deploy
 
