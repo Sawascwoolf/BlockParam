@@ -84,6 +84,18 @@ public partial class BulkChangeDialog : Window
         JumpToMember(entry.Node);
     }
 
+    /// <summary>
+    /// Click on an Issues-list row → jump to that member in the tree (#26).
+    /// Issues are read-only findings; the row has no buttons of its own,
+    /// so any click anywhere on the row should jump.
+    /// </summary>
+    private void OnIssueRowClick(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is not FrameworkElement fe) return;
+        if (fe.DataContext is not ExistingIssueEntry entry) return;
+        JumpToMember(entry.Node);
+    }
+
     /// <summary>Per-row ↶ button in the Pending-edits list.</summary>
     private void OnUndoPendingClick(object sender, RoutedEventArgs e)
     {

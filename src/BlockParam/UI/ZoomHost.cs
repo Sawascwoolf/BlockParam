@@ -9,8 +9,9 @@ namespace BlockParam.UI;
 /// <summary>
 /// Attaches per-window UI zoom to a <see cref="Window"/>:
 /// Ctrl+Scroll, Ctrl +/-, Ctrl+0 (reset) scale the window content via
-/// <see cref="FrameworkElement.LayoutTransform"/> and resize the window
-/// proportionally so scaled content still fits.
+/// <see cref="FrameworkElement.LayoutTransform"/>. The window itself does
+/// not resize — content scales within the existing window bounds, like
+/// browser zoom.
 ///
 /// Zoom is shared across all dialogs via <see cref="UiZoomService.Shared"/>
 /// so toggling zoom in one dialog updates every open dialog at once and the
@@ -38,11 +39,6 @@ internal static class ZoomHost
 
     public static void Attach(Window window, UiZoomService service)
     {
-        // Start from 1.0 so the first apply (with a persisted factor) scales the
-        // window from the XAML "designed" size up to designed × factor. Subsequent
-        // changes scale by the delta so any manual window resize is preserved.
-        double lastAppliedFactor = 1.0;
-
         void ApplyZoom(double factor)
         {
             if (window.Content is not FrameworkElement root) return;
@@ -50,15 +46,6 @@ internal static class ZoomHost
             root.LayoutTransform = Math.Abs(factor - 1.0) < 0.0001
                 ? Transform.Identity
                 : new ScaleTransform(factor, factor);
-
-            var ratio = factor / lastAppliedFactor;
-            if (service.AutoResizeWindow && Math.Abs(ratio - 1.0) > 0.0001)
-            {
-                if (!double.IsNaN(window.Width))  window.Width  = ClampToScreen(window.Width  * ratio, isHeight: false);
-                if (!double.IsNaN(window.Height)) window.Height = ClampToScreen(window.Height * ratio, isHeight: true);
-            }
-
-            lastAppliedFactor = factor;
         }
 
         void OnZoomChanged(double factor) => ApplyZoom(factor);
@@ -98,12 +85,5 @@ internal static class ZoomHost
             else if (e.Delta < 0) service.ZoomOut();
             e.Handled = true;
         };
-    }
-
-    private static double ClampToScreen(double value, bool isHeight)
-    {
-        var wa = SystemParameters.WorkArea;
-        var limit = isHeight ? wa.Height : wa.Width;
-        return Math.Min(value, limit);
     }
 }

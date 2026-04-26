@@ -13,6 +13,7 @@
         <!-- Buttons at bottom -->
         <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal"
                     HorizontalAlignment="Right" Margin="0,12,0,0">
+            <local:ZoomIndicator Margin="0,0,12,0" VerticalAlignment="Center"/>
             <Button Content="{loc:Loc DiffPreview_ApplyChanges}" Command="{Binding ApplyCommand}"
                     Width="110" Height="28" Margin="0,0,8,0"/>
             <Button Content="{loc:Loc Dialog_Cancel}" Command="{Binding CancelCommand}"

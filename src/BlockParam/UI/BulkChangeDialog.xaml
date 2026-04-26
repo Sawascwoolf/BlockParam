@@ -80,6 +80,10 @@
         <!-- Bottom bar: action buttons + license/usage info + status -->
         <DockPanel DockPanel.Dock="Bottom" Margin="0,8,0,0">
             <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                <!-- Discoverable zoom widget (#28). Placed left of the action
+                     buttons so the persistent percentage label and shortcut
+                     tooltip stay in the user's peripheral vision. -->
+                <local:ZoomIndicator Margin="0,0,12,0" VerticalAlignment="Center"/>
                 <!-- License / usage summary — clickable to open the license dialog.
                      Single control replaces the old tier badge + separate Manage link. -->
                 <Button Content="{Binding UsageStatusText}" FontSize="10"
@@ -231,6 +235,14 @@
                                 <Setter Property="Background" Value="#FAFAFA"/>
                             </Trigger>
                             <!-- Status is shown as a 3px colored left edge (plus a pale fill in the Value column) -->
+                            <!-- Pre-existing rule violation (purple, non-blocking — #26).
+                                 Lower priority than every interactive state: rows the user
+                                 is actively editing or affecting take the regular colors;
+                                 the purple edge only stays visible when nothing else applies. -->
+                            <DataTrigger Binding="{Binding HasExistingViolation}" Value="True">
+                                <Setter Property="BorderBrush" Value="#9C27B0"/>
+                                <Setter Property="ToolTip" Value="{Binding ExistingViolationMessage}"/>
+                            </DataTrigger>
                             <!-- Pending inline edit (orange) -->
                             <DataTrigger Binding="{Binding IsPendingInlineEdit}" Value="True">
                                 <Setter Property="BorderBrush" Value="#F39C12"/>
@@ -243,7 +255,7 @@
                             <DataTrigger Binding="{Binding IsAffected}" Value="True">
                                 <Setter Property="BorderBrush" Value="#2196F3"/>
                             </DataTrigger>
-                            <!-- Invalid inline edit (red, highest priority) -->
+                            <!-- Invalid inline edit (red, highest priority — blocks Apply) -->
                             <DataTrigger Binding="{Binding HasInlineError}" Value="True">
                                 <Setter Property="BorderBrush" Value="#D32F2F"/>
                                 <Setter Property="ToolTip" Value="{Binding InlineErrorMessage}"/>
@@ -348,6 +360,10 @@
                                             <Style TargetType="Border">
                                                 <Setter Property="Background" Value="Transparent"/>
                                                 <Style.Triggers>
+                                                    <!-- Pre-existing rule violation (light purple, #26). -->
+                                                    <DataTrigger Binding="{Binding HasExistingViolation}" Value="True">
+                                                        <Setter Property="Background" Value="#F3E5F5"/>
+                                                    </DataTrigger>
                                                     <DataTrigger Binding="{Binding IsPendingInlineEdit}" Value="True">
                                                         <Setter Property="Background" Value="#FFE0B2"/>
                                                     </DataTrigger>
@@ -503,7 +519,7 @@
                             </Border>
                         </Grid>
                         <!-- Pending edits + count badge -->
-                        <Grid Width="26" Height="26" Margin="0,2,0,6">
+                        <Grid Width="26" Height="26" Margin="0,2">
                             <Button Command="{Binding ToggleInspectorCommand}"
                                     Background="Transparent" BorderThickness="0" Cursor="Hand"
                                     ToolTip="Pending edits">
@@ -517,6 +533,26 @@
                                     IsHitTestVisible="False"
                                     Visibility="{Binding HasPendingEdits, Converter={StaticResource BoolToVis}}">
                                 <TextBlock Text="{Binding PendingInlineEditCount}" FontSize="8"
+                                           FontWeight="Bold" Foreground="White"
+                                           HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            </Border>
+                        </Grid>
+                        <!-- Issues + count badge (#26) -->
+                        <Grid Width="26" Height="26" Margin="0,2,0,6">
+                            <Button Command="{Binding ToggleInspectorCommand}"
+                                    Background="Transparent" BorderThickness="0" Cursor="Hand"
+                                    ToolTip="{loc:Loc Issues_Tooltip}">
+                                <Viewbox Width="16" Height="16">
+                                    <Path Data="M 8,1 L 15,14 L 1,14 Z M 8,5 L 8,10 M 8,11.5 L 8,12.5"
+                                          Stroke="#9C27B0" StrokeThickness="1.5" Fill="#F3E5F5"/>
+                                </Viewbox>
+                            </Button>
+                            <Border Background="#9C27B0" CornerRadius="7" MinWidth="14" Height="12"
+                                    HorizontalAlignment="Right" VerticalAlignment="Top"
+                                    Padding="3,0" Margin="0,-2,-2,0"
+                                    IsHitTestVisible="False"
+                                    Visibility="{Binding HasExistingIssues, Converter={StaticResource BoolToVis}}">
+                                <TextBlock Text="{Binding ExistingIssuesCount}" FontSize="8"
                                            FontWeight="Bold" Foreground="White"
                                            HorizontalAlignment="Center" VerticalAlignment="Center"/>
                             </Border>
@@ -1071,6 +1107,133 @@
                                                            FontSize="10" Foreground="#B71C1C"
                                                            TextWrapping="Wrap" Margin="0,2,0,0"
                                                            Visibility="{Binding Node.HasInlineError, Converter={StaticResource BoolToVis}}"/>
+                                            </StackPanel>
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+
+                            <!-- =========================================================
+                                 Section 4 — ISSUES (#26)
+                                 Read-only findings: existing StartValues that already violate
+                                 a configured rule. Click a row to jump to the member in the
+                                 tree. Does NOT block Apply.
+                                 ========================================================= -->
+                            <Border Background="#EEF0F3" BorderBrush="#B9BEC6"
+                                    BorderThickness="0,1,0,1">
+                                <DockPanel ToolTip="{loc:Loc Issues_Tooltip}">
+                                    <Button DockPanel.Dock="Left"
+                                            Command="{Binding ToggleIssuesCommand}"
+                                            Background="Transparent" BorderThickness="0"
+                                            Width="18" Height="24" Cursor="Hand" Focusable="False">
+                                        <Grid Width="10" Height="10">
+                                            <TextBlock Text="&#x25BC;" FontSize="9" Foreground="#5b6471"
+                                                       HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                       Visibility="{Binding IsIssuesExpanded, Converter={StaticResource BoolToVis}}"/>
+                                            <TextBlock Text="&#x25B6;" FontSize="9" Foreground="#5b6471"
+                                                       HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                       Visibility="{Binding IsIssuesExpanded, Converter={StaticResource BoolToVis}, ConverterParameter=Invert}"/>
+                                        </Grid>
+                                    </Button>
+                                    <!-- Section icon: triangle/exclamation = warning finding -->
+                                    <Viewbox DockPanel.Dock="Left" Width="13" Height="13"
+                                             Margin="0,0,6,0" VerticalAlignment="Center">
+                                        <Path Data="M 8,1 L 15,14 L 1,14 Z M 8,5 L 8,10 M 8,11.5 L 8,12.5"
+                                              Stroke="#9C27B0" StrokeThickness="1.5" Fill="#F3E5F5"/>
+                                    </Viewbox>
+                                    <TextBlock DockPanel.Dock="Left" Text="{loc:Loc Issues_Header}"
+                                               Margin="0,6,0,6"
+                                               FontSize="10.5" FontWeight="Bold" Foreground="#1e2227"
+                                               VerticalAlignment="Center"/>
+                                    <Border DockPanel.Dock="Left" Margin="6,0,0,0" Padding="5,0"
+                                            Background="#9C27B0" CornerRadius="8"
+                                            VerticalAlignment="Center"
+                                            Visibility="{Binding HasExistingIssues, Converter={StaticResource BoolToVis}}">
+                                        <TextBlock Text="{Binding ExistingIssuesCount}"
+                                                   FontSize="10" FontWeight="Bold" Foreground="White"/>
+                                    </Border>
+                                    <!-- Filler to consume remaining space (avoids the icon's tooltip
+                                         being the only hover target on a wide section header). -->
+                                    <Border/>
+                                </DockPanel>
+                            </Border>
+                            <!-- Empty state -->
+                            <Border Background="White" Padding="12,10" MinHeight="52">
+                                <Border.Style>
+                                    <Style TargetType="Border">
+                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                        <Style.Triggers>
+                                            <MultiDataTrigger>
+                                                <MultiDataTrigger.Conditions>
+                                                    <Condition Binding="{Binding IsIssuesExpanded}" Value="True"/>
+                                                    <Condition Binding="{Binding HasExistingIssues}" Value="False"/>
+                                                </MultiDataTrigger.Conditions>
+                                                <Setter Property="Visibility" Value="Visible"/>
+                                            </MultiDataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Border.Style>
+                                <TextBlock Text="{loc:Loc Issues_Empty}"
+                                           FontSize="10.5" Foreground="#8a929d" FontStyle="Italic"
+                                           TextWrapping="Wrap"/>
+                            </Border>
+                            <!-- List -->
+                            <ItemsControl x:Name="ExistingIssuesList"
+                                          ItemsSource="{Binding ExistingIssues}"
+                                          Background="White">
+                                <ItemsControl.Style>
+                                    <Style TargetType="ItemsControl">
+                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                        <Style.Triggers>
+                                            <MultiDataTrigger>
+                                                <MultiDataTrigger.Conditions>
+                                                    <Condition Binding="{Binding IsIssuesExpanded}" Value="True"/>
+                                                    <Condition Binding="{Binding HasExistingIssues}" Value="True"/>
+                                                </MultiDataTrigger.Conditions>
+                                                <Setter Property="Visibility" Value="Visible"/>
+                                            </MultiDataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </ItemsControl.Style>
+                                <ItemsControl.Template>
+                                    <ControlTemplate TargetType="ItemsControl">
+                                        <Border Background="White">
+                                            <ItemsPresenter/>
+                                        </Border>
+                                    </ControlTemplate>
+                                </ItemsControl.Template>
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Border BorderBrush="#9C27B0" BorderThickness="3,0,0,1"
+                                                Background="#FBF4FC"
+                                                Padding="10,4,10,4"
+                                                ToolTip="{Binding Message}"
+                                                MouseLeftButtonUp="OnIssueRowClick"
+                                                Cursor="Hand">
+                                            <StackPanel>
+                                                <DockPanel LastChildFill="True">
+                                                    <TextBlock Text="{Binding ShortPath}"
+                                                               FontFamily="Consolas,Courier New" FontSize="10"
+                                                               Foreground="#5b6471"
+                                                               TextTrimming="CharacterEllipsis"
+                                                               VerticalAlignment="Center"/>
+                                                </DockPanel>
+                                                <StackPanel Orientation="Horizontal" Margin="0,1,0,0">
+                                                    <Border Background="#F3E5F5" Padding="3,0">
+                                                        <TextBlock Text="{Binding CurrentValue}"
+                                                                   FontFamily="Consolas,Courier New" FontSize="10"
+                                                                   FontWeight="SemiBold"
+                                                                   Foreground="#4A148C"/>
+                                                    </Border>
+                                                </StackPanel>
+                                                <TextBlock Text="{Binding Message}"
+                                                           FontSize="10" Foreground="#4A148C"
+                                                           TextWrapping="Wrap" Margin="0,2,0,0"/>
+                                                <TextBlock Text="{Binding Hint}"
+                                                           FontSize="9.5" Foreground="#8a929d"
+                                                           FontStyle="Italic"
+                                                           TextWrapping="Wrap" Margin="0,1,0,0"
+                                                           Visibility="{Binding Hint, Converter={StaticResource NullToVis}}"/>
                                             </StackPanel>
                                         </Border>
                                     </DataTemplate>
