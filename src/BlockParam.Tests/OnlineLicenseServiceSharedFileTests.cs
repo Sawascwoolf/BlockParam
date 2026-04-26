@@ -135,6 +135,29 @@ public class OnlineLicenseServiceSharedFileTests : IDisposable
     }
 
     [Fact]
+    public void SharedFile_Unreadable_FallsBackToUserCacheSilently()
+    {
+        // Real-world failure mode: admin gets the ACL slightly wrong and the
+        // license.key file exists but the current user can't read it. The
+        // service must NOT lock the user out — it should fall through to the
+        // per-user cache as if the managed file weren't there at all.
+        WriteUserLicense("PRO-USER-FALLBACK", "instance-1");
+        File.WriteAllText(_sharedKeyPath, "PRO-IT-UNREADABLE");
+
+        // Hold an exclusive lock so the service's File.ReadAllText throws
+        // IOException — this simulates an ACL deny without needing to actually
+        // mutate ACLs (which would require admin rights in CI).
+        using var locker = new FileStream(
+            _sharedKeyPath, FileMode.Open, FileAccess.Read, FileShare.None);
+
+        using var svc = NewService();
+
+        var info = svc.GetLicenseInfo();
+        info.IsManagedKey.Should().BeFalse();
+        info.LicenseKey.Should().Be("PRO-USER-FALLBACK");
+    }
+
+    [Fact]
     public void DefaultSharedLicenseFilePath_PointsAtProgramData()
     {
         // Sanity-check the documented location admins are told to use.

@@ -350,6 +350,11 @@ public class OnlineLicenseService : ILicenseService
         if (_licenseData != null &&
             string.Equals(_licenseData.LicenseKey, sharedKey, StringComparison.Ordinal))
         {
+            // Logged so support can grep "did this seat see the file at all on
+            // this start?" — fires once per TIA launch, not per heartbeat, so
+            // it doesn't flood the log even on the same-key (no-op) path.
+            Log.Information("Managed license file at {Path} matches cached key — no change",
+                _sharedLicenseFilePath);
             return;
         }
 
