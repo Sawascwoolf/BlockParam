@@ -59,6 +59,10 @@ Thumbs.db
 ## Only the stitched MP4 + fixtures + scripts are tracked.
 assets/screenshots/workflow/wf*.png
 
+## License-dialog visual states — diagnostic output of `--capture-license`.
+## Regenerable on demand; not part of marketing assets.
+assets/screenshots/license/
+
 ## Chapter cards — per-chapter SVGs are produced by render-chapters.sh from
 ## chapter-template.svg + workflow_inline.json. The template, script and
 ## transparent logo variant are tracked; the per-chapter outputs are not.

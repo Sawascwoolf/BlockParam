@@ -27,6 +27,12 @@ public partial class LicenseKeyDialog : Window
 
     private void UpdateActivateButtonState()
     {
+        var info = _licenseService.GetLicenseInfo();
+        if (info.IsManagedKey)
+        {
+            ActivateButton.ToolTip = Res.Get("License_ActivateTooltip_Managed");
+            return;
+        }
         if (_licenseService.IsProActive)
         {
             ActivateButton.ToolTip = Res.Get("License_ActivateTooltip_AlreadyPro");
@@ -49,6 +55,26 @@ public partial class LicenseKeyDialog : Window
         // Reset panels
         ExpiredHintPanel.Visibility = Visibility.Collapsed;
         BuyLicensePanel.Visibility = Visibility.Collapsed;
+        ManagedKeyPanel.Visibility = Visibility.Collapsed;
+
+        // #20: Managed-key (shared file rolled out by IT) — disable all local
+        // edits so users don't try to overwrite or remove a key that will just
+        // be re-adopted from the file on next start.
+        if (info.IsManagedKey)
+        {
+            ManagedKeyPanel.Visibility = Visibility.Visible;
+            ManagedKeyHintText.Text = Res.Format(
+                "License_ManagedKeyHint",
+                info.ManagedKeyFilePath ?? "");
+            TierText.Foreground = info.Tier == LicenseTier.Pro
+                ? new SolidColorBrush(Color.FromRgb(0, 120, 215))
+                : new SolidColorBrush(Color.FromRgb(100, 100, 100));
+            KeyInput.Text = info.LicenseKey ?? "";
+            KeyInput.IsEnabled = false;
+            ActivateButton.IsEnabled = false;
+            RemoveButton.Visibility = Visibility.Collapsed;
+            return;
+        }
 
         if (info.Tier == LicenseTier.Pro)
         {

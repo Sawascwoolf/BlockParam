@@ -121,6 +121,8 @@ Nein = Aktuelles (möglicherweise unvollständiges) Ergebnis behalten</value></d
   <data name="License_UpgradeToPro" xml:space="preserve"><value>Upgrade auf Pro</value></data>
   <data name="License_ExpiredHint" xml:space="preserve"><value>Dein Pro-Abo konnte nicht verlängert werden. Verwalte dein Abo um fortzufahren.</value></data>
   <data name="License_ManageSubscription" xml:space="preserve"><value>Abo verwalten</value></data>
+  <data name="License_ManagedKeyHint" xml:space="preserve"><value>Von der IT verwaltet — Schlüssel aus {0}. Wende dich an deinen Administrator, um ihn zu ändern.</value></data>
+  <data name="License_ActivateTooltip_Managed" xml:space="preserve"><value>Lizenz wird von der IT verwaltet und kann lokal nicht geändert werden</value></data>
   <!-- Auswahl -->
   <data name="Selection_ClickToSelect" xml:space="preserve"><value>Blattelement anklicken zum Auswählen</value></data>
   <data name="Selection_MemberDisplay" xml:space="preserve"><value>{0} ({1})</value></data>

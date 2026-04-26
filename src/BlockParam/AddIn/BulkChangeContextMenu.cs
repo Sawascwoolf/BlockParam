@@ -185,9 +185,16 @@ public class BulkChangeContextMenu : ContextMenuAddIn
             var usagePath = Path.Combine(appDataDir, "usage.dat");
             var freeTracker = new LocalUsageTracker(usagePath, dailyLimit: 3);
 
-            // License service: heartbeat-based concurrent session validation
+            // License service: heartbeat-based concurrent session validation.
+            // #20: probe the machine-wide managed key file first so multi-seat
+            // customers can roll out / rotate keys via deployment tooling
+            // (batch / SCCM / Intune / GPO) without each engineer re-typing the
+            // key. Falls back to the per-user cache when no managed file exists.
             var serverUrl = configLoader.ReadLicenseServerUrl() ?? OnlineLicenseService.DefaultServerUrl;
-            var licenseService = new OnlineLicenseService(appDataDir, serverUrl);
+            var licenseService = new OnlineLicenseService(
+                appDataDir,
+                serverUrl,
+                sharedLicenseFilePath: OnlineLicenseService.DefaultSharedLicenseFilePath);
             var usageTracker = new LicensedUsageTracker(licenseService, freeTracker);
 
             // Tag table export: lazy (only when needed by autocomplete). Scoped per project (#14).
