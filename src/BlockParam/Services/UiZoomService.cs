@@ -46,22 +46,8 @@ public class UiZoomService
     /// <summary>
     /// Creates an in-memory-only zoom service that neither reads from nor
     /// writes to disk, so it always starts at <see cref="DefaultZoom"/>.
-    /// Also disables <see cref="AutoResizeWindow"/> since capture mode drives
-    /// window size via its own viewport config.
     /// </summary>
-    public static UiZoomService CreateEphemeral()
-    {
-        var s = new UiZoomService(settingsPath: "");
-        s.AutoResizeWindow = false;
-        return s;
-    }
-
-    /// <summary>
-    /// When true (default), ZoomHost scales the window dimensions
-    /// proportionally as the zoom changes so scaled content fits. Capture
-    /// mode sets this false because the scene viewport is authoritative.
-    /// </summary>
-    public bool AutoResizeWindow { get; set; } = true;
+    public static UiZoomService CreateEphemeral() => new(settingsPath: "");
 
     public UiZoomService() : this(DefaultSettingsPath()) { }
 
