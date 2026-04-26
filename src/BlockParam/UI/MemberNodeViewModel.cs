@@ -19,6 +19,8 @@ public class MemberNodeViewModel : ViewModelBase
     private bool _isSearchMatch;
     private bool _hasInlineError;
     private string? _inlineErrorMessage;
+    private bool _hasExistingViolation;
+    private string? _existingViolationMessage;
     private string? _editableStartValue;
     private string? _ruleHint;
 
@@ -177,6 +179,29 @@ public class MemberNodeViewModel : ViewModelBase
     {
         get => _inlineErrorMessage;
         set => SetProperty(ref _inlineErrorMessage, value);
+    }
+
+    /// <summary>
+    /// True when this member's *current* StartValue (as it sits in the DB,
+    /// independent of any pending edit) violates a configured rule. Surfaced
+    /// in the inspector "Issues" section as a read-only finding (#26).
+    /// Distinct from <see cref="HasInlineError"/>: pre-existing violations
+    /// must NOT block Apply — Apply only cares about pending edits.
+    /// </summary>
+    public bool HasExistingViolation
+    {
+        get => _hasExistingViolation;
+        set => SetProperty(ref _hasExistingViolation, value);
+    }
+
+    /// <summary>
+    /// Human-readable description of why this member's existing value fails its
+    /// rule (e.g. "Range: 0 – 100"). Null when <see cref="HasExistingViolation"/> is false.
+    /// </summary>
+    public string? ExistingViolationMessage
+    {
+        get => _existingViolationMessage;
+        set => SetProperty(ref _existingViolationMessage, value);
     }
 
     /// <summary>

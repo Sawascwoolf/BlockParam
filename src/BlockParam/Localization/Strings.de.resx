@@ -247,6 +247,10 @@ Beispiele: en-US, de-DE. Leer lassen für Standardsprache.</value></data>
   <!-- Seitenleiste „Ausstehende Änderungen“ (#11) -->
   <data name="Pending_InvalidBadge" xml:space="preserve"><value>{0} von {1} ungültig</value></data>
   <data name="Pending_InvalidBadgeTooltip" xml:space="preserve"><value>Ungültige Einträge korrigieren oder verwerfen, bevor übernommen wird.</value></data>
+  <!-- Vorhandene Wert-Findings (#26) -->
+  <data name="Issues_Header" xml:space="preserve"><value>FINDINGS</value></data>
+  <data name="Issues_Empty" xml:space="preserve"><value>Keine Regelverletzungen in den aktuellen Werten gefunden.</value></data>
+  <data name="Issues_Tooltip" xml:space="preserve"><value>Vorhandene Werte, die bereits gegen eine konfigurierte Regel verstoßen. Schreibgeschützt — manuell beheben falls nötig; das Übernehmen wird nicht blockiert.</value></data>
   <!-- Inkonsistente UDT Kompilier-Abfrage (#27) -->
   <data name="Udt_InconsistentPromptTitle" xml:space="preserve"><value>BlockParam — Kompilierung erforderlich</value></data>
   <data name="Udt_InconsistentPrompt" xml:space="preserve"><value>{0} UDT(s) können nicht exportiert werden, da sie inkonsistent sind:
