@@ -27,8 +27,8 @@ public class AddInPublisherManifestParityTests
         v20.Root!.Name.NamespaceName.Should().Be(V20Xmlns);
         v21.Root!.Name.NamespaceName.Should().Be(V21Xmlns);
 
-        Normalize(v20, V20Xmlns);
-        Normalize(v21, V21Xmlns);
+        Normalize(v20);
+        Normalize(v21);
 
         XNode.DeepEquals(v20, v21).Should().BeTrue(
             "V20 and V21 manifests must stay in sync apart from xmlns and <AddInVersion>; " +
@@ -45,17 +45,18 @@ public class AddInPublisherManifestParityTests
             "Siemens's V21 sample uses the literal token 'V21' — stay aligned with the convention.");
     }
 
-    private static void Normalize(XDocument doc, string xmlns)
+    private static void Normalize(XDocument doc)
     {
-        var ns = (XNamespace)xmlns;
-
-        // Strip xmlns by rewriting every element into the empty namespace, so
-        // DeepEquals compares structure + content only.
+        // Rewrite every element into the empty namespace AND drop the leftover
+        // xmlns declaration attribute, otherwise DeepEquals still sees
+        // xmlns="…/V20" vs xmlns="…/V21" on the root.
         foreach (var e in doc.Descendants().ToList())
+        {
             e.Name = XNamespace.None + e.Name.LocalName;
+            e.Attributes().Where(a => a.IsNamespaceDeclaration).Remove();
+        }
 
-        var addInVersion = doc.Root!.Element("AddInVersion");
-        addInVersion?.Remove();
+        doc.Root!.Element("AddInVersion")?.Remove();
     }
 
     private static string LoadManifest(string fileName)
