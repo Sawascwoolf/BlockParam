@@ -12,6 +12,19 @@
     <Authors>Sawascwoolf</Authors>
     <Description>TIA Portal Add-In for editing Data Block start values and parameters — single and in bulk</Description>
     <ApplicationIcon>Resources\BlockParam_logo.ico</ApplicationIcon>
+
+    <!-- TIA Portal target version. Default 20 keeps the standard bin\Release\net48\
+         output path (DevLauncher and Tests resolve their ProjectReference there).
+         Build V21 with `dotnet build -p:TiaVersion=21`; output goes to bin\…\v21\
+         to keep the artifacts side-by-side. -->
+    <TiaVersion Condition="'$(TiaVersion)' == ''">20</TiaVersion>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(TiaVersion)' == '21'">
+    <OutputPath>bin\$(Configuration)\$(TargetFramework)\v21\</OutputPath>
+    <IntermediateOutputPath>obj\$(Configuration)\$(TargetFramework)\v21\</IntermediateOutputPath>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <DefineConstants>$(DefineConstants);TIA_V21</DefineConstants>
   </PropertyGroup>
 
   <ItemGroup>
@@ -25,9 +38,59 @@
     <Reference Include="System.Net.Http" />
   </ItemGroup>
 
-  <!-- Siemens TIA Portal Add-In packages -->
-  <ItemGroup>
+  <!-- Siemens TIA Portal Add-In assemblies.
+       V20: NuGet meta-package wires HintPaths to Portal V20\PublicAPI\V20.AddIn\*.dll.
+       V21: Siemens dropped the meta-package; their official V21 sample uses direct
+            <Reference HintPath> into the local TIA install (Portal V21\PublicAPI\V21\net48\).
+            <Private>False</Private> keeps the DLLs out of our output — TIA loads them
+            from its own install at runtime.
+       Configurable per dev machine via $(TiaPortalV21Root) (default: standard install path). -->
+  <ItemGroup Condition="'$(TiaVersion)' == '20'">
     <PackageReference Include="Siemens.Collaboration.Net.TiaPortal.Packages.OpennessAddIn" Version="20.0.*" />
+  </ItemGroup>
+
+  <PropertyGroup Condition="'$(TiaVersion)' == '21'">
+    <TiaPortalV21Root Condition="'$(TiaPortalV21Root)' == ''">C:\Program Files\Siemens\Automation\Portal V21\PublicAPI\V21\net48</TiaPortalV21Root>
+  </PropertyGroup>
+
+  <!-- Fail fast with a friendly message if the V21 SDK is missing, instead of a
+       cascade of CS0006 metadata-not-found errors. Probes the canonical entry
+       assembly; if it's there, all sibling DLLs are too. -->
+  <Target Name="EnsureTiaPortalV21SdkPresent"
+          BeforeTargets="ResolveAssemblyReferences"
+          Condition="'$(TiaVersion)' == '21'">
+    <Error Condition="!Exists('$(TiaPortalV21Root)\Siemens.Engineering.AddIn.Base.dll')"
+           Text="TIA Portal V21 SDK not found at '$(TiaPortalV21Root)'. Install TIA Portal V21, or pass -p:TiaPortalV21Root=&lt;path&gt; pointing at PublicAPI\V21\net48." />
+  </Target>
+
+  <ItemGroup Condition="'$(TiaVersion)' == '21'">
+    <Reference Include="Siemens.Engineering.AddIn.Base">
+      <HintPath>$(TiaPortalV21Root)\Siemens.Engineering.AddIn.Base.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="Siemens.Engineering.AddIn.Permissions">
+      <HintPath>$(TiaPortalV21Root)\Siemens.Engineering.AddIn.Permissions.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="Siemens.Engineering.AddIn.Step7">
+      <HintPath>$(TiaPortalV21Root)\Siemens.Engineering.AddIn.Step7.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="Siemens.Engineering.AddIn.Utilities">
+      <HintPath>$(TiaPortalV21Root)\Siemens.Engineering.AddIn.Utilities.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="Siemens.Engineering.Base">
+      <HintPath>$(TiaPortalV21Root)\Siemens.Engineering.Base.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="Siemens.Engineering.Step7">
+      <HintPath>$(TiaPortalV21Root)\Siemens.Engineering.Step7.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="Newtonsoft.Json" Version="13.*" />
     <PackageReference Include="Microsoft.Bcl.HashCode" Version="1.*" />
     <PackageReference Include="PolySharp" Version="1.*">

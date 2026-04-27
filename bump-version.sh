@@ -1,46 +1,108 @@
 #!/bin/bash
-# Usage: ./bump-version.sh <major.minor.patch>
+# Usage: ./bump-version.sh <major.minor.patch> [--tia=20|21|both]
 # Example: ./bump-version.sh 0.3.0
+#          ./bump-version.sh 0.3.0 --tia=21
+#
+# Default: build & deploy BOTH V20 and V21 artifacts.
 #
 # Updates version in:
-#   - BlockParam.csproj
-#   - addin-publisher.xml
-# Then rebuilds, packages and deploys to TIA Portal AddIns folder.
+#   - src/BlockParam/BlockParam.csproj
+#   - src/BlockParam/addin-publisher-v20.xml
+#   - src/BlockParam/addin-publisher-v21.xml
+# Then rebuilds, packages and deploys each requested target.
+#
+# V20 deploy target: C:\Program Files\Siemens\Automation\Portal V20\AddIns\
+#                    (machine-wide, requires admin write access)
+# V21 deploy target: %APPDATA%\Siemens\Automation\Portal V21\UserAddIns\
+#                    (per-user; Portal V21\AddIns\ does not exist by default)
 
-set -e
+# pipefail: a non-zero exit from the publisher must not be hidden by `tail` in the
+# pipeline below — without this, a failed package would still reach the "Deployed"
+# line and we'd ship a stale .addin while reporting success.
+set -eo pipefail
 
-VERSION="${1:?Usage: $0 <version> (e.g. 0.3.0)}"
+VERSION="${1:?Usage: $0 <version> [--tia=20|21|both]}"
+TIA_FLAG="${2:---tia=both}"
+
+case "$TIA_FLAG" in
+  --tia=20)   BUILD_V20=1; BUILD_V21=0 ;;
+  --tia=21)   BUILD_V20=0; BUILD_V21=1 ;;
+  --tia=both) BUILD_V20=1; BUILD_V21=1 ;;
+  *) echo "Unknown flag: $TIA_FLAG (use --tia=20 | --tia=21 | --tia=both)"; exit 1 ;;
+esac
+
+# %APPDATA% is required for the V21 deploy path. If unset (CI, plain WSL, sudo
+# with sanitised env), the V21 target collapses to '\Siemens\...' and would
+# write to the root of the working drive. Fail fast instead.
+if [ "$BUILD_V21" = "1" ]; then
+  : "${APPDATA:?APPDATA not set — run from Git Bash on Windows, or pass --tia=20 to skip V21}"
+fi
+
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 CSPROJ="$ROOT/src/BlockParam/BlockParam.csproj"
-PUBLISHER_XML="$ROOT/src/BlockParam/addin-publisher.xml"
-PUBLISHER_EXE="C:\Program Files\Siemens\Automation\Portal V20\PublicAPI\V20.AddIn\Siemens.Engineering.AddIn.Publisher.exe"
-ADDIN_TARGET="C:\Program Files\Siemens\Automation\Portal V20\AddIns\BlockParam.addin"
+PUBLISHER_XML_V20="$ROOT/src/BlockParam/addin-publisher-v20.xml"
+PUBLISHER_XML_V21="$ROOT/src/BlockParam/addin-publisher-v21.xml"
+
+PUBLISHER_EXE_V20="C:\\Program Files\\Siemens\\Automation\\Portal V20\\PublicAPI\\V20.AddIn\\Siemens.Engineering.AddIn.Publisher.exe"
+PUBLISHER_EXE_V21="C:\\Program Files\\Siemens\\Automation\\Portal V21\\PublicAPI\\V21\\Siemens.Engineering.AddIn.Publisher.exe"
+
+ADDIN_TARGET_V20="C:\\Program Files\\Siemens\\Automation\\Portal V20\\AddIns\\BlockParam.addin"
+ADDIN_TARGET_V21="$APPDATA\\Siemens\\Automation\\Portal V21\\UserAddIns\\BlockParam.addin"
 
 echo "=== Bumping version to $VERSION ==="
 
-# Update csproj
+# csproj has one <Version> tag at the project level; PackageReference uses a
+# Version="..." attribute (different syntax) so the regex below only matches
+# the project version and leaves package versions alone.
 sed -i "s|<Version>[^<]*</Version>|<Version>$VERSION</Version>|" "$CSPROJ"
 echo "  Updated $CSPROJ"
 
-# Update publisher config
-sed -i "s|<Version>[^<]*</Version>|<Version>$VERSION</Version>|" "$PUBLISHER_XML"
-echo "  Updated $PUBLISHER_XML"
+# Publisher manifests have one <Product><Version> tag we update.
+# <AddInVersion> ('1.0.0' / 'V21') uses a different tag name, so it is not touched.
+sed -i "s|<Version>[^<]*</Version>|<Version>$VERSION</Version>|" "$PUBLISHER_XML_V20"
+sed -i "s|<Version>[^<]*</Version>|<Version>$VERSION</Version>|" "$PUBLISHER_XML_V21"
+echo "  Updated addin-publisher-v20.xml and addin-publisher-v21.xml"
 
-# Build
-echo "=== Building Release ==="
-dotnet build "$ROOT/src/BlockParam" -c Release --nologo -v quiet
-echo "  Build OK"
+build_and_package() {
+  local tia="$1"
+  local publisher_xml="$2"
+  local publisher_exe="$3"
+  local addin_target="$4"
+  local out_dir
 
-# Package
-echo "=== Packaging .addin ==="
-cp "$PUBLISHER_XML" "$ROOT/src/BlockParam/bin/Release/net48/"
-"$PUBLISHER_EXE" \
-  -f "$ROOT/src/BlockParam/bin/Release/net48/addin-publisher.xml" \
-  -o "$ADDIN_TARGET" \
-  -c 2>&1 | tail -1
+  if [ "$tia" = "20" ]; then
+    out_dir="$ROOT/src/BlockParam/bin/Release/net48"
+  else
+    out_dir="$ROOT/src/BlockParam/bin/Release/net48/v21"
+  fi
+
+  echo "=== [V$tia] Building Release ==="
+  dotnet build "$ROOT/src/BlockParam" -c Release -p:TiaVersion="$tia" --nologo -v quiet
+  echo "  Build OK -> $out_dir"
+
+  echo "=== [V$tia] Packaging .addin ==="
+  local manifest_basename="$(basename "$publisher_xml")"
+  cp "$publisher_xml" "$out_dir/$manifest_basename"
+  "$publisher_exe" \
+    -f "$out_dir/$manifest_basename" \
+    -o "$addin_target" \
+    -c 2>&1 | tail -1
+
+  echo "  Deployed -> $addin_target"
+}
+
+if [ "$BUILD_V20" = "1" ]; then
+  build_and_package 20 "$PUBLISHER_XML_V20" "$PUBLISHER_EXE_V20" "$ADDIN_TARGET_V20"
+fi
+
+if [ "$BUILD_V21" = "1" ]; then
+  build_and_package 21 "$PUBLISHER_XML_V21" "$PUBLISHER_EXE_V21" "$ADDIN_TARGET_V21"
+fi
 
 echo ""
-echo "=== v$VERSION deployed to TIA Portal AddIns ==="
+echo "=== v$VERSION deployed ==="
+[ "$BUILD_V20" = "1" ] && echo "  V20: $ADDIN_TARGET_V20"
+[ "$BUILD_V21" = "1" ] && echo "  V21: $ADDIN_TARGET_V21"
 echo "Restart TIA Portal to load the new version."
 echo ""
 echo "To publish this version as a public GitHub Release, run:"

@@ -130,13 +130,23 @@ runtime. From a BlockParam standpoint it matters because:
 
 ## Open questions to confirm
 
-- [ ] Is there a documented `UserAddIns` path under `%APPDATA%` that the cloud
-      VM exposes to the end user? (V20 docs hint at it, V21+cloud unconfirmed.)
+- [x] Is there a documented `UserAddIns` path under `%APPDATA%` that the cloud
+      VM exposes to the end user? **Local V21 install confirmed (2026-04-26):
+      `%APPDATA%\Siemens\Automation\Portal V21\UserAddIns\` exists out of the
+      box and is the path Siemens's own V21 sample deploys to. Cloud-VM
+      exposure of this path is still untested.** See `08-v21-addin-build.md`.
 - [ ] Does Siemens require Marketplace certification before an Add-In can be
       installed in TIA Portal Cloud, or is it a free-form copy-to-folder?
-- [ ] Does the V21 SDK actually ship a `net6.0` flavor for in-process Add-Ins,
+- [x] Does the V21 SDK actually ship a `net6.0` flavor for in-process Add-Ins,
       or is the `net6.0` HintPath only for out-of-process Openness clients?
+      **Confirmed `net48` only for in-process. The V21 install ships
+      `Portal V21\PublicAPI\V21\net48\Siemens.Engineering.AddIn.*.dll`; no
+      sibling `net6.0\` folder exists. Siemens's V21 sample targets `v4.8`.**
 - [ ] Are Add-Ins disabled by tenant policy in some cloud SKUs?
+- [x] Will our V20 `.addin` load on V21? **No, confirmed 2026-04-26: V21
+      rejects the V20 manifest at load time ("Add-In wird in der aktuellen
+      TIA Portal-Version nicht unterstützt"). Two artifacts required —
+      details and rationale in `08-v21-addin-build.md`.**
 
 ## Sources
 

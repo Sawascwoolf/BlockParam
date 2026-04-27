@@ -60,6 +60,7 @@ Detailed technical research is split into token-efficient files:
 | `docs/research/05-code-patterns.md` | Ready-to-use C# code patterns for Add-In and DB manipulation |
 | `docs/research/06-addin-deployment.md` | V20 deployment: net48 requirement, Publisher, DebugStarter, UserAddIns path |
 | `docs/research/07-tia-cloud-saas.md` | TIA Portal Cloud (V6.1 / V21) SaaS implications, V21 Openness breaking changes, cloud Add-In install open questions |
+| `docs/research/08-v21-addin-build.md` | V21 in-process Add-In build: no V21 NuGet meta-package, direct `<Reference HintPath>` to `Portal V21\PublicAPI\V21\net48\`, manifest changes (`<AddInVersion>V21</AddInVersion>`), why one `.addin` cannot serve V20 + V21 |
 
 ## Version Bump & Deploy
 

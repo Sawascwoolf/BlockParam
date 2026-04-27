@@ -27,4 +27,16 @@
     <EmbeddedResource Include="Fixtures\**\*.json" />
   </ItemGroup>
 
+  <!-- Embed the V20/V21 publisher manifests so AddInPublisherManifestParityTests
+       can verify they only differ in xmlns + <AddInVersion>. Linked, not copied —
+       the source files in src/BlockParam/ are the source of truth. -->
+  <ItemGroup>
+    <EmbeddedResource Include="..\BlockParam\addin-publisher-v20.xml">
+      <Link>Manifests\addin-publisher-v20.xml</Link>
+    </EmbeddedResource>
+    <EmbeddedResource Include="..\BlockParam\addin-publisher-v21.xml">
+      <Link>Manifests\addin-publisher-v21.xml</Link>
+    </EmbeddedResource>
+  </ItemGroup>
+
 </Project>
