@@ -17,18 +17,21 @@ src/BlockParam.DevLauncher/bin/Debug/net48/BlockParam.DevLauncher.exe \
 
 bash assets/screenshots/workflow/chapters/render-chapters.sh
 
+bash assets/screenshots/workflow/external/render-external.sh
+
 bash assets/screenshots/scripts/build_workflow_video.sh
 ```
 
 Output: `assets/screenshots/workflow/workflow_inline.mp4`. The stitch script auto-opens it in the default player.
 
-## Why three steps
+## Why four steps
 
-1. **DevLauncher capture** renders all dialog scenes (everything *not* `kind: "chapter"`).
+1. **DevLauncher capture** renders all dialog scenes (everything *not* `kind: "chapter"` or `kind: "external"`).
 2. **render-chapters.sh** renders chapter title cards from `chapters/chapter-template.svg` (Inkscape) — driven by the same `workflow_inline.json` (chapter scenes have `kind: "chapter"`, `chapterTitle`, `chapterSubtitle`). Adding a chapter scene to the manifest auto-resizes the progress bar across all cards.
-3. **build_workflow_video.sh** stitches every scene's PNG into the MP4 with per-beat pacing.
+3. **render-external.sh** renders external/painpoint scenes (TIA Portal screenshots) with a synthetic cursor + click-ring overlay matching BlockParam's CursorOverlay style. Each `kind: "external"` scene declares `source` (path to source PNG), `cursor: { x, y }` in DIPs, and optional `click: "press" | "release"`.
+4. **build_workflow_video.sh** stitches every scene's PNG into the MP4 with per-beat pacing.
 
-Steps 1 and 2 don't conflict — the capture loop now skips chapter scenes — so they can run in either order.
+Steps 1, 2, and 3 don't conflict — the DevLauncher capture loop skips both `chapter` and `external` scenes — so they can run in any order.
 
 ## Why the build step is not optional
 

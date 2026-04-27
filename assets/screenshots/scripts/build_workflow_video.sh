@@ -31,6 +31,10 @@ declare -A BEATS=(
     [readingBulk]=1.8
     [chapterHold]=2.4
     [outro]=2.6
+    [painEstablish]=2.0
+    [painDwell]=3.0
+    [tiaType]=0.8
+    [clickHold]=0.7
 )
 
 # Extract (filename, beat) pairs from the JSON in scene order.

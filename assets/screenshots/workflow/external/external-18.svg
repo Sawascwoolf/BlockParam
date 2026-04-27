@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  External-scene template (1920x1080 base @ 2x DPI = 3840x2160 PNG).
+
+  Mirrors the BlockParam dialog's CursorOverlay (BulkChangeDialog.xaml @
+  CursorOverlay) so a TIA painpoint screenshot composited via this template
+  reads identical to a BlockParam dialog snapshot — same cursor arrow
+  geometry, same blue click ring, same shadow.
+
+  Filled at render time by render-external.sh. Placeholders:
+    ../TiaScreenshots/StartValue/10_contextMenuToPasteValueIntoDatablock.png   relative path to the source PNG (FHD or higher); the
+                      <image> upscales it to 3840x2160.
+    1520   cursor tip X in 4K pixels (DIP * 2).
+    840   cursor tip Y in 4K pixels.
+<circle cx="1520" cy="840" r="56" stroke="#1f6feb" stroke-width="8" fill="#1f6feb" fill-opacity="0.2" opacity="0.55" filter="url(#ringShadow)"/>                      or empty when the scene has no click.
+
+  Cursor arrow path is identical to BulkChangeDialog.xaml — hotspot at
+  (1,1) in path coords. Inside scale(4): hotspot translates by (-1,-1)
+  so the outer translate places the tip exactly at (CURSOR_X_4K, CURSOR_Y_4K).
+  Stroke 1.0 in path coords * scale(4) = 4 px stroke at 4K, matching the
+  BlockParam capture's stroke-width after its 2x ScaleTransform + 192-DPI render.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
+     viewBox="0 0 3840 2160" width="3840" height="2160">
+
+  <defs>
+    <filter id="ringShadow" x="-50%" y="-50%" width="200%" height="200%">
+      <feDropShadow dx="0" dy="0" stdDeviation="5" flood-color="#1f6feb" flood-opacity="0.6"/>
+    </filter>
+    <filter id="cursorShadow" x="-50%" y="-50%" width="200%" height="200%">
+      <feDropShadow dx="2" dy="2" stdDeviation="3" flood-color="black" flood-opacity="0.55"/>
+    </filter>
+  </defs>
+
+  <image xlink:href="../TiaScreenshots/StartValue/10_contextMenuToPasteValueIntoDatablock.png" href="../TiaScreenshots/StartValue/10_contextMenuToPasteValueIntoDatablock.png"
+         x="0" y="0" width="3840" height="2160"
+         preserveAspectRatio="xMidYMid slice"/>
+
+<circle cx="1520" cy="840" r="56" stroke="#1f6feb" stroke-width="8" fill="#1f6feb" fill-opacity="0.2" opacity="0.55" filter="url(#ringShadow)"/>
+  <g transform="translate(1520, 840)">
+    <g transform="scale(4) translate(-1, -1)">
+      <path d="M 1,1 L 1,17 L 5,13 L 8,20 L 11,19 L 8,12 L 14,12 Z"
+            fill="white" stroke="black" stroke-width="1.0" stroke-linejoin="round"
+            filter="url(#cursorShadow)"/>
+    </g>
+  </g>
+</svg>
