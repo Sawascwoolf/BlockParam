@@ -98,8 +98,7 @@ build_click_ring() {
 }
 
 render_one() {
-  local idx=$1
-  local row="$2"
+  local row="$1"
   IFS=$'\t' read -ra fields <<< "$row"
   local sid=${fields[0]}
   local fn=${fields[1]}
@@ -107,9 +106,6 @@ render_one() {
   local cx_dip=${fields[3]}
   local cy_dip=${fields[4]}
   local click=${fields[5]:-}
-
-  local num
-  num=$(printf "%02d" "$idx")
 
   # DIPs (1920x1080 base) -> 4K pixels (3840x2160)
   local cx_4k cy_4k
@@ -120,7 +116,9 @@ render_one() {
   # so its <image href> needs one extra `..` segment.
   local href="../$src"
 
-  local out_svg="external-${num}.svg"
+  # SVG kept for inspection; named after the manifest filename (e.g.
+  # tia01_click_search.svg) so it greps cleanly against scene ids.
+  local out_svg="${fn%.png}.svg"
   local out_png="${WORKFLOW_DIR}/${fn}"
 
   local ring_tmp
@@ -148,9 +146,7 @@ render_one() {
 }
 
 echo "Rendering ${#SCENE_ROWS[@]} external scene(s) at 3840x2160"
-i=1
 for row in "${SCENE_ROWS[@]}"; do
-  render_one "$i" "$row"
-  i=$((i + 1))
+  render_one "$row"
 done
 echo "Done."
