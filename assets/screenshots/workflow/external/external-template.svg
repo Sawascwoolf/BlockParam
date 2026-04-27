@@ -8,12 +8,16 @@
   geometry, same blue click ring, same shadow.
 
   Filled at render time by render-external.sh. Placeholders:
-    {{SOURCE_HREF}}   relative path to the source PNG (FHD or higher); the
-                      <image> upscales it to 3840x2160.
-    {{CURSOR_X_4K}}   cursor tip X in 4K pixels (DIP * 2).
-    {{CURSOR_Y_4K}}   cursor tip Y in 4K pixels.
-    {{CLICK_RING}}    a single <circle> element for the press/release ring,
-                      or empty when the scene has no click.
+    {{SOURCE_HREF}}     relative path to the source PNG (FHD or higher); the
+                        <image> upscales it to 3840x2160.
+    {{CURSOR_X_4K}}     cursor tip X in 4K pixels (DIP * 2).
+    {{CURSOR_Y_4K}}     cursor tip Y in 4K pixels.
+    {{CLICK_RING}}      a single <circle> element for the press/release ring,
+                        or empty when the scene has no click.
+    {{CAPTION_BADGE}}   a <g> element for the painpoint badge (top-left pill,
+                        navy backdrop, brick-red text), or empty when the
+                        scene has no caption. Painted between source and
+                        cursor so the cursor stays on top.
 
   Cursor arrow path is identical to BulkChangeDialog.xaml — hotspot at
   (1,1) in path coords. Inside scale(4): hotspot translates by (-1,-1)
@@ -25,17 +29,36 @@
      viewBox="0 0 3840 2160" width="3840" height="2160">
 
   <defs>
+    <!-- SVG1.1 drop-shadow chain (NOT feDropShadow). Inkscape silently
+         drops elements that reference an unsupported filter, so the
+         cursor + ring vanish from the rendered PNG. The compose chain
+         below works in both Inkscape and modern browsers. -->
     <filter id="ringShadow" x="-50%" y="-50%" width="200%" height="200%">
-      <feDropShadow dx="0" dy="0" stdDeviation="5" flood-color="#1f6feb" flood-opacity="0.6"/>
+      <feGaussianBlur in="SourceAlpha" stdDeviation="5"/>
+      <feFlood flood-color="#1f6feb" flood-opacity="0.6"/>
+      <feComposite in2="SourceAlpha" operator="in"/>
+      <feMerge>
+        <feMergeNode/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
     </filter>
     <filter id="cursorShadow" x="-50%" y="-50%" width="200%" height="200%">
-      <feDropShadow dx="2" dy="2" stdDeviation="3" flood-color="black" flood-opacity="0.55"/>
+      <feGaussianBlur in="SourceAlpha" stdDeviation="3"/>
+      <feOffset dx="2" dy="2" result="offsetBlur"/>
+      <feFlood flood-color="black" flood-opacity="0.55"/>
+      <feComposite in2="offsetBlur" operator="in"/>
+      <feMerge>
+        <feMergeNode/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
     </filter>
   </defs>
 
   <image xlink:href="{{SOURCE_HREF}}" href="{{SOURCE_HREF}}"
          x="0" y="0" width="3840" height="2160"
          preserveAspectRatio="xMidYMid slice"/>
+
+  {{CAPTION_BADGE}}
 
   {{CLICK_RING}}
 

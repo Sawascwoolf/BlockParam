@@ -50,13 +50,10 @@ print(int(vw * scale), int(vh * scale))
 ")
 
 # ---- Extract chapter scenes from the manifest ----
-# Output rows: idx<TAB>total<TAB>basefilename<TAB>title<TAB>pain<TAB>phrase1<TAB>phrase2<TAB>...
+# Output rows: idx<TAB>total<TAB>basefilename<TAB>title<TAB>phrase1<TAB>phrase2<TAB>...
 # Python opens the manifest with explicit utf-8 (Windows defaults to cp1252,
 # which mangles the U+2022 bullet character used between subtitle phrases) and
 # also forces utf-8 on stdout so the bullets survive the bash round-trip.
-# `pain` is the optional uppercased painpoint caption (chapterPain field, with
-# • normalized to · for SVG rendering); empty string when the chapter has no
-# painpoint set.
 mapfile -t CHAPTER_ROWS < <(python -c "
 import io, json, sys
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', newline='\n')
@@ -69,9 +66,7 @@ for i, s in enumerate(chapters, start=1):
     title = s.get('chapterTitle', '')
     subtitle = s.get('chapterSubtitle', '') or ''
     phrases = [p.strip() for p in subtitle.split('•') if p.strip()]
-    pain_raw = s.get('chapterPain', '') or ''
-    pain = pain_raw.upper().replace('•', '·')
-    print('\t'.join([str(i), str(total), base, title, pain, *phrases]))
+    print('\t'.join([str(i), str(total), base, title, *phrases]))
 " | tr -d '\r')
 
 if [[ ${#CHAPTER_ROWS[@]} -eq 0 ]]; then
@@ -118,8 +113,7 @@ render_one() {
   local total=${fields[1]}    # equals TOTAL; carried for clarity
   local basename=${fields[2]}
   local title=${fields[3]}
-  local pain=${fields[4]}
-  local phrases=("${fields[@]:5}")
+  local phrases=("${fields[@]:4}")
 
   local num
   num=$(printf "%02d" "$current")
@@ -129,20 +123,14 @@ render_one() {
 
   # Stage replacement contents in temp files so sed can `r`-include them
   # verbatim — avoids escaping XML/quotes/newlines through sed substitution.
-  local rects_tmp tspans_tmp pain_tmp
+  local rects_tmp tspans_tmp
   rects_tmp=$(mktemp)
   tspans_tmp=$(mktemp)
-  pain_tmp=$(mktemp)
   build_progress_rects "$current" > "$rects_tmp"
   build_subtitle_tspans "${phrases[@]}" > "$tspans_tmp"
-  printf '%s' "$pain" > "$pain_tmp"
 
   sed -e "s|{{CHAPTER_NUMBER}}|$num|g" \
       -e "s|{{TITLE}}|$title|g" \
-      -e "/{{PAIN_LINE}}/{
-        r $pain_tmp
-        d
-      }" \
       -e "/{{SUBTITLE_TSPANS}}/{
         r $tspans_tmp
         d
@@ -153,7 +141,7 @@ render_one() {
       }" \
       "$TEMPLATE" > "$out_svg"
 
-  rm -f "$rects_tmp" "$tspans_tmp" "$pain_tmp"
+  rm -f "$rects_tmp" "$tspans_tmp"
 
   inkscape "$out_svg" \
     --export-type=png \

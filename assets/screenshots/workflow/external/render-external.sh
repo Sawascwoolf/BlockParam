@@ -16,6 +16,9 @@
 #              the 4K render. Required for external scenes.
 #   click      optional, "press" or "release" — paints the BlockParam click
 #              ring on top of the source frame, centered on the cursor.
+#   caption    optional, a short painpoint string (e.g. "TIA: no search").
+#              Renders as a top-left rounded pill (dark-navy backdrop,
+#              brick-red text). Pill width is sized to the caption length.
 #
 # Outputs:
 #   external/external-NN.svg   filled template, kept for inspection
@@ -43,15 +46,18 @@ RING_STROKE_WIDTH=8
 RING_FILL='#1f6feb'
 RING_FILL_OPACITY=0.2
 
-# Extract external scenes from the manifest. Output rows:
-#   id<TAB>filename<TAB>source<TAB>cx<TAB>cy<TAB>click
-# (click is empty string when not set.)
+# Extract external scenes from the manifest. Output rows separated by
+# \x1f (Unit Separator) — a non-whitespace delimiter so that empty middle
+# fields (e.g. an empty `click` between non-empty `cy` and `caption`) are
+# preserved. Bash's `read -ra` with whitespace IFS collapses consecutive
+# tabs into one, eating empty fields and shifting later columns left.
 mapfile -t SCENE_ROWS < <(python -c "
 import io, json, sys
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', newline='\n')
 with open('$MANIFEST', encoding='utf-8') as f:
     data = json.load(f)
 externals = [s for s in data['scenes'] if s.get('kind') == 'external']
+SEP = '\x1f'
 for s in externals:
     sid = s.get('id', '')
     fn = s.get('filename', '')
@@ -60,19 +66,42 @@ for s in externals:
     cx = cur.get('x', '')
     cy = cur.get('y', '')
     click = s.get('click', '') or ''
+    caption = s.get('caption', '') or ''
     if not src:
         sys.stderr.write(f'External scene {sid} missing source field\n')
         sys.exit(1)
     if cx == '' or cy == '':
         sys.stderr.write(f'External scene {sid} missing cursor.x/cursor.y\n')
         sys.exit(1)
-    print('\t'.join([sid, fn, src, str(cx), str(cy), click]))
+    print(SEP.join([sid, fn, src, str(cx), str(cy), click, caption]))
 " | tr -d '\r')
 
 if [[ ${#SCENE_ROWS[@]} -eq 0 ]]; then
   echo "No external scenes (kind=\"external\") found in $MANIFEST"
   exit 0
 fi
+
+# Painpoint badge: top-left rounded pill, dark-navy backdrop @ 92% opacity,
+# brick-red bold text. Pill width is fixed across all scenes so the badge
+# is the same size on every frame — sized to fit the longest expected
+# caption (~45 chars at Segoe UI 56px bold).
+BADGE_WIDTH=1500
+
+build_caption_badge() {
+  local caption="$1"
+  if [[ -z "$caption" ]]; then
+    return
+  fi
+  # Escape XML entities so captions can contain & < > " without breaking the
+  # SVG parse. Order matters: & first, otherwise later replacements get
+  # double-escaped.
+  caption="${caption//&/&amp;}"
+  caption="${caption//</&lt;}"
+  caption="${caption//>/&gt;}"
+  caption="${caption//\"/&quot;}"
+  printf '<g transform="translate(80, 80)"><rect x="0" y="0" width="%d" height="140" rx="70" fill="#0e2140" fill-opacity="0.92"/><text x="60" y="93" font-family="Segoe UI, Arial, sans-serif" font-size="56" font-weight="700" fill="#ff6464">%s</text></g>' \
+    "$BADGE_WIDTH" "$caption"
+}
 
 build_click_ring() {
   local click="$1"
@@ -99,13 +128,14 @@ build_click_ring() {
 
 render_one() {
   local row="$1"
-  IFS=$'\t' read -ra fields <<< "$row"
+  IFS=$'\x1f' read -ra fields <<< "$row"
   local sid=${fields[0]}
   local fn=${fields[1]}
   local src=${fields[2]}
   local cx_dip=${fields[3]}
   local cy_dip=${fields[4]}
   local click=${fields[5]:-}
+  local caption=${fields[6]:-}
 
   # DIPs (1920x1080 base) -> 4K pixels (3840x2160)
   local cx_4k cy_4k
@@ -121,28 +151,34 @@ render_one() {
   local out_svg="${fn%.png}.svg"
   local out_png="${WORKFLOW_DIR}/${fn}"
 
-  local ring_tmp
+  local ring_tmp badge_tmp
   ring_tmp=$(mktemp)
+  badge_tmp=$(mktemp)
   build_click_ring "$click" "$cx_4k" "$cy_4k" > "$ring_tmp"
+  build_caption_badge "$caption" > "$badge_tmp"
 
   sed -e "s|{{SOURCE_HREF}}|$href|g" \
       -e "s|{{CURSOR_X_4K}}|$cx_4k|g" \
       -e "s|{{CURSOR_Y_4K}}|$cy_4k|g" \
+      -e "/{{CAPTION_BADGE}}/{
+        r $badge_tmp
+        d
+      }" \
       -e "/{{CLICK_RING}}/{
         r $ring_tmp
         d
       }" \
       "$TEMPLATE" > "$out_svg"
 
-  rm -f "$ring_tmp"
+  rm -f "$ring_tmp" "$badge_tmp"
 
   inkscape "$out_svg" \
     --export-type=png \
     --export-filename="$out_png" \
     --export-width=3840 >/dev/null
 
-  printf "  %-32s  cursor=(%s,%s)  click=%-7s  %s\n" \
-    "$fn" "$cx_dip" "$cy_dip" "${click:-none}" "$sid"
+  printf "  %-32s  cursor=(%s,%s)  click=%-7s  caption=%s\n" \
+    "$fn" "$cx_dip" "$cy_dip" "${click:-none}" "${caption:-(none)}"
 }
 
 echo "Rendering ${#SCENE_ROWS[@]} external scene(s) at 3840x2160"

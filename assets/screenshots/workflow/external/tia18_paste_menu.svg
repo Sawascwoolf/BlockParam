@@ -8,11 +8,14 @@
   geometry, same blue click ring, same shadow.
 
   Filled at render time by render-external.sh. Placeholders:
-    ../TiaScreenshots/StartValue/10_contextMenuToPasteValueIntoDatablock.png   relative path to the source PNG (FHD or higher); the
-                      <image> upscales it to 3840x2160.
-    1520   cursor tip X in 4K pixels (DIP * 2).
-    840   cursor tip Y in 4K pixels.
-<circle cx="1520" cy="840" r="56" stroke="#1f6feb" stroke-width="8" fill="#1f6feb" fill-opacity="0.2" opacity="0.55" filter="url(#ringShadow)"/>                      or empty when the scene has no click.
+    ../TiaScreenshots/StartValue/10_contextMenuToPasteValueIntoDatablock.png     relative path to the source PNG (FHD or higher); the
+                        <image> upscales it to 3840x2160.
+    1520     cursor tip X in 4K pixels (DIP * 2).
+    840     cursor tip Y in 4K pixels.
+<circle cx="1520" cy="840" r="56" stroke="#1f6feb" stroke-width="8" fill="#1f6feb" fill-opacity="0.2" opacity="0.55" filter="url(#ringShadow)"/>                        or empty when the scene has no click.
+                        navy backdrop, brick-red text), or empty when the
+                        scene has no caption. Painted between source and
+                        cursor so the cursor stays on top.
 
   Cursor arrow path is identical to BulkChangeDialog.xaml — hotspot at
   (1,1) in path coords. Inside scale(4): hotspot translates by (-1,-1)
@@ -24,17 +27,35 @@
      viewBox="0 0 3840 2160" width="3840" height="2160">
 
   <defs>
+    <!-- SVG1.1 drop-shadow chain (NOT feDropShadow). Inkscape silently
+         drops elements that reference an unsupported filter, so the
+         cursor + ring vanish from the rendered PNG. The compose chain
+         below works in both Inkscape and modern browsers. -->
     <filter id="ringShadow" x="-50%" y="-50%" width="200%" height="200%">
-      <feDropShadow dx="0" dy="0" stdDeviation="5" flood-color="#1f6feb" flood-opacity="0.6"/>
+      <feGaussianBlur in="SourceAlpha" stdDeviation="5"/>
+      <feFlood flood-color="#1f6feb" flood-opacity="0.6"/>
+      <feComposite in2="SourceAlpha" operator="in"/>
+      <feMerge>
+        <feMergeNode/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
     </filter>
     <filter id="cursorShadow" x="-50%" y="-50%" width="200%" height="200%">
-      <feDropShadow dx="2" dy="2" stdDeviation="3" flood-color="black" flood-opacity="0.55"/>
+      <feGaussianBlur in="SourceAlpha" stdDeviation="3"/>
+      <feOffset dx="2" dy="2" result="offsetBlur"/>
+      <feFlood flood-color="black" flood-opacity="0.55"/>
+      <feComposite in2="offsetBlur" operator="in"/>
+      <feMerge>
+        <feMergeNode/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
     </filter>
   </defs>
 
   <image xlink:href="../TiaScreenshots/StartValue/10_contextMenuToPasteValueIntoDatablock.png" href="../TiaScreenshots/StartValue/10_contextMenuToPasteValueIntoDatablock.png"
          x="0" y="0" width="3840" height="2160"
          preserveAspectRatio="xMidYMid slice"/>
+
 
 <circle cx="1520" cy="840" r="56" stroke="#1f6feb" stroke-width="8" fill="#1f6feb" fill-opacity="0.2" opacity="0.55" filter="url(#ringShadow)"/>
   <g transform="translate(1520, 840)">

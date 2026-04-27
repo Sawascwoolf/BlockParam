@@ -5,9 +5,6 @@
   Filled at render time by render-chapters.sh. Placeholders:
     {{CHAPTER_NUMBER}}  zero-padded display string, e.g. "01"
     {{TITLE}}           e.g. "Bulk edits"
-    {{PAIN_LINE}}       optional pain caption above CHAPTER · NN (uppercase
-                        with em-dot separators, e.g. "TIA TODAY · NO SEARCH").
-                        Empty string when the chapter has no chapterPain.
     {{SUBTITLE_TSPANS}} the subtitle text inner content (one or more <tspan>
                         elements joined by cyan "·" separators — see script).
     {{PROGRESS_RECTS}}  the progress-bar <rect> elements; the script emits
@@ -35,11 +32,6 @@
 
   <!-- Chapter heading -->
   <g transform="translate(120, 600)">
-    <text x="0" y="-50" font-family="Consolas, 'Courier New', monospace"
-          font-size="20" font-weight="600" fill="#c25450" letter-spacing="5">
-{{PAIN_LINE}}
-    </text>
-
     <text x="0" y="0" font-family="Consolas, 'Courier New', monospace"
           font-size="20" font-weight="600" fill="#06b6c7" letter-spacing="5">CHAPTER · {{CHAPTER_NUMBER}}</text>
 
