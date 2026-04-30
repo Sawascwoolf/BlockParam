@@ -338,7 +338,7 @@
                                                                     <Run Text="Array not expanded: "/>
                                                                     <Run Text="{Binding UnresolvedBound, Mode=OneWay}" FontWeight="Bold"/>
                                                                     <LineBreak/>
-                                                                    <Run Text="If this is a symbolic bound, export tag tables (Export Tag Tables menu) and reopen the dialog."/>
+                                                                    <Run Text="If this is a symbolic bound, ensure the constant is defined in a TIA tag table, then click the refresh (↻) button or reopen the dialog."/>
                                                                 </TextBlock>
                                                             </Setter.Value>
                                                         </Setter>
