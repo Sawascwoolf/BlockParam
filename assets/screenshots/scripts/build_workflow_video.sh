@@ -20,16 +20,16 @@ concat_list="$frames_dir/.concat.txt"
 # Beat name → seconds. Keep names semantic ("what the viewer is doing"),
 # not numeric ("short/long") — so intent survives pacing tweaks.
 declare -A BEATS=(
-    [typingAChar]=0.15
+    [typingAChar]=0.5
     [clickDown]=0.18
     [clickRelease]=0.35
     [pointingWithMouse]=1.2
-    [readingShort]=1.0
+    [readingShort]=1.5
     [afterCommit]=1.2
     [intro]=1.4
     [readingError]=2.2
     [readingBulk]=1.8
-    [chapterHold]=2.4
+    [chapterHold]=3.6
     [outro]=2.6
     [painEstablish]=2.0
     [painDwell]=3.0

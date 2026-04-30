@@ -10,10 +10,10 @@
   Filled at render time by render-external.sh. Placeholders:
     {{SOURCE_HREF}}     relative path to the source PNG (FHD or higher); the
                         <image> upscales it to 3840x2160.
-    {{CURSOR_X_4K}}     cursor tip X in 4K pixels (DIP * 2).
-    {{CURSOR_Y_4K}}     cursor tip Y in 4K pixels.
+    {{CURSOR}}          cursor arrow <g>...</g>, or empty when the scene
+                        sets `noCursor: true` (post-action result frames).
     {{CLICK_RING}}      a single <circle> element for the press/release ring,
-                        or empty when the scene has no click.
+                        or empty when the scene has no click (or noCursor).
     {{CAPTION_BADGE}}   a <g> element for the painpoint badge (top-left pill,
                         navy backdrop, brick-red text), or empty when the
                         scene has no caption. Painted between source and
@@ -62,11 +62,5 @@
 
   {{CLICK_RING}}
 
-  <g transform="translate({{CURSOR_X_4K}}, {{CURSOR_Y_4K}})">
-    <g transform="scale(4) translate(-1, -1)">
-      <path d="M 1,1 L 1,17 L 5,13 L 8,20 L 11,19 L 8,12 L 14,12 Z"
-            fill="white" stroke="black" stroke-width="1.0" stroke-linejoin="round"
-            filter="url(#cursorShadow)"/>
-    </g>
-  </g>
+  {{CURSOR}}
 </svg>

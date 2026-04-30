@@ -13,9 +13,15 @@
 #   source     relative path (from assets/screenshots/workflow/) to the
 #              original screenshot (any resolution; SVG upscales to 4K).
 #   cursor     { x, y } in DIPs (1920x1080 base) — multiplied by 2 here for
-#              the 4K render. Required for external scenes.
+#              the 4K render. Required for external scenes UNLESS
+#              `noCursor: true` is set (then cursor is omitted entirely).
+#   noCursor   optional bool. When true, no cursor arrow and no click ring
+#              are painted — for post-action "result" frames where the
+#              context menu / click is already gone and a stale cursor on
+#              the settled image would distract.
 #   click      optional, "press" or "release" — paints the BlockParam click
 #              ring on top of the source frame, centered on the cursor.
+#              Ignored when noCursor is true.
 #   caption    optional, a short painpoint string (e.g. "TIA: no search").
 #              Renders as a top-left rounded pill (dark-navy backdrop,
 #              brick-red text). Pill width is sized to the caption length.
@@ -67,13 +73,14 @@ for s in externals:
     cy = cur.get('y', '')
     click = s.get('click', '') or ''
     caption = s.get('caption', '') or ''
+    nocursor = '1' if s.get('noCursor', False) else '0'
     if not src:
         sys.stderr.write(f'External scene {sid} missing source field\n')
         sys.exit(1)
-    if cx == '' or cy == '':
-        sys.stderr.write(f'External scene {sid} missing cursor.x/cursor.y\n')
+    if nocursor == '0' and (cx == '' or cy == ''):
+        sys.stderr.write(f'External scene {sid} missing cursor.x/cursor.y (set noCursor: true to opt out)\n')
         sys.exit(1)
-    print(SEP.join([sid, fn, src, str(cx), str(cy), click, caption]))
+    print(SEP.join([sid, fn, src, str(cx), str(cy), click, caption, nocursor]))
 " | tr -d '\r')
 
 if [[ ${#SCENE_ROWS[@]} -eq 0 ]]; then
@@ -136,11 +143,7 @@ render_one() {
   local cy_dip=${fields[4]}
   local click=${fields[5]:-}
   local caption=${fields[6]:-}
-
-  # DIPs (1920x1080 base) -> 4K pixels (3840x2160)
-  local cx_4k cy_4k
-  cx_4k=$(python -c "print(int(round($cx_dip * 2)))")
-  cy_4k=$(python -c "print(int(round($cy_dip * 2)))")
+  local nocursor=${fields[7]:-0}
 
   # Source path is relative to workflow/, but the SVG is in workflow/external/
   # so its <image href> needs one extra `..` segment.
@@ -151,15 +154,27 @@ render_one() {
   local out_svg="${fn%.png}.svg"
   local out_png="${WORKFLOW_DIR}/${fn}"
 
-  local ring_tmp badge_tmp
+  local ring_tmp badge_tmp cursor_tmp
   ring_tmp=$(mktemp)
   badge_tmp=$(mktemp)
-  build_click_ring "$click" "$cx_4k" "$cy_4k" > "$ring_tmp"
+  cursor_tmp=$(mktemp)
   build_caption_badge "$caption" > "$badge_tmp"
 
+  if [[ "$nocursor" == "1" ]]; then
+    # No cursor, no click ring. Both placeholders collapse to empty.
+    : > "$ring_tmp"
+    : > "$cursor_tmp"
+  else
+    # DIPs (1920x1080 base) -> 4K pixels (3840x2160)
+    local cx_4k cy_4k
+    cx_4k=$(python -c "print(int(round($cx_dip * 2)))")
+    cy_4k=$(python -c "print(int(round($cy_dip * 2)))")
+    build_click_ring "$click" "$cx_4k" "$cy_4k" > "$ring_tmp"
+    printf '<g transform="translate(%s, %s)"><g transform="scale(4) translate(-1, -1)"><path d="M 1,1 L 1,17 L 5,13 L 8,20 L 11,19 L 8,12 L 14,12 Z" fill="white" stroke="black" stroke-width="1.0" stroke-linejoin="round" filter="url(#cursorShadow)"/></g></g>' \
+      "$cx_4k" "$cy_4k" > "$cursor_tmp"
+  fi
+
   sed -e "s|{{SOURCE_HREF}}|$href|g" \
-      -e "s|{{CURSOR_X_4K}}|$cx_4k|g" \
-      -e "s|{{CURSOR_Y_4K}}|$cy_4k|g" \
       -e "/{{CAPTION_BADGE}}/{
         r $badge_tmp
         d
@@ -168,17 +183,26 @@ render_one() {
         r $ring_tmp
         d
       }" \
+      -e "/{{CURSOR}}/{
+        r $cursor_tmp
+        d
+      }" \
       "$TEMPLATE" > "$out_svg"
 
-  rm -f "$ring_tmp" "$badge_tmp"
+  rm -f "$ring_tmp" "$badge_tmp" "$cursor_tmp"
 
   inkscape "$out_svg" \
     --export-type=png \
     --export-filename="$out_png" \
     --export-width=3840 >/dev/null
 
-  printf "  %-32s  cursor=(%s,%s)  click=%-7s  caption=%s\n" \
-    "$fn" "$cx_dip" "$cy_dip" "${click:-none}" "${caption:-(none)}"
+  if [[ "$nocursor" == "1" ]]; then
+    printf "  %-32s  cursor=(none)        click=%-7s  caption=%s\n" \
+      "$fn" "${click:-none}" "${caption:-(none)}"
+  else
+    printf "  %-32s  cursor=(%s,%s)  click=%-7s  caption=%s\n" \
+      "$fn" "$cx_dip" "$cy_dip" "${click:-none}" "${caption:-(none)}"
+  fi
 }
 
 echo "Rendering ${#SCENE_ROWS[@]} external scene(s) at 3840x2160"

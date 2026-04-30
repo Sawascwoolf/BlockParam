@@ -10,9 +10,8 @@
   Filled at render time by render-external.sh. Placeholders:
     ../TiaScreenshots/Search/longDatablockScrolledTop.png     relative path to the source PNG (FHD or higher); the
                         <image> upscales it to 3840x2160.
-    3500     cursor tip X in 4K pixels (DIP * 2).
-    440     cursor tip Y in 4K pixels.
-<circle cx="3500" cy="440" r="56" stroke="#1f6feb" stroke-width="8" fill="#1f6feb" fill-opacity="0.2" opacity="0.55" filter="url(#ringShadow)"/>                        or empty when the scene has no click.
+<g transform="translate(3500, 440)"><g transform="scale(4) translate(-1, -1)"><path d="M 1,1 L 1,17 L 5,13 L 8,20 L 11,19 L 8,12 L 14,12 Z" fill="white" stroke="black" stroke-width="1.0" stroke-linejoin="round" filter="url(#cursorShadow)"/></g></g>                        sets `noCursor: true` (post-action result frames).
+<circle cx="3500" cy="440" r="56" stroke="#1f6feb" stroke-width="8" fill="#1f6feb" fill-opacity="0.2" opacity="0.55" filter="url(#ringShadow)"/>                        or empty when the scene has no click (or noCursor).
 <g transform="translate(80, 80)"><rect x="0" y="0" width="1500" height="140" rx="70" fill="#0e2140" fill-opacity="0.92"/><text x="60" y="93" font-family="Segoe UI, Arial, sans-serif" font-size="56" font-weight="700" fill="#ff6464">TIA: no live search &amp; no smart expand</text></g>                        navy backdrop, brick-red text), or empty when the
                         scene has no caption. Painted between source and
                         cursor so the cursor stays on top.
@@ -58,11 +57,4 @@
 
 <g transform="translate(80, 80)"><rect x="0" y="0" width="1500" height="140" rx="70" fill="#0e2140" fill-opacity="0.92"/><text x="60" y="93" font-family="Segoe UI, Arial, sans-serif" font-size="56" font-weight="700" fill="#ff6464">TIA: no live search &amp; no smart expand</text></g>
 <circle cx="3500" cy="440" r="56" stroke="#1f6feb" stroke-width="8" fill="#1f6feb" fill-opacity="0.2" opacity="0.55" filter="url(#ringShadow)"/>
-  <g transform="translate(3500, 440)">
-    <g transform="scale(4) translate(-1, -1)">
-      <path d="M 1,1 L 1,17 L 5,13 L 8,20 L 11,19 L 8,12 L 14,12 Z"
-            fill="white" stroke="black" stroke-width="1.0" stroke-linejoin="round"
-            filter="url(#cursorShadow)"/>
-    </g>
-  </g>
-</svg>
+<g transform="translate(3500, 440)"><g transform="scale(4) translate(-1, -1)"><path d="M 1,1 L 1,17 L 5,13 L 8,20 L 11,19 L 8,12 L 14,12 Z" fill="white" stroke="black" stroke-width="1.0" stroke-linejoin="round" filter="url(#cursorShadow)"/></g></g></svg>
