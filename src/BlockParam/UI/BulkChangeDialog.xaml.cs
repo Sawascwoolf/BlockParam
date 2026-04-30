@@ -30,6 +30,7 @@ public partial class BulkChangeDialog : Window
         viewModel.RequestClose += () => Close();
         viewModel.FlatListRefreshed += RehydrateManualSelection;
         viewModel.PropertyChanged += OnViewModelPropertyChanged;
+        Closed += (_, _) => viewModel.Dispose();
 
         // Briefly set Topmost to appear above TIA Portal, then release
         // so other windows (non-TIA) can go in front.

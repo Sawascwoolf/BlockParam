@@ -128,15 +128,7 @@ public class SimaticMLParser
         return new DataBlockInfo(name, number, memoryLayout, blockType, members, unresolved.ToArray());
     }
 
-    /// <summary>
-    /// Walks <c>&lt;Member&gt;</c> children and builds a MemberNode tree.
-    /// <paramref name="indexStack"/> accumulates array indices from all enclosing
-    /// array expansions so primitive leaves inside array context can read
-    /// their StartValue from <c>&lt;Subelement Path="i,j,..."&gt;</c>.
-    /// <paramref name="enclosingUdt"/> and <paramref name="pathWithinUdt"/>
-    /// propagate the current UDT context so members without a SetPoint
-    /// attribute can be resolved via <see cref="UdtSetPointResolver"/>.
-    /// </summary>
+    /// <summary>Walks <c>&lt;Member&gt;</c> children and builds a MemberNode tree.</summary>
     private IReadOnlyList<MemberNode> ParseMembers(
         XElement parent,
         XNamespace ns,

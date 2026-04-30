@@ -71,7 +71,7 @@ public class BulkChangeContextMenu : ContextMenuAddIn
         {
             // Mutable: ImportBlock disposes the old DataBlock instance; we must refresh
             // this reference after every import so subsequent Apply clicks don't hit a
-            // disposed GlobalDB (#19).
+            // disposed GlobalDB.
             var selection = provider.GetSelection<DataBlock>().FirstOrDefault();
             if (selection == null) return;
 
@@ -142,7 +142,6 @@ public class BulkChangeContextMenu : ContextMenuAddIn
             var configPath = FindConfigFile();
             var configLoader = new ConfigLoader(configPath);
 
-            // Auto-detect TIA project path and language settings (project already resolved above for scope)
             IReadOnlyList<string> projectLanguages = Array.Empty<string>();
             string? editingLanguage = null;
             string? referenceLanguage = null;
