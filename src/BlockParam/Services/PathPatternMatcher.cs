@@ -97,7 +97,7 @@ public static class PathPatternMatcher
 
         int score = 0;
 
-        var pattern = pathPattern;
+        var pattern = pathPattern!;
 
         // Strip {udt:} and {childUdt:} tokens and count them
         var udtTokens = UdtTokenRegex.Matches(pattern);

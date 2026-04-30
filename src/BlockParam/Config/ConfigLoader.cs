@@ -84,7 +84,7 @@ public class ConfigLoader
         LoadResult sharedResult = new();
         if (!string.IsNullOrEmpty(sharedRulesDir))
         {
-            var resolvedSharedDir = ResolveRulesDirectory(sharedRulesDir);
+            var resolvedSharedDir = ResolveRulesDirectory(sharedRulesDir!);
 
             sharedResult = dirLoader.LoadFromDirectory(resolvedSharedDir,
                 skipFileNames: localFileNames, ruleSource: RuleSource.Shared);

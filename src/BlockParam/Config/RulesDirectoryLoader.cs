@@ -74,7 +74,7 @@ public class RulesDirectoryLoader
                 {
                     if (!string.IsNullOrEmpty(rule.PathPattern))
                     {
-                        var error = PathPatternMatcher.ValidatePattern(rule.PathPattern);
+                        var error = PathPatternMatcher.ValidatePattern(rule.PathPattern!);
                         if (error != null)
                         {
                             result.Warnings.Add($"Skipped rule with invalid pattern in {Path.GetFileName(file)}: {error}");

@@ -117,7 +117,7 @@ public class ValueConstraint
         if (limit is string s)
         {
             if (!string.IsNullOrEmpty(datatype)
-                && TiaDataTypeValidator.TryParseNumericValue(s, datatype, out result))
+                && TiaDataTypeValidator.TryParseNumericValue(s, datatype!, out result))
                 return true;
 
             // Fallback: plain numeric string

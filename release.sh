@@ -114,8 +114,10 @@ C:\Program Files\Siemens\Automation\Portal V20\AddIns\\
 %APPDATA%\Siemens\Automation\Portal V21\UserAddIns\\
 \`\`\`
 
-Restart TIA Portal and confirm the Add-In load prompt. Right-click any Data
-Block in the project tree &rarr; **BlockParam&hellip;**
+TIA Portal can stay open &mdash; the AddIns folder is rescanned live. Open the
+**Add-ins** task card (right edge of the window), enable **BlockParam**, and
+confirm the permission prompt. Then right-click any Data Block in the project
+tree &rarr; **BlockParam&hellip;**
 EOF
 
 # --- create or update release --------------------------------------------------

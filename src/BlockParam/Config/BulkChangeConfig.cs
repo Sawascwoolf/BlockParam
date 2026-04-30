@@ -38,14 +38,14 @@ public class BulkChangeConfig
         {
             // Datatype filter
             if (!string.IsNullOrEmpty(r.Datatype)
-                && !string.Equals(r.Datatype.Trim('"'), member.Datatype.Trim('"'),
+                && !string.Equals(r.Datatype!.Trim('"'), member.Datatype.Trim('"'),
                     StringComparison.OrdinalIgnoreCase))
                 continue;
 
             // PathPattern required
             if (string.IsNullOrEmpty(r.PathPattern))
                 continue;
-            if (!PathPatternMatcher.IsMatch(member, r.PathPattern))
+            if (!PathPatternMatcher.IsMatch(member, r.PathPattern!))
                 continue;
 
             // Calculate specificity — most specific wins, source bonus as tiebreaker
@@ -77,7 +77,7 @@ public class BulkChangeConfig
                 continue;
             if (string.IsNullOrEmpty(r.PathPattern))
                 continue;
-            if (!PathPatternMatcher.IsMatch(udtInstance, r.PathPattern, includeSelf: true))
+            if (!PathPatternMatcher.IsMatch(udtInstance, r.PathPattern!, includeSelf: true))
                 continue;
 
             var score = PathPatternMatcher.CalculateSpecificity(

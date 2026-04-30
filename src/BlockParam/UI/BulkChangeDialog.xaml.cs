@@ -891,8 +891,8 @@ public partial class BulkChangeDialog : Window
         if (vm.PendingInlineEditCount > 0)
         {
             var result = MessageBox.Show(
-                $"Do you want to save {vm.PendingInlineEditCount} pending change(s) before closing?",
-                "Unsaved Changes",
+                Res.Format("Dialog_UnsavedChanges_Prompt", vm.PendingInlineEditCount),
+                Res.Get("Dialog_UnsavedChanges_Title"),
                 MessageBoxButton.YesNoCancel,
                 MessageBoxImage.Warning);
 
