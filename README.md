@@ -135,8 +135,22 @@ merchant of record.
 
 ## Documentation
 
-- [`docs/configuration.md`](docs/configuration.md) &mdash; rule-file and config reference
+End-user guide ([`docs/user/`](docs/user/index.md)):
+
+- [Getting started](docs/user/getting-started.md) &mdash; install and first run
+- [Bulk apply workflow](docs/user/bulk-workflow.md) &mdash; pick, scope, preview, apply
+- [Rule editor](docs/user/rule-editor.md) &mdash; create/edit rules in the visual UI
+- [Comment rules](docs/user/comment-rules.md) &mdash; auto-generated comments with placeholders
+- [Tag-table integration](docs/user/tag-tables.md) &mdash; autocomplete and required-value rules
+- [Config storage](docs/user/config-storage.md) &mdash; where files live, how to back them up
+- [Licensing](docs/user/licensing.md) &mdash; Free vs Pro, daily quotas
+- [Troubleshooting](docs/user/troubleshooting.md) &mdash; common errors and recovery
+
+Reference:
+
+- [`docs/configuration.md`](docs/configuration.md) &mdash; rule-file JSON schema
 - [`docs/example-config.jsonc`](docs/example-config.jsonc) &mdash; annotated sample config
+- [`docs/admin-license-deployment.md`](docs/admin-license-deployment.md) &mdash; multi-seat license rollout
 
 ## Support
 
