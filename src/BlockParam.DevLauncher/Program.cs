@@ -45,6 +45,16 @@ class Program
             return;
         }
 
+        // --capture-rules <out.png> [<rules-dir>]  website hero: rules editor
+        if (args.Length >= 2 && args[0] == "--capture-rules")
+        {
+            var rulesDir = args.Length >= 3
+                ? args[2]
+                : Path.GetFullPath("assets/fixtures/rules");
+            RulesCapture.Run(Path.GetFullPath(args[1]), rulesDir);
+            return;
+        }
+
         // --- Parse capture arguments ---
         // --capture <out.png> [<dbName>]          one-shot single scene
         // --capture-script <script.json>          multi-scene JSON-driven

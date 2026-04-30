@@ -1,0 +1,26 @@
+{
+  "//": "Capture-only manifest for website hero screenshots that need a state the workflow video doesn't already have. DevLauncher --capture-script reads this the same way as workflow_inline.json. Frames land in assets/screenshots/workflow/ and are NOT stitched into the video (build_workflow_video.sh only reads workflow_inline.json). build_website_shots.sh runs this manifest, then crops the resulting PNG into web/assets/.",
+
+  "output_dir": "../workflow",
+  "dpi": 192,
+  "viewport": { "width": 1920, "height": 1080 },
+  "fixture": "../../fixtures/DB_ProcessPlant_A1.xml",
+  "udt_dir": "../../fixtures/UdtTypes",
+  "tag_table_dir": "../../fixtures/TagTables",
+  "rules_dir": "../../fixtures/rules",
+  "scenes": [
+    {
+      "id": "ws_inline_valveTag_autocomplete",
+      "filename": "ws_inline_valveTag_autocomplete.png",
+      "beat": "pointingWithMouse",
+      "dialog": "main",
+      "expand": ["units[1,2]", "units[1,2].modules[1]", "units[1,2].modules[1].valves[1]"],
+      "filter": { "searchText": "valveTag" },
+      "select": "units[1,2].modules[1].valves[1].valveTag",
+      "scope": "units[1,2].modules[1].valves",
+      "newValue": "V-101",
+      "hoverSuggestion": "V-10101",
+      "cursor": { "target": "suggestion:V-10101" }
+    }
+  ]
+}
