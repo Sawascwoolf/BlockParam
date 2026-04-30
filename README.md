@@ -83,22 +83,29 @@ single action.
 
 ## Requirements
 
-- **TIA Portal V20** (V19 and older are not supported &mdash; the Add-In API and NuGet packages
-  target V20).
+- **TIA Portal V20 or V21** (V19 and older are not supported &mdash; the Add-In API targets V20+).
 - **.NET Framework 4.8** (bundled with modern Windows).
 - **Windows 10/11**.
 
+## Download
+
+Each release ships two `.addin` files &mdash; pick the one that matches your TIA Portal version:
+
+| TIA Portal | File | Direct link |
+|---|---|---|
+| **V20** | `BlockParam-v<version>-TIA-V20.addin` | [Latest release](https://github.com/Sawascwoolf/BlockParam/releases/latest) |
+| **V21** | `BlockParam-v<version>-TIA-V21.addin` | [Latest release](https://github.com/Sawascwoolf/BlockParam/releases/latest) |
+
+All releases: [Releases page](https://github.com/Sawascwoolf/BlockParam/releases).
+
 ## Installation
 
-1. Download the latest `BlockParam.addin` from the
-   [Releases page](https://github.com/Sawascwoolf/BlockParam/releases).
-2. Close TIA Portal.
-3. Copy `BlockParam.addin` into:
-   ```
-   C:\Program Files\Siemens\Automation\Portal V20\AddIns\
-   ```
-4. Start TIA Portal. Confirm the Add-In load prompt.
-5. Right-click any Data Block in the project tree &rarr; **BlockParam...**
+1. Close TIA Portal.
+2. Copy the matching `.addin` file into:
+   - **V20**: `C:\Program Files\Siemens\Automation\Portal V20\AddIns\` (machine-wide, requires admin)
+   - **V21**: `%APPDATA%\Siemens\Automation\Portal V21\UserAddIns\` (per-user)
+3. Start TIA Portal. Confirm the Add-In load prompt.
+4. Right-click any Data Block in the project tree &rarr; **BlockParam...**
 
 ## Pricing
 
