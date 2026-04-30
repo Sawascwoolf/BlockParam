@@ -109,7 +109,18 @@ All releases: [Releases page](https://github.com/Sawascwoolf/BlockParam/releases
    **BlockParam** in the list. TIA shows a security/permission prompt &mdash; confirm it.
    The Add-In stays enabled across sessions; on each version update (new `.addin`
    dropped into the folder) TIA re-prompts for permission once.
-3. Right-click any Data Block in the project tree &rarr; **BlockParam...**
+
+   <p align="center">
+     <img src="assets/screenshots/install/01_enable_addin.png" alt="Add-ins task card with BlockParam.addin not yet enabled" width="260">
+     <img src="assets/screenshots/install/02_permission_prompt.png" alt="TIA permission prompt for BlockParam.addin" width="260">
+     <img src="assets/screenshots/install/03_activated.png" alt="BlockParam.addin enabled (green check)" width="260">
+   </p>
+
+3. Right-click any Data Block in the project tree &rarr; **BlockParam...** &rarr; **Edit Start Values...**
+
+   <p align="center">
+     <img src="assets/screenshots/install/04_context_menu.png" alt="Right-click context menu on a Data Block showing BlockParam &rarr; Edit Start Values..." width="500">
+   </p>
 
 ## Pricing
 

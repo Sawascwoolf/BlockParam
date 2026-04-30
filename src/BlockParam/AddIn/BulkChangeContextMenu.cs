@@ -63,16 +63,6 @@ public class BulkChangeContextMenu : ContextMenuAddIn
             "Edit Start Values...",
             OnClick,
             OnUpdateStatus);
-
-        addInRootSubmenu.Items.AddActionItem<IEngineeringObject>(
-            "Export Tag Tables...",
-            OnExportTagTables,
-            OnUpdateStatus);
-
-        addInRootSubmenu.Items.AddActionItem<IEngineeringObject>(
-            "Export UDT Types...",
-            OnExportUdtTypes,
-            OnUpdateStatus);
     }
 
     private void OnClick(MenuSelectionProvider<IEngineeringObject> provider)
@@ -268,40 +258,6 @@ public class BulkChangeContextMenu : ContextMenuAddIn
         }
     }
 
-    private void OnExportTagTables(MenuSelectionProvider<IEngineeringObject> provider)
-    {
-        try
-        {
-            var selection = provider.GetSelection<DataBlock>().FirstOrDefault();
-            if (selection == null) return;
-
-            EnsureTempCacheCleaned();
-
-            var plcSoftware = FindPlcSoftware(selection);
-            if (plcSoftware == null)
-            {
-                ShowMessageBox("Could not find PLC Software for this block.",
-                    "Export Tag Tables", System.Windows.MessageBoxButton.OK,
-                    System.Windows.MessageBoxImage.Warning);
-                return;
-            }
-
-            var scope = ProjectScope.ForPath(_tiaPortal.Projects.FirstOrDefault()?.Path?.FullName);
-            var exportDir = Path.Combine(Path.GetTempPath(), "BlockParam", scope, "TagTables");
-            int count = ExportTagTables(plcSoftware, exportDir);
-
-            ShowMessageBox($"Exported {count} tag tables to:\n{exportDir}",
-                "Export Tag Tables", System.Windows.MessageBoxButton.OK,
-                System.Windows.MessageBoxImage.Information);
-        }
-        catch (Exception ex)
-        {
-            Log.Error(ex, "Error exporting tag tables");
-            ShowMessageBox(ex.ToString(), "Export Tag Tables Error",
-                System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Error);
-        }
-    }
-
     private static int ExportTagTables(PlcSoftware plcSoftware, string exportDir)
     {
         Directory.CreateDirectory(exportDir);
@@ -331,68 +287,6 @@ public class BulkChangeContextMenu : ContextMenuAddIn
         return count;
     }
 
-    private void OnExportUdtTypes(MenuSelectionProvider<IEngineeringObject> provider)
-    {
-        try
-        {
-            var selection = provider.GetSelection<DataBlock>().FirstOrDefault();
-            if (selection == null) return;
-
-            EnsureTempCacheCleaned();
-
-            var plcSoftware = FindPlcSoftware(selection);
-            if (plcSoftware == null)
-            {
-                ShowMessageBox("Could not find PLC Software for this block.",
-                    "Export UDT Types", System.Windows.MessageBoxButton.OK,
-                    System.Windows.MessageBoxImage.Warning);
-                return;
-            }
-
-            var scope = ProjectScope.ForPath(_tiaPortal.Projects.FirstOrDefault()?.Path?.FullName);
-            var exportDir = Path.Combine(Path.GetTempPath(), "BlockParam", scope, "UdtTypes");
-            int count = ExportUdtTypes(plcSoftware, exportDir);
-
-            ShowMessageBox($"Exported {count} UDT types to:\n{exportDir}",
-                "Export UDT Types", System.Windows.MessageBoxButton.OK,
-                System.Windows.MessageBoxImage.Information);
-        }
-        catch (Exception ex)
-        {
-            Log.Error(ex, "Error exporting UDT types");
-            ShowMessageBox(ex.ToString(), "Export UDT Types Error",
-                System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Error);
-        }
-    }
-
-    private static int ExportUdtTypes(PlcSoftware plcSoftware, string exportDir)
-    {
-        Directory.CreateDirectory(exportDir);
-        int count = 0;
-        var inconsistent = new List<(string displayName, Func<bool> compile, Func<bool> reExport)>();
-
-        var typeGroup = plcSoftware.TypeGroup;
-
-        foreach (var (type, groupPath) in EnumerateTypesRecursive(typeGroup, parentPath: null))
-        {
-            var fileName = FileNameFor(type, groupPath);
-            if (TryExportUdt(type, exportDir, fileName, groupPath, inconsistent))
-                count++;
-        }
-
-        if (inconsistent.Count > 0)
-        {
-            count += InconsistentUdtRetry.RetryAfterCompile(
-                inconsistent,
-                nameOf: i => i.displayName,
-                tryCompile: i => i.compile(),
-                tryReExport: i => i.reExport(),
-                askUser: AskUserToCompileInconsistentUdts);
-        }
-
-        return count;
-    }
-
     private static IEnumerable<(PlcType type, string? groupPath)> EnumerateTypesRecursive(
         PlcTypeGroup group, string? parentPath)
     {
@@ -409,50 +303,6 @@ public class BulkChangeContextMenu : ContextMenuAddIn
 
     private static string FileNameFor(PlcType type, string? groupPath)
         => groupPath == null ? type.Name : $"{groupPath.Replace('/', '_')}_{type.Name}";
-
-    private static bool TryExportUdt(
-        PlcType type, string exportDir, string fileName, string? groupPath,
-        List<(string displayName, Func<bool> compile, Func<bool> reExport)> inconsistent)
-    {
-        var filePath = Path.Combine(exportDir, $"{fileName}.xml");
-        var displayName = groupPath == null ? type.Name : $"{groupPath}/{type.Name}";
-        try
-        {
-            if (File.Exists(filePath)) File.Delete(filePath);
-            type.Export(new FileInfo(filePath), ExportOptions.WithDefaults);
-            return true;
-        }
-        catch (Exception ex) when (IsInconsistencyError(ex))
-        {
-            Log.Warning("UDT '{Name}' cannot be exported: inconsistent — will offer compile", displayName);
-            var capturedType = type;
-            inconsistent.Add((
-                displayName,
-                compile: () => TryCompileUdt(capturedType, displayName),
-                reExport: () => TryReExportUdt(capturedType, filePath, displayName)));
-            return false;
-        }
-        catch (Exception ex)
-        {
-            if (groupPath == null)
-                Log.Warning(ex, "Failed to export UDT: {Name}", type.Name);
-            else
-                Log.Warning(ex, "Failed to export UDT: {Group}/{Name}", groupPath, type.Name);
-            return false;
-        }
-    }
-
-    /// <summary>
-    /// Returns true if tag table XMLs exist and were written within the last 10 minutes.
-    /// </summary>
-    private static bool TagTablesAreRecent(string dir)
-    {
-        if (!Directory.Exists(dir)) return false;
-        var files = Directory.GetFiles(dir, "*.xml");
-        if (files.Length == 0) return false;
-        var oldest = files.Min(f => File.GetLastWriteTimeUtc(f));
-        return (DateTime.UtcNow - oldest).TotalMinutes < 10;
-    }
 
     /// <summary>
     /// Re-exports any UDT whose TIA <c>ModifiedDate</c> (or <c>InterfaceModifiedDate</c>)
