@@ -273,4 +273,13 @@ Datenbaustein jetzt kompilieren?</value></data>
   <data name="License_UnknownError" xml:space="preserve"><value>Unbekannter Fehler</value></data>
   <!-- Zoom-Anzeige (#28) -->
   <data name="Zoom_Tooltip" xml:space="preserve"><value>Zoom (Strg + Mausrad, Strg + / Strg −, Strg + 0 zum Zurücksetzen)</value></data>
+  <!-- Sprach-Umschalter (#50) -->
+  <data name="Language_TooltipEnglish" xml:space="preserve"><value>Oberfläche auf Englisch umstellen</value></data>
+  <data name="Language_TooltipGerman" xml:space="preserve"><value>Oberfläche auf Deutsch umstellen</value></data>
+  <data name="Language_PromptTitle" xml:space="preserve"><value>BlockParam — Sprache geändert</value></data>
+  <data name="Language_PromptMessage" xml:space="preserve"><value>Die Oberflächensprache wurde auf {0} gesetzt.
+
+Dialog jetzt neu öffnen, um die neue Sprache anzuwenden, oder auf Nein klicken — die Änderung wird beim nächsten Öffnen des Dialogs wirksam.</value></data>
+  <data name="Language_DisplayEnglish" xml:space="preserve"><value>English</value></data>
+  <data name="Language_DisplayGerman" xml:space="preserve"><value>Deutsch</value></data>
 </root>
