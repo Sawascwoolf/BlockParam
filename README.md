@@ -75,9 +75,9 @@ single action.
 - **Unused struct-member cleanup** with safety confirmation (UDT members are never touched).
 
 ### Platform
-- **English &amp; German UI** (complete translations; i18n architecture ready for more).
-- **ExclusiveAccess mode** for fast bulk operations on large DBs (~1500 variables).
-- **Context menu performance** &lt; 200ms &mdash; no lag when right-clicking.
+- **English &amp; German UI**.
+- **Fast on large DBs** &mdash; bulk operations on ~1500-variable blocks complete in seconds.
+- **No-lag context menu** &mdash; right-click is instant.
 - **UI zoom** &mdash; `Ctrl+Scroll`, `Ctrl +/-`, `Ctrl+0` (reset). Default 1.2&times; for high-DPI
   readability; persisted per workstation.
 
@@ -126,43 +126,6 @@ merchant of record.
 
 - [`docs/configuration.md`](docs/configuration.md) &mdash; rule-file and config reference
 - [`docs/example-config.jsonc`](docs/example-config.jsonc) &mdash; annotated sample config
-- [`docs/research/`](docs/research) &mdash; technical notes on TIA Add-Ins, Openness API,
-  SimaticML, deployment
-- [`CLAUDE.md`](CLAUDE.md) &mdash; project overview for contributors
-
-## Building from source
-
-```bash
-# Restore &amp; build
-dotnet build BlockParam.sln -c Release
-
-# Package the .addin file and deploy to TIA Portal AddIns folder
-bash bump-version.sh 0.9.0
-
-# Run unit tests
-dotnet test src/BlockParam.Tests/BlockParam.Tests.csproj
-```
-
-See [`bump-version.sh`](bump-version.sh) for the full deploy steps (build, package via
-`Siemens.Engineering.AddIn.Publisher.exe`, copy to the AddIns folder).
-
-## Licensing
-
-This repository is **dual-licensed**:
-
-- The **source code** is published under the [MIT License](LICENSE) &mdash; fork, modify, learn from
-  it freely.
-- The **compiled &ldquo;Pro&rdquo; tier features** (unlimited bulk operations / inline edits) are
-  commercial and require a valid license key. The freemium gating is enforced at runtime; building
-  from source does not bypass the daily limits.
-
-This split keeps the code open for audit and learning while supporting ongoing maintenance through
-Pro licenses.
-
-## Trademarks
-
-TIA Portal&reg; and SIMATIC&reg; are registered trademarks of Siemens AG. BlockParam is not an
-official Siemens product and has no business affiliation with Siemens AG.
 
 ## Support
 
@@ -170,7 +133,12 @@ official Siemens product and has no business affiliation with Siemens AG.
 - **License &amp; billing**: [support@lautimweb.de](mailto:support@lautimweb.de)
 - **Subscription management**: [LemonSqueezy customer portal](https://app.lemonsqueezy.com/my-orders)
 
-## Contributing
+## Licensing
 
-Pull requests welcome. For larger changes, please open an issue first to discuss scope. See
-[`CLAUDE.md`](CLAUDE.md) for the project layout and conventions.
+Source code is published under the [MIT License](LICENSE). The Pro tier (unlimited bulk operations
+and inline edits) requires a valid license key &mdash; see [Pricing](#pricing).
+
+## Trademarks
+
+TIA Portal&reg; and SIMATIC&reg; are registered trademarks of Siemens AG. BlockParam is not an
+official Siemens product and has no business affiliation with Siemens AG.
