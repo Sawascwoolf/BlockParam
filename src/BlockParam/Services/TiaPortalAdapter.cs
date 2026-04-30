@@ -18,51 +18,6 @@ public class TiaPortalAdapter : ITiaPortalAdapter
         _tiaPortal = tiaPortal;
     }
 
-    /// <summary>
-    /// Checks if the block needs compilation and asks the user to compile if needed.
-    /// Returns true if export can proceed, false if user cancelled.
-    /// </summary>
-    public bool TryEnsureCompiled(object dataBlock)
-    {
-        var block = (PlcBlock)dataBlock;
-
-        if (block is ICompilable compilable)
-        {
-            // Try export to a temp location to detect inconsistency
-            var testDir = Path.Combine(Path.GetTempPath(), "BlockParam", "_check");
-            Directory.CreateDirectory(testDir);
-            var testPath = Path.Combine(testDir, $"{block.Name}_check.xml");
-            if (File.Exists(testPath)) File.Delete(testPath);
-
-            try
-            {
-                block.Export(new FileInfo(testPath), ExportOptions.WithDefaults);
-                if (File.Exists(testPath)) File.Delete(testPath);
-                return true; // Export works fine
-            }
-            catch
-            {
-                // Export failed — block needs compilation
-                Log.Warning("DB {Name} cannot be exported, needs compilation", block.Name);
-
-                var result = System.Windows.MessageBox.Show(
-                    $"The data block '{block.Name}' needs to be compiled before it can be edited.\n\nCompile now?",
-                    "Bulk Change — Compilation Required",
-                    System.Windows.MessageBoxButton.YesNo,
-                    System.Windows.MessageBoxImage.Question);
-
-                if (result != System.Windows.MessageBoxResult.Yes)
-                    return false;
-
-                var compileResult = compilable.Compile();
-                Log.Information("Compile result for {Block}: {State}", block.Name, compileResult.State);
-                return true;
-            }
-        }
-
-        return true;
-    }
-
     public void CompileBlock(object dataBlock)
     {
         var block = (PlcBlock)dataBlock;

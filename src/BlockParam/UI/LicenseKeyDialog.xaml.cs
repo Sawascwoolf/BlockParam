@@ -137,7 +137,7 @@ public partial class LicenseKeyDialog : Window
                 LicenseActivationStatus.InvalidKey => Res.Get("License_Invalid"),
                 LicenseActivationStatus.TooManySessions => result.ErrorMessage ?? Res.Get("License_TooManySessions"),
                 LicenseActivationStatus.ServerError => Res.Get("License_ServerError"),
-                _ => result.ErrorMessage ?? "Unknown error"
+                _ => result.ErrorMessage ?? Res.Get("License_UnknownError")
             };
         }
         catch (Exception ex)

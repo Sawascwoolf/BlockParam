@@ -251,7 +251,7 @@ public class BulkChangeContextMenu : ContextMenuAddIn
             Log.Error(ex, "Error in Bulk Change OnClick");
             ShowMessageBox(
                 ex.ToString(),
-                "BlockParam Error",
+                Res.Get("Rollback_Title"),
                 System.Windows.MessageBoxButton.OK,
                 System.Windows.MessageBoxImage.Error);
         }
@@ -489,10 +489,8 @@ public class BulkChangeContextMenu : ContextMenuAddIn
         {
             Log.Warning("DB {Name} is inconsistent, asking user to compile", block.Name);
             var answer = ShowMessageBox(
-                $"The data block '{block.Name}' is inconsistent and cannot be exported.\n\n" +
-                "This usually happens after editing start values or UDT changes.\n\n" +
-                "Compile the block now?",
-                "BlockParam — Compilation Required",
+                Res.Format("Db_InconsistentPrompt", block.Name),
+                Res.Get("Udt_InconsistentPromptTitle"),
                 System.Windows.MessageBoxButton.YesNo,
                 System.Windows.MessageBoxImage.Question);
 

@@ -52,14 +52,14 @@ public class XmlFileTagTableReader : ITagTableReader
                     var culture = textItem.Element("AttributeList")?.Element("Culture")?.Value;
                     var text = textItem.Element("AttributeList")?.Element("Text")?.Value;
                     if (culture != null && !string.IsNullOrEmpty(text))
-                        comments[culture] = text;
+                        comments[culture] = text!;
                 }
 
                 // Default comment: preferred culture, or first available
                 var defaultComment = comments.TryGetValue(_commentCulture, out var dc) ? dc
                     : comments.Values.FirstOrDefault();
 
-                entries.Add(new TagTableEntry(name, value, dataType, defaultComment, comments));
+                entries.Add(new TagTableEntry(name!, value, dataType, defaultComment, comments));
             }
 
             return entries;

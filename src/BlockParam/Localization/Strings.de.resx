@@ -260,6 +260,17 @@ Beispiele: en-US, de-DE. Leer lassen für Standardsprache.</value></data>
 {1}
 
 Jetzt kompilieren? Andernfalls bleiben die Kommentare dieser UDT-Mitglieder in der Anzeige leer.</value></data>
+  <!-- Inkonsistente DB Kompilier-Abfrage (#50/#51) -->
+  <data name="Db_InconsistentPrompt" xml:space="preserve"><value>Der Datenbaustein '{0}' ist inkonsistent und kann nicht exportiert werden.
+
+Dies tritt meist nach dem Bearbeiten von Startwerten oder UDT-Änderungen auf.
+
+Datenbaustein jetzt kompilieren?</value></data>
+  <!-- Ungespeicherte-Änderungen-Abfrage beim Schließen des Dialogs -->
+  <data name="Dialog_UnsavedChanges_Title" xml:space="preserve"><value>Ungespeicherte Änderungen</value></data>
+  <data name="Dialog_UnsavedChanges_Prompt" xml:space="preserve"><value>Möchten Sie {0} ausstehende Änderung(en) vor dem Schließen speichern?</value></data>
+  <!-- Fallback bei unbekanntem Aktivierungs-Status -->
+  <data name="License_UnknownError" xml:space="preserve"><value>Unbekannter Fehler</value></data>
   <!-- Zoom-Anzeige (#28) -->
   <data name="Zoom_Tooltip" xml:space="preserve"><value>Zoom (Strg + Mausrad, Strg + / Strg −, Strg + 0 zum Zurücksetzen)</value></data>
 </root>
