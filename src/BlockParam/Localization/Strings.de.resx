@@ -34,6 +34,7 @@
   <!-- Kontextmenü -->
   <data name="MenuTitle_BulkChange" xml:space="preserve"><value>BlockParam...</value></data>
   <data name="MenuTitle_SetAll" xml:space="preserve"><value>Alle {0} in '{1}' setzen</value></data>
+  <data name="MenuTitle_EditStartValues" xml:space="preserve"><value>Startwerte bearbeiten...</value></data>
   <!-- Dialog -->
   <data name="Dialog_Title" xml:space="preserve"><value>BlockParam: {0}</value></data>
   <data name="Dialog_NewValue" xml:space="preserve"><value>Neuer Wert:</value></data>

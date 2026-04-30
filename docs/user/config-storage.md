@@ -91,6 +91,27 @@ To reset everything to a clean state:
 The Add-In recreates the necessary directories on first run. The license has to
 be re-activated.
 
+## UI language
+
+BlockParam ships with English (default) and German UI strings. The language is
+picked from the OS culture on Windows, which is the same default TIA itself
+uses for non-localized addin assemblies. (TIA Openness has no documented hook
+that reflects the user's TIA UI-language dropdown reliably at runtime, so we
+don't try to follow it.)
+
+To force a specific language regardless of OS culture, add a `language` field
+to `%APPDATA%\BlockParam\config.json`:
+
+```json
+{
+  "language": "de"
+}
+```
+
+Accepted values: `"en"` / `"de"` / any specific culture name like `"en-US"` or
+`"de-DE"`. Restart TIA Portal for the change to take effect — Siemens's addin
+API freezes context-menu labels at addin load.
+
 ## Schema reference
 
 The on-disk format for rule files and `config.json` is documented separately:

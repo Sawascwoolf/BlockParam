@@ -131,6 +131,17 @@ public class ConfigLoader
 
     public string? ReadLicenseServerUrl() => TryReadConfig("license server URL")?.LicenseServerUrl;
 
+    /// <summary>
+    /// Reads the optional <c>language</c> field from config.json (#50).
+    /// Returns null when unset, empty, or the file is missing/unreadable —
+    /// caller falls back to the OS culture in that case.
+    /// </summary>
+    public string? ReadLanguage()
+    {
+        var raw = TryReadConfig("language")?.Language;
+        return string.IsNullOrWhiteSpace(raw) ? null : raw!.Trim();
+    }
+
     private BulkChangeConfig? TryReadConfig(string context)
     {
         if (string.IsNullOrEmpty(_configPath) || !File.Exists(_configPath))
