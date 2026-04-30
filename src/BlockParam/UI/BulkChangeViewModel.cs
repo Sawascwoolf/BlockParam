@@ -20,8 +20,11 @@ namespace BlockParam.UI;
 /// Main ViewModel for the BulkChange dialog.
 /// Uses a flat list (via FlatTreeManager) for proper column alignment in ListView/GridView.
 /// </summary>
-public class BulkChangeViewModel : ViewModelBase
+public class BulkChangeViewModel : ViewModelBase, IDisposable
 {
+    private EventHandler? _licenseStateChangedHandler;
+    private bool _disposed;
+
     private readonly HierarchyAnalyzer _analyzer;
     private readonly BulkChangeService _bulkChangeService;
     private readonly IUsageTracker _usageTracker;
@@ -184,8 +187,9 @@ public class BulkChangeViewModel : ViewModelBase
 
         if (_licenseService != null)
         {
-            _licenseService.LicenseStateChanged += (_, __) =>
+            _licenseStateChangedHandler = (_, __) =>
                 _dispatcher.BeginInvoke(new Action(() => UpdateUsageStatus()));
+            _licenseService.LicenseStateChanged += _licenseStateChangedHandler;
         }
 
         // Apply initial filter and build flat list
@@ -2590,6 +2594,25 @@ public class BulkChangeViewModel : ViewModelBase
         catch
         {
             // Fallback: silently ignore if browser cannot be opened
+        }
+    }
+
+    public void Dispose()
+    {
+        if (_disposed) return;
+        _disposed = true;
+
+        _valueDebounceTimer?.Dispose();
+        _valueDebounceTimer = null;
+        _searchDebounceTimer?.Dispose();
+        _searchDebounceTimer = null;
+
+        // Unsubscribe so the lambda's `this` capture stops keeping the VM alive.
+        // We do NOT dispose _licenseService — the caller that constructed it owns it.
+        if (_licenseService != null && _licenseStateChangedHandler != null)
+        {
+            _licenseService.LicenseStateChanged -= _licenseStateChangedHandler;
+            _licenseStateChangedHandler = null;
         }
     }
 }

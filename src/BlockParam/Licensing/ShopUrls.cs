@@ -2,14 +2,10 @@ namespace BlockParam.Licensing;
 
 /// <summary>
 /// Central configuration for all shop and licensing URLs.
-/// Replace placeholder URLs with real LemonSqueezy URLs before launch.
 /// </summary>
 public static class ShopUrls
 {
-    /// <summary>
-    /// LemonSqueezy checkout URL for purchasing a Pro license.
-    /// TODO: Replace with actual LemonSqueezy checkout link after product creation.
-    /// </summary>
+    /// <summary>LemonSqueezy checkout URL for purchasing a Pro license.</summary>
     public const string CheckoutUrl = "https://blockparam.lemonsqueezy.com/buy";
 
     /// <summary>

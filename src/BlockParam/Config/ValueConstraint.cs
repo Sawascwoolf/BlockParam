@@ -32,14 +32,12 @@ public class ValueConstraint
     /// </summary>
     public string? Validate(string value, string? datatype = null, ISet<string>? knownConstants = null)
     {
-        // 1. Data type format validation (if datatype provided)
         if (datatype != null)
         {
             var typeError = TiaDataTypeValidator.Validate(value, datatype, knownConstants);
             if (typeError != null) return typeError;
         }
 
-        // 2. Check Min/Max range
         if (HasMinMax)
         {
             // Known constants skip Min/Max — they resolve at TIA runtime
@@ -73,7 +71,6 @@ public class ValueConstraint
             }
         }
 
-        // 3. Check allowed values list
         if (AllowedValues is { Count: > 0 })
         {
             var stringValues = AllowedValues.Select(v => v.ToString()).ToList();

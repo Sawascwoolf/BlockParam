@@ -103,7 +103,6 @@ public class LocalUsageTracker : IUsageTracker
         var json = JsonConvert.SerializeObject(data);
         var bytes = Obfuscation.Obfuscate(json);
 
-        // Use a temporary file + rename for atomicity
         var tempPath = _storagePath + ".tmp";
         File.WriteAllBytes(tempPath, bytes);
         if (File.Exists(_storagePath))
