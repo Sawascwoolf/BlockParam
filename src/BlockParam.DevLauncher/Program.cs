@@ -240,12 +240,15 @@ class Program
 
             // Chapter cards are rendered out-of-band by
             // assets/screenshots/workflow/chapters/render-chapters.sh (SVG
-            // template → Inkscape → wf<NN>_ch_<slug>.png). The capture loop
-            // skips them so it doesn't overwrite the designed PNG with a
-            // dialog snapshot.
-            if (string.Equals(scene.Kind, "chapter", StringComparison.OrdinalIgnoreCase))
+            // template → Inkscape → wf<NN>_ch_<slug>.png). External scenes
+            // (kind=external) are TIA Portal painpoint screenshots dropped
+            // into the workflow folder by hand — neither category is rendered
+            // by the dialog capture loop, so we skip them here so we don't
+            // overwrite the source PNG with a dialog snapshot.
+            if (string.Equals(scene.Kind, "chapter", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(scene.Kind, "external", StringComparison.OrdinalIgnoreCase))
             {
-                Log.Information("Scene {Id}: skipping chapter card (rendered by render-chapters.sh)", scene.Id);
+                Log.Information("Scene {Id}: skipping {Kind} scene (PNG provided out-of-band)", scene.Id, scene.Kind);
                 continue;
             }
 

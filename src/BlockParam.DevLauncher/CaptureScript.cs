@@ -160,6 +160,10 @@ public sealed class Scene
     /// assets/screenshots/workflow/chapters/render-chapters.sh, which reads
     /// <see cref="ChapterTitle"/> / <see cref="ChapterSubtitle"/> from this
     /// same manifest and writes the PNG to the canonical scene filename.
+    /// "external" marks a hand-supplied PNG (e.g. TIA Portal painpoint
+    /// screenshot) already present in the workflow folder; the capture loop
+    /// skips these so it doesn't overwrite the source PNG with a dialog
+    /// snapshot.
     /// </summary>
     [JsonProperty("kind")] public string? Kind { get; set; }
 
