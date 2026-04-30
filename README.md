@@ -100,12 +100,16 @@ All releases: [Releases page](https://github.com/Sawascwoolf/BlockParam/releases
 
 ## Installation
 
-1. Close TIA Portal.
-2. Copy the matching `.addin` file into:
+1. Copy the matching `.addin` file (see [Download](#download) above) into:
    - **V20**: `C:\Program Files\Siemens\Automation\Portal V20\AddIns\` (machine-wide, requires admin)
    - **V21**: `%APPDATA%\Siemens\Automation\Portal V21\UserAddIns\` (per-user)
-3. Start TIA Portal. Confirm the Add-In load prompt.
-4. Right-click any Data Block in the project tree &rarr; **BlockParam...**
+
+   TIA Portal can stay open &mdash; no restart needed.
+2. In TIA Portal, open the **Add-ins** task card (right edge of the window) and enable
+   **BlockParam** in the list. TIA shows a security/permission prompt &mdash; confirm it.
+   The Add-In stays enabled across sessions; on each version update (new `.addin`
+   dropped into the folder) TIA re-prompts for permission once.
+3. Right-click any Data Block in the project tree &rarr; **BlockParam...**
 
 ## Pricing
 
@@ -141,18 +145,6 @@ dotnet test src/BlockParam.Tests/BlockParam.Tests.csproj
 
 See [`bump-version.sh`](bump-version.sh) for the full deploy steps (build, package via
 `Siemens.Engineering.AddIn.Publisher.exe`, copy to the AddIns folder).
-
-### DevLauncher (UI testing without TIA Portal)
-
-A standalone WPF host for iterating on the UI without restarting TIA Portal:
-
-```bash
-dotnet build src/BlockParam.DevLauncher -c Debug
-src/BlockParam.DevLauncher/bin/Debug/net48/BlockParam.DevLauncher.exe
-```
-
-It loads a real TIA export from `%TEMP%\BlockParam\TP307.xml` (or a bundled demo) and reads the
-same config/tag-tables the real add-in uses.
 
 ## Licensing
 
