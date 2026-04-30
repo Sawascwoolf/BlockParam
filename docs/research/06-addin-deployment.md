@@ -199,7 +199,12 @@ copy AddInPublisherConfig.xml bin\Release\net48\
 %APPDATA%\Siemens\Automation\Portal V20\UserAddIns\
 ```
 
-TIA Portal scannt diesen Ordner beim Start und lädt alle `.addin`-Dateien.
+TIA Portal scannt diesen Ordner sowohl beim Start als auch periodisch während einer
+laufenden Session. Neu hineinkopierte `.addin`-Dateien erscheinen ohne Neustart in
+der **Add-ins**-Task Card (rechter Fensterrand). Der Benutzer muss das Add-In dort
+manuell **aktivieren** &mdash; danach erscheint ein Berechtigungs-Prompt. Nach
+Bestätigung bleibt das Add-In über Sessions hinweg aktiviert. Bei jedem Update
+(neue `.addin`-Datei im Ordner) erscheint die Berechtigungsabfrage erneut.
 
 ## DebugStarter.exe
 

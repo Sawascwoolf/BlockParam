@@ -44,11 +44,9 @@ Set-Content -Path "$dir\license.key" -Value "PRO-XXXX-XXXX-XXXX" -Encoding ASCII
 icacls "$dir\license.key" /inheritance:r /grant:r "Authenticated Users:(R)" "Administrators:(F)" "SYSTEM:(F)"
 ```
 
-Restart TIA Portal on each seat to pick up the new key. Seats already running keep their cached key until the next start.
-
 ## Rotating the key
 
-Rotation is a single-file replace. Push a new `license.key` to every seat with the same deployment script — every seat picks it up on the next Add-In start with no user interaction. The server-side concurrent-session validation continues unchanged.
+Rotation is a single-file replace. Push a new `license.key` to every seat with the same deployment script. The server-side concurrent-session validation continues unchanged.
 
 ## Recommended ACLs
 
@@ -70,6 +68,6 @@ The example scripts above set these permissions.
 
 ## Troubleshooting
 
-- **Seat still shows Free after rollout**: confirm the file exists at `%PROGRAMDATA%\BlockParam\license.key` (not `%APPDATA%`), contains exactly the key, and that TIA Portal has been restarted. Then check `%APPDATA%\BlockParam\blockparam.log` for an `Adopting managed license key from ...` line.
+- **Seat still shows Free after rollout**: confirm the file exists at `%PROGRAMDATA%\BlockParam\license.key` (not `%APPDATA%`) and contains exactly the key. Then check `%APPDATA%\BlockParam\blockparam.log` for an `Adopting managed license key from ...` line.
 - **Heartbeat fails after rotation**: the license server must accept the new key. The Add-In itself does not validate the key locally — verify on the server side that the key is provisioned for the customer.
-- **User wants to revert to a personal key**: remove `%PROGRAMDATA%\BlockParam\license.key` (requires admin) and restart TIA. The Add-In falls back to the per-user cache, and the License dialog becomes editable again.
+- **User wants to revert to a personal key**: remove `%PROGRAMDATA%\BlockParam\license.key` (requires admin). The Add-In falls back to the per-user cache, and the License dialog becomes editable again.
