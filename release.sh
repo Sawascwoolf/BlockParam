@@ -77,10 +77,18 @@ stage_asset() {
     echo "  run 'bash bump-version.sh $VERSION --tia=$tia' first" >&2
     exit 1
   fi
-  local dst="$STAGE/BlockParam-v$VERSION-TIA-V$tia.addin"
-  cp "$src" "$dst"
-  ASSETS+=("$dst")
-  echo "  V$tia: $(basename "$dst")"
+  # Versioned copy — stable archival name in the release's asset list.
+  local dst_versioned="$STAGE/BlockParam-v$VERSION-TIA-V$tia.addin"
+  cp "$src" "$dst_versioned"
+  ASSETS+=("$dst_versioned")
+  echo "  V$tia: $(basename "$dst_versioned")"
+  # Stable-named copy — lets external links use
+  # https://github.com/$REPO/releases/latest/download/BlockParam-TIA-V$tia.addin
+  # which GitHub redirects to the latest release's asset of that name.
+  local dst_stable="$STAGE/BlockParam-TIA-V$tia.addin"
+  cp "$src" "$dst_stable"
+  ASSETS+=("$dst_stable")
+  echo "  V$tia: $(basename "$dst_stable")"
 }
 
 TAG="v$VERSION"
@@ -97,10 +105,10 @@ NOTES_HEADER_FILE="$STAGE/notes-header.md"
 cat > "$NOTES_HEADER_FILE" <<EOF
 ## Download
 
-| TIA Portal version | File |
-|---|---|
-| **V20** | [\`BlockParam-v$VERSION-TIA-V20.addin\`](https://github.com/$REPO/releases/download/$TAG/BlockParam-v$VERSION-TIA-V20.addin) |
-| **V21** | [\`BlockParam-v$VERSION-TIA-V21.addin\`](https://github.com/$REPO/releases/download/$TAG/BlockParam-v$VERSION-TIA-V21.addin) |
+| TIA Portal version | This release | Always-latest |
+|---|---|---|
+| **V20** | [\`BlockParam-v$VERSION-TIA-V20.addin\`](https://github.com/$REPO/releases/download/$TAG/BlockParam-v$VERSION-TIA-V20.addin) | [\`BlockParam-TIA-V20.addin\`](https://github.com/$REPO/releases/latest/download/BlockParam-TIA-V20.addin) |
+| **V21** | [\`BlockParam-v$VERSION-TIA-V21.addin\`](https://github.com/$REPO/releases/download/$TAG/BlockParam-v$VERSION-TIA-V21.addin) | [\`BlockParam-TIA-V21.addin\`](https://github.com/$REPO/releases/latest/download/BlockParam-TIA-V21.addin) |
 
 ## Installation
 

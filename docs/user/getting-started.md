@@ -11,10 +11,13 @@ This page walks you from a fresh download to your first bulk edit.
 
 Each release ships two `.addin` files — pick the one that matches your TIA Portal version.
 
-| TIA Portal | File | Where to get it |
-|---|---|---|
-| **V20** | `BlockParam-v<version>-TIA-V20.addin` | [Latest release](https://github.com/Sawascwoolf/BlockParam/releases/latest) |
-| **V21** | `BlockParam-v<version>-TIA-V21.addin` | [Latest release](https://github.com/Sawascwoolf/BlockParam/releases/latest) |
+| TIA Portal | Direct download (always latest) |
+|---|---|
+| **V20** | [`BlockParam-TIA-V20.addin`](https://github.com/Sawascwoolf/BlockParam/releases/latest/download/BlockParam-TIA-V20.addin) |
+| **V21** | [`BlockParam-TIA-V21.addin`](https://github.com/Sawascwoolf/BlockParam/releases/latest/download/BlockParam-TIA-V21.addin) |
+
+Both URLs always resolve to the most recent release. Older versions live on
+the [Releases page](https://github.com/Sawascwoolf/BlockParam/releases).
 
 A `.addin` for the wrong TIA version will not load (and TIA will not tell you why).
 If the Add-in never appears in the task card after enabling, double-check the version match.
