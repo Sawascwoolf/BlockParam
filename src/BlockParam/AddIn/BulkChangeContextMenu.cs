@@ -507,8 +507,7 @@ public class BulkChangeContextMenu : ContextMenuAddIn
     }
 
     private static bool IsInconsistencyError(Exception ex) =>
-        (ex.Message?.Contains("Inconsistent") == true)
-        || (ex.InnerException?.Message?.Contains("Inconsistent") == true);
+        InconsistencyDetector.Matches(ex);
 
     private static System.Windows.MessageBoxResult ShowMessageBox(
         string message, string title,
