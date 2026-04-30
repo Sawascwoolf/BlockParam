@@ -21,6 +21,17 @@ public class BulkChangeConfig
     [JsonProperty("licenseServerUrl")]
     public string? LicenseServerUrl { get; set; }
 
+    /// <summary>
+    /// User override for the addin's UI language (#50). Accepts "en" / "de" /
+    /// any specific culture name (e.g. "de-DE"). When unset/empty the addin
+    /// follows the OS culture, which is the same default TIA itself uses for
+    /// non-localized addin assemblies. We don't try to follow TIA's own UI
+    /// language because Openness has no documented hook that reflects it
+    /// reliably at runtime.
+    /// </summary>
+    [JsonProperty("language")]
+    public string? Language { get; set; }
+
     /// <summary>Copy-on-write metadata: tracks where this file was copied from.</summary>
     [JsonProperty("_copiedFrom")]
     public CopiedFromMetadata? CopiedFrom { get; set; }

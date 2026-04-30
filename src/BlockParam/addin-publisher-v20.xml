@@ -6,7 +6,7 @@
   <Product>
     <Name>BlockParam</Name>
     <Id>BlockParam</Id>
-    <Version>0.16.5</Version>
+    <Version>0.16.14</Version>
   </Product>
   <FeatureAssembly>
     <AssemblyInfo>
@@ -16,6 +16,10 @@
   <AdditionalAssemblies>
     <AssemblyInfo><Assembly>Newtonsoft.Json.dll</Assembly></AssemblyInfo>
     <AssemblyInfo><Assembly>Microsoft.Bcl.HashCode.dll</Assembly></AssemblyInfo>
+    <!-- Localization satellite — German UI strings (#50). The build emits this
+         to bin\…\de\BlockParam.resources.dll; .NET's ResourceManager probes
+         <base>\de\<asm>.resources.dll, so the relative path matters. -->
+    <AssemblyInfo><Assembly>de\BlockParam.resources.dll</Assembly></AssemblyInfo>
   </AdditionalAssemblies>
   <RequiredPermissions>
     <TIAPermissions>

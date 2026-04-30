@@ -23,6 +23,45 @@ public class BulkChangeContextMenu : ContextMenuAddIn
     private static int _tempCacheCleanupRan;
 
     /// <summary>
+    /// Reads the optional <c>language</c> override from %APPDATA%\BlockParam\config.json
+    /// (#50) and, if set, applies it to <c>Thread.CurrentUICulture</c>. When unset,
+    /// the OS culture is used (which is what TIA itself defaults to for our addin).
+    ///
+    /// We deliberately do NOT try to mirror TIA's own UI-language setting —
+    /// research showed Openness has no reliable hook for the live value, and
+    /// the only documented one (<c>SettingsFolders[General][UserInterfaceLanguage]</c>)
+    /// returns inconsistent results across addin reloads. This matches the
+    /// approach Parozzz/TiaUtilities (the only fully-localized open-source TIA
+    /// addin) uses: own setting, ignore TIA's UI-language dropdown.
+    ///
+    /// CAS sandbox forbids writes to <c>Thread.CurrentCulture</c> but allows
+    /// <c>CurrentUICulture</c>, which is the one ResourceManager consults.
+    /// </summary>
+    private static void ApplyConfiguredLanguage()
+    {
+        try
+        {
+            var configPath = FindConfigFile();
+            if (configPath == null) return;
+
+            var lang = new ConfigLoader(configPath).ReadLanguage();
+            if (string.IsNullOrEmpty(lang)) return;
+
+            var culture = System.Globalization.CultureInfo.GetCultureInfo(lang);
+            if (!Equals(System.Threading.Thread.CurrentThread.CurrentUICulture, culture))
+            {
+                System.Threading.Thread.CurrentThread.CurrentUICulture = culture;
+                Log.Information("Applied config.json language override: {Culture}", culture.Name);
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Warning(ex, "Could not apply config.json language; thread culture stays at {Culture}",
+                System.Threading.Thread.CurrentThread.CurrentUICulture.Name);
+        }
+    }
+
+    /// <summary>
     /// Runs the TEMP cache cleanup at most once per Add-In process, and at most
     /// once per <see cref="CacheCleanupSchedule.DefaultInterval"/> across sessions
     /// (state file in %APPDATA%\BlockParam\). Keeps %TEMP%\BlockParam\ bounded
@@ -59,8 +98,14 @@ public class BulkChangeContextMenu : ContextMenuAddIn
 
     protected override void BuildContextMenuItems(ContextMenuAddInRoot addInRootSubmenu)
     {
+        // BuildContextMenuItems runs once at addin load (#50 research). The
+        // label is then frozen for the entire TIA session — Siemens API has
+        // no per-render hook. Apply our config.json language now so the label
+        // matches the user's pref even though it can't live-flip.
+        ApplyConfiguredLanguage();
+
         addInRootSubmenu.Items.AddActionItem<IEngineeringObject>(
-            "Edit Start Values...",
+            Res.Get("MenuTitle_EditStartValues"),
             OnClick,
             OnUpdateStatus);
     }
@@ -76,9 +121,17 @@ public class BulkChangeContextMenu : ContextMenuAddIn
             if (selection == null) return;
 
             EnsureTempCacheCleaned();
+            ApplyConfiguredLanguage();
 
             Log.Information("Bulk Change v{Version} clicked on DB: {DbName}",
                 typeof(BulkChangeContextMenu).Assembly.GetName().Version, selection.Name);
+
+            // Two language axes (#50). UI language: Thread.CurrentUICulture,
+            // either the OS default or the user's config.json override
+            // (applied above). Project text languages: read from
+            // project.LanguageSettings further down for DB comment rendering.
+            Log.Information("UI culture: {Culture} (ResourceManager picks Strings.<lang>.resx satellite)",
+                System.Threading.Thread.CurrentThread.CurrentUICulture.Name);
 
             var adapter = new TiaPortalAdapter(_tiaPortal);
 
@@ -163,6 +216,10 @@ public class BulkChangeContextMenu : ContextMenuAddIn
                 {
                     Log.Warning(langEx, "Could not read TIA project languages");
                 }
+                Log.Information("TIA project text languages — active: [{Active}], editing: {Editing}, reference: {Reference}",
+                    string.Join(", ", projectLanguages),
+                    editingLanguage ?? "(unset)",
+                    referenceLanguage ?? "(unset)");
             }
 
             var logger = new ChangeLogger();

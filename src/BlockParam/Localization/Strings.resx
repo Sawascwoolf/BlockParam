@@ -47,6 +47,10 @@
     <value>Set all {0} in '{1}'</value>
     <comment>{0} = count, {1} = scope name</comment>
   </data>
+  <!-- Context menu action item label (#50). The submenu root is MenuTitle_BulkChange ("BlockParam..."); this is the leaf the user clicks. -->
+  <data name="MenuTitle_EditStartValues" xml:space="preserve">
+    <value>Edit Start Values...</value>
+  </data>
   <!-- Dialog -->
   <data name="Dialog_Title" xml:space="preserve">
     <value>BlockParam: {0}</value>
