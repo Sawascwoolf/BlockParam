@@ -80,22 +80,6 @@
         <!-- Bottom bar: action buttons + license/usage info + status -->
         <DockPanel DockPanel.Dock="Bottom" Margin="0,8,0,0">
             <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
-                <!-- Language switcher (#50): two flag buttons that override the
-                     OS culture independently. Click → save + ask "reopen now?". -->
-                <Button x:Name="FlagEnButton" Click="OnSwitchLanguageEnglish"
-                        Background="Transparent" BorderThickness="0" Padding="0"
-                        Cursor="Hand" Margin="0,0,4,0" VerticalAlignment="Center"
-                        ToolTip="{loc:Loc Language_TooltipEnglish}">
-                    <Image Source="/BlockParam;component/Resources/flag_gb.png"
-                           Width="20" Height="15" Stretch="Uniform"/>
-                </Button>
-                <Button x:Name="FlagDeButton" Click="OnSwitchLanguageGerman"
-                        Background="Transparent" BorderThickness="0" Padding="0"
-                        Cursor="Hand" Margin="0,0,12,0" VerticalAlignment="Center"
-                        ToolTip="{loc:Loc Language_TooltipGerman}">
-                    <Image Source="/BlockParam;component/Resources/flag_de.png"
-                           Width="20" Height="15" Stretch="Uniform"/>
-                </Button>
                 <!-- Discoverable zoom widget (#28). Placed left of the action
                      buttons so the persistent percentage label and shortcut
                      tooltip stay in the user's peripheral vision. -->

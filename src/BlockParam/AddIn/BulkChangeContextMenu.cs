@@ -77,15 +77,189 @@ public class BulkChangeContextMenu : ContextMenuAddIn
 
             EnsureTempCacheCleaned();
 
-            // #50 — language switcher loop. The dialog's flag buttons set
-            // RestartAfterClose when the user picks "reopen now"; we close,
-            // re-apply the new culture, and rebuild the dialog from scratch
-            // so every {loc:Loc} binding re-evaluates against it.
-            bool restart;
-            do
+            Log.Information("Bulk Change v{Version} clicked on DB: {DbName}",
+                typeof(BulkChangeContextMenu).Assembly.GetName().Version, selection.Name);
+
+            // TIA exposes two language settings (#50): the *UI language* (TIA's
+            // own menus and our addin's resource strings, surfaced via
+            // Thread.CurrentUICulture), and the *project text languages* (used
+            // for DB comments / multilingual texts, exposed by
+            // project.LanguageSettings further down). We don't override either —
+            // the addin runs under TIA's CAS sandbox, which forbids writes to
+            // Thread.CurrentCulture. Logging both so any locale-dependent
+            // behaviour is observable from the log file alone.
+            Log.Information("TIA UI culture inherited: {Culture} (ResourceManager fallback: en if not de-*)",
+                System.Threading.Thread.CurrentThread.CurrentUICulture.Name);
+
+            var adapter = new TiaPortalAdapter(_tiaPortal);
+
+            // Per-project scope so parallel TIA instances / switched projects cannot share cache dirs (#14).
+            // Layout: %TEMP%\BlockParam\<scope>\{TagTables,UdtTypes,DB export}
+            var project = _tiaPortal.Projects.FirstOrDefault();
+            var scope = ProjectScope.ForPath(project?.Path?.FullName);
+            var tempDir = Path.Combine(Path.GetTempPath(), "BlockParam", scope);
+
+            // Export DB to XML - handle inconsistent blocks
+            string xmlPath = null!;
+            if (!TryExportWithCompilePrompt(selection, adapter, () => xmlPath = adapter.ExportBlock(selection, tempDir)))
+                return;
+
+            var xml = File.ReadAllText(xmlPath);
+
+            var plcSoftware = FindPlcSoftware(selection);
+
+            // Build an optional constant resolver from any previously exported
+            // tag tables so symbolic array bounds (Array[1..MAX_VALVES]) expand
+            // correctly. If no tables are cached yet the array stays collapsed
+            // with UnresolvedBound set; the user can then export tag tables
+            // from the dialog and refresh. Uses the per-project scoped dir
+            // (#14) to avoid cross-project bleed and match where `onRefreshTagTables` writes.
+            var prestartTagTableDir = Path.Combine(tempDir, "TagTables");
+            IConstantResolver? constantResolver = null;
+            if (Directory.Exists(prestartTagTableDir) &&
+                Directory.GetFiles(prestartTagTableDir, "*.xml").Length > 0)
             {
-                restart = OpenDialogOnce(ref selection);
-            } while (restart);
+                var prestartCache = new TagTableCache(new XmlFileTagTableReader(prestartTagTableDir));
+                constantResolver = new TagTableConstantResolver(prestartCache);
+            }
+
+            // Validate UDT cache against TIA's per-type ModifiedDate and re-export stale entries.
+            var udtDir = Path.Combine(tempDir, "UdtTypes");
+            if (plcSoftware != null)
+            {
+                var refreshed = RefreshStaleUdtCache(plcSoftware, udtDir);
+                Log.Information("UDT cache validation: {Refreshed} stale file(s) re-exported", refreshed);
+            }
+            var udtResolver = new UdtSetPointResolver();
+            udtResolver.LoadFromDirectory(udtDir);
+            var commentResolver = new UdtCommentResolver();
+            commentResolver.LoadFromDirectory(udtDir);
+            Log.Information("UDT cache loaded: {TypeCount} types from {Dir}", udtResolver.TypeCount, udtDir);
+
+            // Parse structure (constant resolver expands symbolic array bounds;
+            // UDT resolvers fill in SetPoint / Comment for nested UDT leaves whose
+            // DB XML carries no per-instance override).
+            var parser = new SimaticMLParser(constantResolver, udtResolver, commentResolver);
+            var dbInfo = parser.Parse(xml);
+            if (dbInfo.UnresolvedUdts.Count > 0)
+            {
+                Log.Information("DB {Name} references {Count} UDT(s) not in cache: {Types}",
+                    dbInfo.Name, dbInfo.UnresolvedUdts.Count, string.Join(", ", dbInfo.UnresolvedUdts));
+            }
+            Log.Information("Parsed DB {Name}: {MemberCount} top-level members, {TotalCount} total",
+                dbInfo.Name, dbInfo.Members.Count, dbInfo.AllMembers().Count());
+
+            // Create services
+            var configPath = FindConfigFile();
+            var configLoader = new ConfigLoader(configPath);
+
+            IReadOnlyList<string> projectLanguages = Array.Empty<string>();
+            string? editingLanguage = null;
+            string? referenceLanguage = null;
+            if (project != null)
+            {
+                configLoader.SetTiaProjectPath(project.Path.FullName);
+                try
+                {
+                    var langSettings = project.LanguageSettings;
+                    projectLanguages = langSettings.ActiveLanguages
+                        .Select(l => l.Culture.Name)
+                        .ToList();
+                    try { editingLanguage = langSettings.EditingLanguage?.Culture?.Name; }
+                    catch { /* not always exposed; falls back to null */ }
+                    try { referenceLanguage = langSettings.ReferenceLanguage?.Culture?.Name; }
+                    catch { /* not always exposed; falls back to null */ }
+                }
+                catch (Exception langEx)
+                {
+                    Log.Warning(langEx, "Could not read TIA project languages");
+                }
+                Log.Information("TIA project text languages — active: [{Active}], editing: {Editing}, reference: {Reference}",
+                    string.Join(", ", projectLanguages),
+                    editingLanguage ?? "(unset)",
+                    referenceLanguage ?? "(unset)");
+            }
+
+            var logger = new ChangeLogger();
+            var bulkService = new BulkChangeService(logger, configLoader);
+            var analyzer = new HierarchyAnalyzer();
+            var appDataDir = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                "BlockParam");
+            var usagePath = Path.Combine(appDataDir, "usage.dat");
+            var freeTracker = new LocalUsageTracker(usagePath, dailyLimit: 3);
+
+            // License service: heartbeat-based concurrent session validation.
+            // #20: probe the machine-wide managed key file first so multi-seat
+            // customers can roll out / rotate keys via deployment tooling
+            // (batch / SCCM / Intune / GPO) without each engineer re-typing the
+            // key. Falls back to the per-user cache when no managed file exists.
+            var serverUrl = configLoader.ReadLicenseServerUrl() ?? OnlineLicenseService.DefaultServerUrl;
+            var licenseService = new OnlineLicenseService(
+                appDataDir,
+                serverUrl,
+                sharedLicenseFilePath: OnlineLicenseService.DefaultSharedLicenseFilePath);
+            var usageTracker = new LicensedUsageTracker(licenseService, freeTracker);
+
+            // Tag table export: lazy (only when needed by autocomplete). Scoped per project (#14).
+            var tagTableDir = Path.Combine(tempDir, "TagTables");
+
+            // Open dialog
+            var vm = new BulkChangeViewModel(
+                dbInfo, xml, analyzer, bulkService, usageTracker, configLoader,
+                onApply: modifiedXml =>
+                {
+                    Log.Information("Apply: writing modified XML for {DbName}", dbInfo.Name);
+
+                    // #19 follow-up: BackupBlock also calls Export; if TIA's ImportBlock left
+                    // the previous round's block inconsistent, the export fails the same way
+                    // it did in the initial path. Reuse the compile-prompt helper instead of
+                    // crashing silently.
+                    if (!TryExportWithCompilePrompt(selection, adapter, () => adapter.BackupBlock(selection, tempDir)))
+                    {
+                        Log.Information("Apply cancelled: user declined compile for {DbName}", dbInfo.Name);
+                        throw new OperationCanceledException("User declined to compile the inconsistent block.");
+                    }
+
+                    var modifiedPath = Path.Combine(tempDir, $"{dbInfo.Name}_modified.xml");
+                    File.WriteAllText(modifiedPath, modifiedXml);
+                    var blockGroup = (PlcBlockGroup)adapter.GetBlockGroup(selection);
+                    adapter.ImportBlock(blockGroup, modifiedPath);
+
+                    // #19: TIA's ImportBlock(Override) disposes the old DataBlock instance.
+                    // Re-resolve the fresh instance from the block group so a second Apply
+                    // inside the same dialog session doesn't throw on the stale reference.
+                    var fresh = blockGroup.Blocks.Find(dbInfo.Name) as DataBlock;
+                    if (fresh != null)
+                    {
+                        selection = fresh;
+                    }
+                    else
+                    {
+                        Log.Warning("Could not re-resolve DataBlock '{DbName}' after import — next Apply may fail", dbInfo.Name);
+                    }
+                    Log.Information("Import completed for {DbName}", dbInfo.Name);
+                },
+                onRefreshTagTables: plcSoftware != null
+                    ? () => ExportTagTables(plcSoftware, tagTableDir)
+                    : null,
+                tagTableDir: plcSoftware != null ? tagTableDir : null,
+                projectLanguages: projectLanguages,
+                licenseService: licenseService,
+                onRefreshUdtTypes: plcSoftware != null
+                    ? new Action(() => { RefreshStaleUdtCache(plcSoftware, udtDir); })
+                    : null,
+                udtDir: udtDir,
+                udtResolver: udtResolver,
+                commentResolver: commentResolver,
+                editingLanguage: editingLanguage,
+                referenceLanguage: referenceLanguage);
+
+            licenseService.StartHeartbeat();
+            var dialog = new BulkChangeDialog(vm);
+            dialog.ShowDialog();
+            licenseService.StopHeartbeat();
+            licenseService.Dispose();
         }
         catch (Exception ex)
         {
@@ -96,199 +270,6 @@ public class BulkChangeContextMenu : ContextMenuAddIn
                 System.Windows.MessageBoxButton.OK,
                 System.Windows.MessageBoxImage.Error);
         }
-    }
-
-    /// <summary>
-    /// Builds the view model + dialog for a single open of the bulk-change UI.
-    /// Returns <c>true</c> if the user requested a language-driven restart
-    /// (caller re-runs us); <c>false</c> when the dialog closed normally.
-    /// <paramref name="selection"/> is <c>ref</c> because <see cref="OpenDialogOnce"/>'s
-    /// Apply callback re-resolves the DataBlock instance after each import — that
-    /// fresh reference must survive into the next restart iteration.
-    /// </summary>
-    private bool OpenDialogOnce(ref DataBlock selection)
-    {
-        UiLanguageService.Shared.ApplyToCurrentThread();
-
-        // Capture into a local so the Apply closure can re-bind `selection` after
-        // ImportBlock disposes the old DataBlock instance (#19). Refs cannot be
-        // captured by lambdas, so we propagate any update back through `selection`
-        // at the end of the method.
-        var localSelection = selection;
-
-        Log.Information("Bulk Change v{Version} clicked on DB: {DbName}",
-            typeof(BulkChangeContextMenu).Assembly.GetName().Version, localSelection.Name);
-
-        var adapter = new TiaPortalAdapter(_tiaPortal);
-
-        // Per-project scope so parallel TIA instances / switched projects cannot share cache dirs (#14).
-        // Layout: %TEMP%\BlockParam\<scope>\{TagTables,UdtTypes,DB export}
-        var project = _tiaPortal.Projects.FirstOrDefault();
-        var scope = ProjectScope.ForPath(project?.Path?.FullName);
-        var tempDir = Path.Combine(Path.GetTempPath(), "BlockParam", scope);
-
-        // Export DB to XML - handle inconsistent blocks
-        string xmlPath = null!;
-        if (!TryExportWithCompilePrompt(localSelection, adapter, () => xmlPath = adapter.ExportBlock(localSelection, tempDir)))
-            return false;
-
-        var xml = File.ReadAllText(xmlPath);
-
-        var plcSoftware = FindPlcSoftware(localSelection);
-
-        // Build an optional constant resolver from any previously exported
-        // tag tables so symbolic array bounds (Array[1..MAX_VALVES]) expand
-        // correctly. If no tables are cached yet the array stays collapsed
-        // with UnresolvedBound set; the user can then export tag tables
-        // from the dialog and refresh. Uses the per-project scoped dir
-        // (#14) to avoid cross-project bleed and match where `onRefreshTagTables` writes.
-        var prestartTagTableDir = Path.Combine(tempDir, "TagTables");
-        IConstantResolver? constantResolver = null;
-        if (Directory.Exists(prestartTagTableDir) &&
-            Directory.GetFiles(prestartTagTableDir, "*.xml").Length > 0)
-        {
-            var prestartCache = new TagTableCache(new XmlFileTagTableReader(prestartTagTableDir));
-            constantResolver = new TagTableConstantResolver(prestartCache);
-        }
-
-        // Validate UDT cache against TIA's per-type ModifiedDate and re-export stale entries.
-        var udtDir = Path.Combine(tempDir, "UdtTypes");
-        if (plcSoftware != null)
-        {
-            var refreshed = RefreshStaleUdtCache(plcSoftware, udtDir);
-            Log.Information("UDT cache validation: {Refreshed} stale file(s) re-exported", refreshed);
-        }
-        var udtResolver = new UdtSetPointResolver();
-        udtResolver.LoadFromDirectory(udtDir);
-        var commentResolver = new UdtCommentResolver();
-        commentResolver.LoadFromDirectory(udtDir);
-        Log.Information("UDT cache loaded: {TypeCount} types from {Dir}", udtResolver.TypeCount, udtDir);
-
-        // Parse structure (constant resolver expands symbolic array bounds;
-        // UDT resolvers fill in SetPoint / Comment for nested UDT leaves whose
-        // DB XML carries no per-instance override).
-        var parser = new SimaticMLParser(constantResolver, udtResolver, commentResolver);
-        var dbInfo = parser.Parse(xml);
-        if (dbInfo.UnresolvedUdts.Count > 0)
-        {
-            Log.Information("DB {Name} references {Count} UDT(s) not in cache: {Types}",
-                dbInfo.Name, dbInfo.UnresolvedUdts.Count, string.Join(", ", dbInfo.UnresolvedUdts));
-        }
-        Log.Information("Parsed DB {Name}: {MemberCount} top-level members, {TotalCount} total",
-            dbInfo.Name, dbInfo.Members.Count, dbInfo.AllMembers().Count());
-
-        // Create services
-        var configPath = FindConfigFile();
-        var configLoader = new ConfigLoader(configPath);
-
-        IReadOnlyList<string> projectLanguages = Array.Empty<string>();
-        string? editingLanguage = null;
-        string? referenceLanguage = null;
-        if (project != null)
-        {
-            configLoader.SetTiaProjectPath(project.Path.FullName);
-            try
-            {
-                var langSettings = project.LanguageSettings;
-                projectLanguages = langSettings.ActiveLanguages
-                    .Select(l => l.Culture.Name)
-                    .ToList();
-                try { editingLanguage = langSettings.EditingLanguage?.Culture?.Name; }
-                catch { /* not always exposed; falls back to null */ }
-                try { referenceLanguage = langSettings.ReferenceLanguage?.Culture?.Name; }
-                catch { /* not always exposed; falls back to null */ }
-            }
-            catch (Exception langEx)
-            {
-                Log.Warning(langEx, "Could not read TIA project languages");
-            }
-        }
-
-        var logger = new ChangeLogger();
-        var bulkService = new BulkChangeService(logger, configLoader);
-        var analyzer = new HierarchyAnalyzer();
-        var appDataDir = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-            "BlockParam");
-        var usagePath = Path.Combine(appDataDir, "usage.dat");
-        var freeTracker = new LocalUsageTracker(usagePath, dailyLimit: 3);
-
-        // License service: heartbeat-based concurrent session validation.
-        // #20: probe the machine-wide managed key file first so multi-seat
-        // customers can roll out / rotate keys via deployment tooling
-        // (batch / SCCM / Intune / GPO) without each engineer re-typing the
-        // key. Falls back to the per-user cache when no managed file exists.
-        var serverUrl = configLoader.ReadLicenseServerUrl() ?? OnlineLicenseService.DefaultServerUrl;
-        var licenseService = new OnlineLicenseService(
-            appDataDir,
-            serverUrl,
-            sharedLicenseFilePath: OnlineLicenseService.DefaultSharedLicenseFilePath);
-        var usageTracker = new LicensedUsageTracker(licenseService, freeTracker);
-
-        // Tag table export: lazy (only when needed by autocomplete). Scoped per project (#14).
-        var tagTableDir = Path.Combine(tempDir, "TagTables");
-
-        var vm = new BulkChangeViewModel(
-            dbInfo, xml, analyzer, bulkService, usageTracker, configLoader,
-            onApply: modifiedXml =>
-            {
-                Log.Information("Apply: writing modified XML for {DbName}", dbInfo.Name);
-
-                // #19 follow-up: BackupBlock also calls Export; if TIA's ImportBlock left
-                // the previous round's block inconsistent, the export fails the same way
-                // it did in the initial path. Reuse the compile-prompt helper instead of
-                // crashing silently.
-                if (!TryExportWithCompilePrompt(localSelection, adapter, () => adapter.BackupBlock(localSelection, tempDir)))
-                {
-                    Log.Information("Apply cancelled: user declined compile for {DbName}", dbInfo.Name);
-                    throw new OperationCanceledException("User declined to compile the inconsistent block.");
-                }
-
-                var modifiedPath = Path.Combine(tempDir, $"{dbInfo.Name}_modified.xml");
-                File.WriteAllText(modifiedPath, modifiedXml);
-                var blockGroup = (PlcBlockGroup)adapter.GetBlockGroup(localSelection);
-                adapter.ImportBlock(blockGroup, modifiedPath);
-
-                // #19: TIA's ImportBlock(Override) disposes the old DataBlock instance.
-                // Re-resolve the fresh instance from the block group so a second Apply
-                // inside the same dialog session doesn't throw on the stale reference.
-                var fresh = blockGroup.Blocks.Find(dbInfo.Name) as DataBlock;
-                if (fresh != null)
-                {
-                    localSelection = fresh;
-                }
-                else
-                {
-                    Log.Warning("Could not re-resolve DataBlock '{DbName}' after import — next Apply may fail", dbInfo.Name);
-                }
-                Log.Information("Import completed for {DbName}", dbInfo.Name);
-            },
-            onRefreshTagTables: plcSoftware != null
-                ? () => ExportTagTables(plcSoftware, tagTableDir)
-                : null,
-            tagTableDir: plcSoftware != null ? tagTableDir : null,
-            projectLanguages: projectLanguages,
-            licenseService: licenseService,
-            onRefreshUdtTypes: plcSoftware != null
-                ? new Action(() => { RefreshStaleUdtCache(plcSoftware, udtDir); })
-                : null,
-            udtDir: udtDir,
-            udtResolver: udtResolver,
-            commentResolver: commentResolver,
-            editingLanguage: editingLanguage,
-            referenceLanguage: referenceLanguage);
-
-        licenseService.StartHeartbeat();
-        var dialog = new BulkChangeDialog(vm);
-        dialog.ShowDialog();
-        licenseService.StopHeartbeat();
-        licenseService.Dispose();
-
-        // Propagate any DataBlock re-resolution that happened inside the Apply
-        // closure back to the caller — a restart iteration must use the fresh
-        // reference, not the disposed one.
-        selection = localSelection;
-        return vm.RestartAfterClose;
     }
 
     private static int ExportTagTables(PlcSoftware plcSoftware, string exportDir)

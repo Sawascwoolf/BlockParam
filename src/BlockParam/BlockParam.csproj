@@ -8,7 +8,7 @@
     <Nullable>enable</Nullable>
     <RootNamespace>BlockParam</RootNamespace>
     <AssemblyName>BlockParam</AssemblyName>
-    <Version>0.16.6</Version>
+    <Version>0.16.5</Version>
     <Authors>Sawascwoolf</Authors>
     <Description>TIA Portal Add-In for editing Data Block start values and parameters — single and in bulk</Description>
     <ApplicationIcon>Resources\BlockParam_logo.ico</ApplicationIcon>
@@ -30,8 +30,6 @@
   <ItemGroup>
     <Resource Include="Resources\BlockParam_logo.ico" />
     <Resource Include="Resources\BlockParam_logo_256.png" />
-    <Resource Include="Resources\flag_de.png" />
-    <Resource Include="Resources\flag_gb.png" />
   </ItemGroup>
 
   <!-- Framework references for WinForms dialogs (FolderBrowserDialog) -->

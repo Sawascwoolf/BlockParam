@@ -204,14 +204,6 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
 
     // --- Properties ---
 
-    /// <summary>
-    /// Set by the language-switcher footer (#50) when the user picks a new
-    /// language and confirms "reopen now". OnClick in the context menu reads
-    /// this after <c>ShowDialog</c> returns and re-runs the dialog setup so
-    /// every <c>{loc:Loc}</c> binding re-evaluates against the new culture.
-    /// </summary>
-    public bool RestartAfterClose { get; set; }
-
     public string Title { get; }
     public ObservableCollection<MemberNodeViewModel> RootMembers { get; }
     public ObservableCollection<ScopeLevel> AvailableScopes { get; }

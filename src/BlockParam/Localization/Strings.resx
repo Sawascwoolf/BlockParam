@@ -681,29 +681,4 @@ Compile the block now?</value>
   <data name="Zoom_Tooltip" xml:space="preserve">
     <value>Zoom (Ctrl + mouse wheel, Ctrl + / Ctrl −, Ctrl + 0 to reset)</value>
   </data>
-  <!-- Language switcher (#50): flag buttons in the dialog footer. Tooltips name
-       the target language; the prompt fires after a flag click and lets the
-       user reopen the dialog now to apply the new language, or keep working
-       and have it apply on next open. -->
-  <data name="Language_TooltipEnglish" xml:space="preserve">
-    <value>Switch UI to English</value>
-  </data>
-  <data name="Language_TooltipGerman" xml:space="preserve">
-    <value>Switch UI to German</value>
-  </data>
-  <data name="Language_PromptTitle" xml:space="preserve">
-    <value>BlockParam — Language Changed</value>
-  </data>
-  <data name="Language_PromptMessage" xml:space="preserve">
-    <value>The UI language was set to {0}.
-
-Reopen the dialog now to apply the new language, or click No to keep working — the change will apply the next time you open the dialog.</value>
-    <comment>{0} = display name of the new language ("English" / "Deutsch")</comment>
-  </data>
-  <data name="Language_DisplayEnglish" xml:space="preserve">
-    <value>English</value>
-  </data>
-  <data name="Language_DisplayGerman" xml:space="preserve">
-    <value>Deutsch</value>
-  </data>
 </root>

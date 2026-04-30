@@ -77,12 +77,6 @@ class Program
             // developer's personal %APPDATA%\BlockParam\ui-settings.json.
             UiZoomService.ReplaceShared(UiZoomService.CreateEphemeral());
         }
-        else
-        {
-            // Interactive mode: honour the user's saved UI language (#50)
-            // before any {loc:Loc} binding resolves.
-            UiLanguageService.Shared.ApplyToCurrentThread();
-        }
 
         // 1. Find DB XML. Capture plan fixture wins; bare arg next; else defaults.
         var tiaExportDir = Path.Combine(Path.GetTempPath(), "BlockParam");

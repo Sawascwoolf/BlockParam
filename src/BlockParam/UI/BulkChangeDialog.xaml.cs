@@ -882,39 +882,6 @@ public partial class BulkChangeDialog : Window
         Close();
     }
 
-    private void OnSwitchLanguageEnglish(object sender, RoutedEventArgs e)
-        => HandleLanguageSwitch(UiLanguageOption.English, "Language_DisplayEnglish");
-
-    private void OnSwitchLanguageGerman(object sender, RoutedEventArgs e)
-        => HandleLanguageSwitch(UiLanguageOption.German, "Language_DisplayGerman");
-
-    /// <summary>
-    /// Saves the language choice, applies it to the current thread (so any
-    /// MessageBox shown next picks up the new culture immediately), and asks
-    /// whether to reopen the dialog now. {loc:Loc} bindings only re-evaluate
-    /// at XAML parse time, so a real relabel needs a fresh dialog — Yes signals
-    /// the context-menu caller via <c>RestartAfterClose</c>; No leaves the
-    /// current dialog as-is and the change applies on next open.
-    /// </summary>
-    private void HandleLanguageSwitch(UiLanguageOption option, string displayKey)
-    {
-        UiLanguageService.Shared.SetLanguage(option);
-        UiLanguageService.Shared.ApplyToCurrentThread();
-
-        var languageName = Res.Get(displayKey);
-        var answer = MessageBox.Show(
-            Res.Format("Language_PromptMessage", languageName),
-            Res.Get("Language_PromptTitle"),
-            MessageBoxButton.YesNo,
-            MessageBoxImage.Question);
-
-        if (answer != MessageBoxResult.Yes) return;
-
-        if (DataContext is BulkChangeViewModel vm)
-            vm.RestartAfterClose = true;
-        Close();
-    }
-
     protected override void OnClosing(System.ComponentModel.CancelEventArgs e)
     {
         base.OnClosing(e);
