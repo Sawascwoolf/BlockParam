@@ -91,12 +91,13 @@ single action.
 
 Each release ships two `.addin` files &mdash; pick the one that matches your TIA Portal version:
 
-| TIA Portal | File | Direct link |
-|---|---|---|
-| **V20** | `BlockParam-v<version>-TIA-V20.addin` | [Latest release](https://github.com/Sawascwoolf/BlockParam/releases/latest) |
-| **V21** | `BlockParam-v<version>-TIA-V21.addin` | [Latest release](https://github.com/Sawascwoolf/BlockParam/releases/latest) |
+| TIA Portal | Direct download (always latest) |
+|---|---|
+| **V20** | [`BlockParam-TIA-V20.addin`](https://github.com/Sawascwoolf/BlockParam/releases/latest/download/BlockParam-TIA-V20.addin) |
+| **V21** | [`BlockParam-TIA-V21.addin`](https://github.com/Sawascwoolf/BlockParam/releases/latest/download/BlockParam-TIA-V21.addin) |
 
-All releases: [Releases page](https://github.com/Sawascwoolf/BlockParam/releases).
+These URLs always resolve to the most recent release. Older versions and
+release notes: [Releases page](https://github.com/Sawascwoolf/BlockParam/releases).
 
 ## Installation
 
