@@ -14,6 +14,7 @@ start with [Getting Started](getting-started.md).
 | [Getting started](getting-started.md) | Install the `.addin`, enable it in TIA Portal, open the dialog. |
 | [Bulk apply workflow](bulk-workflow.md) | Pick a member, choose a scope, preview, apply, undo. |
 | [Rule editor](rule-editor.md) | Create / edit / delete rules; how the three rule sources merge. |
+| [AI prompt for rule authoring](ai-rule-prompt.md) | Copy-paste prompt that turns plain-language requirements into rule JSON. |
 | [Comment rules](comment-rules.md) | Comment templates, placeholders, when comments are written. |
 | [Tag-table integration](tag-tables.md) | Where tag tables come from, autocomplete, required-value rules. |
 | [Config storage](config-storage.md) | Where `config.json` and rule files live; how to back them up. |
