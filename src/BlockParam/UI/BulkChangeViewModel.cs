@@ -56,6 +56,11 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     private string _dataBlockSearchText = "";
     private bool _isDataBlocksDropdownOpen;
     private bool _isLoadingDataBlocks;
+    // In-memory stash of pending edits keyed by DB identity (#59). Lets the
+    // user switch DBs without committing or losing work — when they come back
+    // to a stashed DB later in the same session, the edits restore.
+    private readonly Dictionary<string, StashedDbState> _stashedDbs =
+        new(StringComparer.Ordinal);
     private MemberNodeViewModel? _selectedFlatMember;
     private ScopeLevel? _selectedScope;
     private string _newValue = "";
@@ -166,6 +171,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         BulkPreview = new ObservableCollection<BulkPreviewEntry>();
         PendingEdits = new ObservableCollection<PendingEditEntry>();
         ExistingIssues = new ObservableCollection<ExistingIssueEntry>();
+        StashedDbs = new ObservableCollection<StashedDbState>();
 
         // Build tree view models
         RootMembers = new ObservableCollection<MemberNodeViewModel>();
@@ -207,6 +213,10 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         });
         RefreshDataBlocksCommand = new RelayCommand(ExecuteRefreshDataBlocks,
             () => _enumerateDataBlocks != null && !_isLoadingDataBlocks);
+        SwitchToStashedDbCommand = new RelayCommand(parameter =>
+        {
+            if (parameter is StashedDbState stash) SwitchToDataBlock(stash.Summary);
+        });
 
         if (_licenseService != null)
         {
@@ -256,6 +266,16 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     /// edits. They never block Apply (#26).
     /// </summary>
     public ObservableCollection<ExistingIssueEntry> ExistingIssues { get; }
+
+    /// <summary>
+    /// One entry per DB the user has switched away from with un-applied
+    /// pending edits (#59). Each entry renders as its own inspector section
+    /// so the staged work stays visible across switches; clicking the section
+    /// header switches back to that DB (running the same prompt again).
+    /// </summary>
+    public ObservableCollection<StashedDbState> StashedDbs { get; }
+
+    public bool HasStashedDbs => StashedDbs.Count > 0;
 
     public bool HasBulkPreview => BulkPreview.Count > 0;
     public int BulkPreviewCount => BulkPreview.Count;
@@ -616,6 +636,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     public ICommand OpenDataBlocksDropdownCommand { get; }
     public ICommand CloseDataBlocksDropdownCommand { get; }
     public ICommand RefreshDataBlocksCommand { get; }
+    public ICommand SwitchToStashedDbCommand { get; }
 
     /// <summary>
     /// True when the host wired up DB enumeration + switching callbacks.
@@ -725,10 +746,18 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
-    /// Switch the dialog over to a different DB. Confirms before discarding
-    /// staged inline edits; closes the dropdown either way (#59 acceptance
-    /// criteria). Returns true on a successful switch, false on cancel /
-    /// no-op (already on the target DB).
+    /// Switch the dialog over to a different DB (#59). When the current DB
+    /// has staged inline edits, prompts a 3-way choice:
+    /// <list type="bullet">
+    ///   <item><b>Yes</b> — apply staged edits to TIA, then switch.</item>
+    ///   <item><b>No</b> — keep staged edits in an in-memory stash so the user
+    ///     can come back to this DB later in the same session, then switch.</item>
+    ///   <item><b>Cancel</b> — stay on the current DB.</item>
+    /// </list>
+    /// On switch in, looks up <see cref="_stashedDbs"/> for any prior stash and
+    /// re-applies it to the freshly loaded tree (orphan paths drop silently
+    /// with a status note when the DB structure has changed since stashing).
+    /// Returns true on a successful switch, false on cancel / no-op.
     /// </summary>
     public bool SwitchToDataBlock(DataBlockSummary summary)
     {
@@ -741,13 +770,39 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             return false;
         }
 
-        if (PendingInlineEditCount > 0)
+        // Snapshot any active pending edits so we can either commit them, stash
+        // them, or (on Cancel) leave them untouched on the live tree.
+        var pendingSnapshot = SnapshotPendingEdits();
+
+        if (pendingSnapshot.Count > 0)
         {
-            var message = Res.Format("Dialog_SwitchDb_DiscardConfirm_Text",
-                PendingInlineEditCount, summary.Name);
-            if (!_messageBox.AskYesNo(message, Res.Get("Dialog_SwitchDb_DiscardConfirm_Title")))
-                return false;
-            DiscardPendingSilent();
+            var message = Res.Format("Dialog_SwitchDb_KeepConfirm_Text",
+                pendingSnapshot.Count, _dataBlockInfo.Name, summary.Name);
+            var choice = _messageBox.AskYesNoCancel(
+                message, Res.Get("Dialog_SwitchDb_KeepConfirm_Title"));
+
+            switch (choice)
+            {
+                case YesNoCancelResult.Cancel:
+                    return false;
+                case YesNoCancelResult.Yes:
+                    // Apply path: commit staged edits to TIA before leaving the
+                    // current DB. CommitChanges returns false if the user
+                    // cancels the inconsistent-block compile prompt — abort
+                    // the switch so their work isn't silently dropped.
+                    if (!ExecuteApplyForSwitch())
+                        return false;
+                    // After Apply succeeds the tree's PendingValue fields are
+                    // cleared by RefreshTree, so nothing to stash.
+                    break;
+                case YesNoCancelResult.No:
+                    // Stash path: capture the snapshot under the current DB's
+                    // identity. Replaces any prior stash for this DB so the
+                    // newest edits win.
+                    StashCurrentDb(pendingSnapshot);
+                    DiscardPendingSilent();
+                    break;
+            }
         }
 
         IsDataBlocksDropdownOpen = false;
@@ -781,7 +836,22 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             OnPropertyChanged(nameof(NewValue));
             OnPropertyChanged(nameof(SelectedMemberDisplay));
 
-            StatusText = Res.Format("Status_DbSwitched", _dataBlockInfo.Name);
+            // Restore any prior stash for this DB. Removes the stash entry on
+            // success — once edits are back on the live tree they're tracked
+            // there, not in the stash.
+            var (restored, dropped) = RestoreStashFor(summary);
+
+            if (restored > 0 || dropped > 0)
+            {
+                StatusText = dropped == 0
+                    ? Res.Format("Status_DbSwitched_StashRestored", _dataBlockInfo.Name, restored)
+                    : Res.Format("Status_DbSwitched_StashPartial",
+                        _dataBlockInfo.Name, restored, dropped);
+            }
+            else
+            {
+                StatusText = Res.Format("Status_DbSwitched", _dataBlockInfo.Name);
+            }
             return true;
         }
         catch (Exception ex)
@@ -803,6 +873,125 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         return _availableDataBlocks
             .FirstOrDefault(b => string.Equals(b.Name, _dataBlockInfo.Name, StringComparison.Ordinal))
             ?.FolderPath ?? "";
+    }
+
+    /// <summary>
+    /// Walks the live tree and snapshots every node with a <c>PendingValue</c>
+    /// into inert <see cref="StashedEditEntry"/> rows. Used both before a
+    /// switch (to populate the stash) and to render the badge count.
+    /// </summary>
+    private IReadOnlyList<StashedEditEntry> SnapshotPendingEdits()
+    {
+        var list = new List<StashedEditEntry>();
+        SnapshotRecursive(RootMembers, list);
+        return list;
+    }
+
+    private static void SnapshotRecursive(
+        IEnumerable<MemberNodeViewModel> nodes, List<StashedEditEntry> output)
+    {
+        foreach (var node in nodes)
+        {
+            if (node.PendingValue != null)
+            {
+                output.Add(new StashedEditEntry(
+                    node.Path,
+                    node.StartValue ?? "",
+                    node.PendingValue));
+            }
+            SnapshotRecursive(node.Children, output);
+        }
+    }
+
+    private static string StashKey(DataBlockSummary summary) =>
+        summary.FolderPath + "" + summary.Name;
+
+    private void StashCurrentDb(IReadOnlyList<StashedEditEntry> edits)
+    {
+        var summary = new DataBlockSummary(
+            _dataBlockInfo.Name,
+            GetCurrentFolderPath(),
+            blockType: _dataBlockInfo.BlockType,
+            isInstanceDb: string.Equals(_dataBlockInfo.BlockType, "InstanceDB", StringComparison.Ordinal));
+        var key = StashKey(summary);
+        var state = new StashedDbState(summary, edits);
+        _stashedDbs[key] = state;
+        SyncStashedDbsCollection();
+        Log.Information("Stashed {Count} pending edit(s) for DB {Db}",
+            edits.Count, summary.Name);
+    }
+
+    /// <summary>
+    /// Re-applies a stash to the freshly loaded tree. Returns (restored, dropped)
+    /// so the caller can surface a status line when paths no longer resolve
+    /// (DB was edited externally between stash and restore).
+    /// </summary>
+    private (int restored, int dropped) RestoreStashFor(DataBlockSummary summary)
+    {
+        var key = StashKey(summary);
+        if (!_stashedDbs.TryGetValue(key, out var state)) return (0, 0);
+
+        int restored = 0;
+        int dropped = 0;
+        foreach (var edit in state.Edits)
+        {
+            var node = FindNodeByPath(edit.Path);
+            if (node is { IsLeaf: true })
+            {
+                // EditableStartValue setter routes through the same path as
+                // user typing, so validation + pending-list aggregation fires.
+                node.EditableStartValue = edit.PendingValue;
+                restored++;
+            }
+            else
+            {
+                dropped++;
+                Log.Information("Stashed edit dropped (path no longer exists): {Path}", edit.Path);
+            }
+        }
+
+        _stashedDbs.Remove(key);
+        SyncStashedDbsCollection();
+        Log.Information("Restored {Restored} stashed edit(s) for {Db} ({Dropped} dropped)",
+            restored, summary.Name, dropped);
+        return (restored, dropped);
+    }
+
+    /// <summary>Mirrors the dictionary into the bound <see cref="StashedDbs"/> collection.</summary>
+    private void SyncStashedDbsCollection()
+    {
+        StashedDbs.Clear();
+        foreach (var state in _stashedDbs.Values
+            .OrderBy(s => s.FolderPath, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(s => s.DbName, StringComparer.OrdinalIgnoreCase))
+        {
+            StashedDbs.Add(state);
+        }
+        OnPropertyChanged(nameof(HasStashedDbs));
+    }
+
+    /// <summary>
+    /// Yes-on-prompt path: commits staged edits to TIA via the existing Apply
+    /// path. Used by the DB-switcher 3-way prompt (#59) so the user's "Apply
+    /// before switching" choice goes through the same code path as the Apply
+    /// button and surfaces the same compile-prompt UX on inconsistent blocks.
+    /// </summary>
+    private bool ExecuteApplyForSwitch()
+    {
+        if (!ApplyCommand.CanExecute(null))
+        {
+            // Mirror the Apply button's gating — invalid pending edits, license
+            // limit, etc. shouldn't be silently bypassed by the switch flow.
+            StatusText = Res.Get("Status_DbSwitch_ApplyBlocked");
+            return false;
+        }
+
+        ExecuteApply();
+        // ExecuteApply leaves _hasPendingChanges=true and StatusText set on
+        // success; HasInlineErrors stays false. Treat success as "no errors
+        // on the tree after the call" — failed Apply paths set status and
+        // leave pending edits in place.
+        return PendingInlineEditCount == 0;
     }
 
 

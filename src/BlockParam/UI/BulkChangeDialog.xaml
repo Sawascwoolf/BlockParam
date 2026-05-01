@@ -1206,6 +1206,93 @@
                             </ItemsControl>
 
                             <!-- =========================================================
+                                 Section 3.5 — STASHED DBs (#59)
+                                 One section per DB the user switched away from
+                                 with un-applied edits. Header click switches
+                                 back to that DB (running the same Apply / Keep /
+                                 Cancel prompt for the now-current DB first).
+                                 ========================================================= -->
+                            <ItemsControl x:Name="StashedDbsList"
+                                          ItemsSource="{Binding StashedDbs}"
+                                          Visibility="{Binding HasStashedDbs, Converter={StaticResource BoolToVis}}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <StackPanel>
+                                            <!-- Section header (clickable: switches back to this DB). -->
+                                            <Border Background="#EEF0F3" BorderBrush="#B9BEC6"
+                                                    BorderThickness="0,1,0,1"
+                                                    ToolTip="{loc:Loc Inspector_StashedDb_Tooltip}">
+                                                <Button Background="Transparent" BorderThickness="0"
+                                                        Cursor="Hand" Padding="0"
+                                                        HorizontalContentAlignment="Stretch"
+                                                        Command="{Binding DataContext.SwitchToStashedDbCommand,
+                                                                  RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                                        CommandParameter="{Binding}">
+                                                    <DockPanel>
+                                                        <Viewbox DockPanel.Dock="Left" Width="13" Height="13"
+                                                                 Margin="6,0,6,0" VerticalAlignment="Center">
+                                                            <Path Data="{StaticResource IconClock}" Fill="#7c63b5"/>
+                                                        </Viewbox>
+                                                        <TextBlock DockPanel.Dock="Left"
+                                                                   Margin="0,6,0,6"
+                                                                   FontSize="10.5" FontWeight="Bold"
+                                                                   Foreground="#1e2227"
+                                                                   VerticalAlignment="Center">
+                                                            <Run Text="PENDING IN "/>
+                                                            <Run Text="{Binding DbName, Mode=OneWay}"/>
+                                                        </TextBlock>
+                                                        <Border DockPanel.Dock="Left" Margin="6,0,0,0" Padding="5,0"
+                                                                Background="#7c63b5" CornerRadius="8"
+                                                                VerticalAlignment="Center">
+                                                            <TextBlock Text="{Binding Count}"
+                                                                       FontSize="10" FontWeight="Bold"
+                                                                       Foreground="White"/>
+                                                        </Border>
+                                                        <TextBlock DockPanel.Dock="Right" Text="Switch back &#x2192;"
+                                                                   FontSize="10" FontWeight="SemiBold"
+                                                                   Foreground="#0b4fbf"
+                                                                   VerticalAlignment="Center"
+                                                                   Margin="0,0,8,0"/>
+                                                        <Border/>
+                                                    </DockPanel>
+                                                </Button>
+                                            </Border>
+                                            <!-- Per-edit rows: same shape as the active-DB Pending list,
+                                                 but inert (no jump, no undo — these belong to a different DB). -->
+                                            <ItemsControl ItemsSource="{Binding Edits}" Background="White">
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <Border BorderBrush="#E6E8EC" BorderThickness="0,0,0,1"
+                                                                Padding="10,4,10,4" Background="White">
+                                                            <StackPanel>
+                                                                <TextBlock Text="{Binding ShortPath}"
+                                                                           FontFamily="Consolas,Courier New" FontSize="10"
+                                                                           Foreground="#5b6471"
+                                                                           TextTrimming="CharacterEllipsis"/>
+                                                                <StackPanel Orientation="Horizontal" Margin="0,1,0,0">
+                                                                    <TextBlock Text="{Binding OriginalValue}"
+                                                                               FontFamily="Consolas,Courier New" FontSize="10"
+                                                                               Foreground="#8a929d"
+                                                                               TextDecorations="Strikethrough"/>
+                                                                    <TextBlock Text=" &#x2192; " FontSize="10" Foreground="#7c63b5"/>
+                                                                    <Border Padding="3,0" Background="#ece4f7">
+                                                                        <TextBlock Text="{Binding PendingValue}"
+                                                                                   FontFamily="Consolas,Courier New" FontSize="10"
+                                                                                   FontWeight="SemiBold"
+                                                                                   Foreground="#3f2d6b"/>
+                                                                    </Border>
+                                                                </StackPanel>
+                                                            </StackPanel>
+                                                        </Border>
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+                                        </StackPanel>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+
+                            <!-- =========================================================
                                  Section 4 — ISSUES (#26)
                                  Read-only findings: existing StartValues that already violate
                                  a configured rule. Click a row to jump to the member in the

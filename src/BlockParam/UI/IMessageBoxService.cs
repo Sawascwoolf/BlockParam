@@ -8,6 +8,22 @@ public interface IMessageBoxService
 {
     bool AskYesNo(string message, string title);
     void ShowError(string message, string title);
+
+    /// <summary>
+    /// 3-way prompt used when an action would lose pending work and the user
+    /// has three meaningful choices: commit (Yes), keep-but-don't-commit (No),
+    /// or back out entirely (Cancel). Used by the DB-switcher (#59) to ask
+    /// "apply staged edits to TIA before switching?" without forcing a destructive
+    /// 2-way collapse of "Apply" and "Keep stashed".
+    /// </summary>
+    YesNoCancelResult AskYesNoCancel(string message, string title);
+}
+
+public enum YesNoCancelResult
+{
+    Yes,
+    No,
+    Cancel,
 }
 
 /// <summary>
@@ -30,5 +46,19 @@ public class WpfMessageBoxService : IMessageBoxService
             message, title,
             System.Windows.MessageBoxButton.OK,
             System.Windows.MessageBoxImage.Error);
+    }
+
+    public YesNoCancelResult AskYesNoCancel(string message, string title)
+    {
+        var result = System.Windows.MessageBox.Show(
+            message, title,
+            System.Windows.MessageBoxButton.YesNoCancel,
+            System.Windows.MessageBoxImage.Warning);
+        return result switch
+        {
+            System.Windows.MessageBoxResult.Yes => YesNoCancelResult.Yes,
+            System.Windows.MessageBoxResult.No => YesNoCancelResult.No,
+            _ => YesNoCancelResult.Cancel,
+        };
     }
 }

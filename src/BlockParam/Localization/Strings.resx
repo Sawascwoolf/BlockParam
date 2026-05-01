@@ -713,6 +713,38 @@ Compile the block now?</value>
 Continue?</value>
     <comment>{0} = pending edit count, {1} = target DB name</comment>
   </data>
+  <!-- 3-way prompt fired by SwitchToDataBlock when staged edits exist (#59).
+       Yes = apply to TIA before switching, No = stash in memory and switch,
+       Cancel = stay on the current DB. -->
+  <data name="Dialog_SwitchDb_KeepConfirm_Title" xml:space="preserve">
+    <value>Apply staged changes before switching?</value>
+  </data>
+  <data name="Dialog_SwitchDb_KeepConfirm_Text" xml:space="preserve">
+    <value>You have {0} staged change(s) on '{1}'. Switching to '{2}'.
+
+Yes — Apply to TIA Portal now, then switch.
+No  — Keep them in memory; you'll see them in the inspector and can come back to '{1}' later this session.
+Cancel — Stay on '{1}'.</value>
+    <comment>{0} = pending edit count, {1} = current DB name, {2} = target DB name</comment>
+  </data>
+  <data name="Status_DbSwitch_ApplyBlocked" xml:space="preserve">
+    <value>Cannot apply staged edits — fix invalid entries or wait for the daily limit to reset.</value>
+  </data>
+  <data name="Status_DbSwitched_StashRestored" xml:space="preserve">
+    <value>Switched to {0} — restored {1} stashed edit(s).</value>
+    <comment>{0} = DB name, {1} = restored count</comment>
+  </data>
+  <data name="Status_DbSwitched_StashPartial" xml:space="preserve">
+    <value>Switched to {0} — restored {1} stashed edit(s); {2} no longer apply to the current DB structure.</value>
+    <comment>{0} = DB name, {1} = restored count, {2} = dropped count</comment>
+  </data>
+  <data name="Inspector_StashedDb_Header" xml:space="preserve">
+    <value>PENDING IN {0}</value>
+    <comment>{0} = stashed DB name (uppercased to match other section headers)</comment>
+  </data>
+  <data name="Inspector_StashedDb_Tooltip" xml:space="preserve">
+    <value>Click to switch back to this DB. The current DB's edits will be re-prompted.</value>
+  </data>
   <data name="Dialog_SwitchDb_LoadFailed" xml:space="preserve">
     <value>Failed to load '{0}':
 
