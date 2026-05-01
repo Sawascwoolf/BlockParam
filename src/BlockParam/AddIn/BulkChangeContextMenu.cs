@@ -3,6 +3,8 @@ using System.Threading;
 using Siemens.Engineering;
 using Siemens.Engineering.AddIn.Menu;
 using Siemens.Engineering.Compiler;
+using Siemens.Engineering.HW;
+using Siemens.Engineering.HW.Features;
 using Siemens.Engineering.SW;
 using Siemens.Engineering.SW.Blocks;
 using Siemens.Engineering.SW.Tags;
@@ -247,6 +249,19 @@ public class BulkChangeContextMenu : ContextMenuAddIn
             // Tag table export: lazy (only when needed by autocomplete). Scoped per project (#14).
             var tagTableDir = Path.Combine(tempDir, "TagTables");
 
+            // PLC count drives whether the header shows a "{PLC} / " prefix
+            // (#59 follow-up). Single-PLC projects — the ≈85% common case —
+            // get the cleaner "DB only" header; multi-PLC projects always
+            // get the prefix so users can tell which PLC they're operating on.
+            // Single source of truth for the displayed PLC name: empty when
+            // we want it suppressed, real name otherwise. Both enumeration
+            // and the VM's currentPlcName use this value, so the stash key
+            // (which includes PlcName) stays consistent across stash + restore.
+            var plcCount = CountPlcSoftwaresInProject(project);
+            var displayPlcName = plcSoftware != null && plcCount > 1
+                ? SafeGetPlcName(plcSoftware)
+                : "";
+
             // Open dialog
             var vm = new BulkChangeViewModel(
                 dbInfo, xml, analyzer, bulkService, usageTracker, configLoader,
@@ -301,9 +316,9 @@ public class BulkChangeContextMenu : ContextMenuAddIn
                 // otherwise enumeration has nowhere to walk and the dropdown
                 // stays hidden.
                 enumerateDataBlocks: plcSoftware != null
-                    ? new Func<IReadOnlyList<DataBlockSummary>>(() => EnumerateDataBlocks(plcSoftware))
+                    ? new Func<IReadOnlyList<DataBlockSummary>>(() => EnumerateDataBlocks(plcSoftware, displayPlcName))
                     : null,
-                currentPlcName: plcSoftware != null ? SafeGetPlcName(plcSoftware) : null,
+                currentPlcName: displayPlcName,
                 switchToDataBlock: plcSoftware != null
                     ? new Func<DataBlockSummary, string>(summary =>
                     {
@@ -399,13 +414,14 @@ public class BulkChangeContextMenu : ContextMenuAddIn
     /// (#59). Lazy + on-demand: only invoked when the user opens the dropdown,
     /// then cached for the dialog session by the VM.
     /// </summary>
-    private static IReadOnlyList<DataBlockSummary> EnumerateDataBlocks(PlcSoftware plcSoftware)
+    private static IReadOnlyList<DataBlockSummary> EnumerateDataBlocks(
+        PlcSoftware plcSoftware, string plcName)
     {
         // The dialog is scoped to the active PLC software unit (the parent of
-        // the right-clicked DB). DB names + numbers are unique per PLC, not
-        // project-wide — capturing PlcName on each summary keeps the stash key
-        // honest in case cross-PLC discovery is added later.
-        var plcName = SafeGetPlcName(plcSoftware);
+        // the right-clicked DB). The caller decides whether the PLC name is
+        // shown in the header (suppressed for single-PLC projects); we just
+        // stamp every summary with whatever they pass in so stash + restore
+        // both compute the same identity key.
         var list = new List<DataBlockSummary>();
         foreach (var (db, folderPath) in EnumerateDataBlocksRecursive(plcSoftware.BlockGroup, parentPath: null))
         {
@@ -427,6 +443,51 @@ public class BulkChangeContextMenu : ContextMenuAddIn
     {
         try { return plc.Name ?? ""; }
         catch { return ""; }
+    }
+
+    /// <summary>
+    /// Walks <paramref name="project"/>'s device tree and counts the
+    /// <see cref="PlcSoftware"/> instances. Used by the DB-switcher header
+    /// (#59 follow-up): in single-PLC projects (≈85% of users) the PLC name
+    /// would be redundant chrome, so we suppress the prefix unless the
+    /// project actually has more than one PLC. Conservative on errors —
+    /// returns 1 if anything throws so we just don't show the prefix.
+    /// </summary>
+    private static int CountPlcSoftwaresInProject(Project? project)
+    {
+        if (project == null) return 0;
+        int count = 0;
+        try
+        {
+            foreach (Device device in project.Devices)
+            {
+                foreach (var item in EnumerateDeviceItemsRecursive(device.DeviceItems))
+                {
+                    try
+                    {
+                        var container = item.GetService<SoftwareContainer>();
+                        if (container?.Software is PlcSoftware) count++;
+                    }
+                    catch { /* per-item failures shouldn't bring the whole walk down */ }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Warning(ex, "PLC count walk failed; suppressing PLC prefix");
+            return 1;
+        }
+        return count;
+    }
+
+    private static IEnumerable<DeviceItem> EnumerateDeviceItemsRecursive(DeviceItemComposition items)
+    {
+        foreach (DeviceItem item in items)
+        {
+            yield return item;
+            foreach (var child in EnumerateDeviceItemsRecursive(item.DeviceItems))
+                yield return child;
+        }
     }
 
     /// <summary>
