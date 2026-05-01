@@ -18,6 +18,11 @@ public partial class BulkChangeDialog : Window
     }
 
     private bool _suppressSelectionEvents;
+    // Set true while OnDbSwitcherSearchKeyDown navigates into the result list
+    // — prevents the resulting SelectionChanged from being interpreted as a
+    // user-initiated switch (#59 review: Down arrow used to accidentally
+    // switch to the first DB).
+    private bool _suppressDbSwitcherSelectionChanged;
 
     // Inspector collapse: remember the expanded width so we can restore it.
     // 340 matches the XAML default; overwritten once the user resizes.
@@ -32,13 +37,19 @@ public partial class BulkChangeDialog : Window
         viewModel.PropertyChanged += OnViewModelPropertyChanged;
         // VM raises this when "go to first change" picks a member to scroll
         // into view (#59 follow-up). VM owns the selection logic; we just
-        // do the visual scroll the ListView needs.
-        viewModel.RequestJumpToMember += target =>
+        // do the visual scroll the ListView needs. Named so we can unhook
+        // on close — matches the _licenseStateChangedHandler cleanup pattern.
+        Action<MemberNodeViewModel> jumpHandler = target =>
         {
             target.EnsureVisible();
             MemberListView.ScrollIntoView(target);
         };
-        Closed += (_, _) => viewModel.Dispose();
+        viewModel.RequestJumpToMember += jumpHandler;
+        Closed += (_, _) =>
+        {
+            viewModel.RequestJumpToMember -= jumpHandler;
+            viewModel.Dispose();
+        };
 
         // Briefly set Topmost to appear above TIA Portal, then release
         // so other windows (non-TIA) can go in front.
@@ -1019,7 +1030,13 @@ public partial class BulkChangeDialog : Window
             case Key.Down:
                 if (DbSwitcherList.Items.Count > 0)
                 {
-                    DbSwitcherList.SelectedIndex = 0;
+                    // Highlight the first row and move focus to it. The
+                    // SelectionChanged that fires here is *navigation*, not
+                    // a user pick — gate it so the switch only triggers on
+                    // explicit Enter / mouse click.
+                    _suppressDbSwitcherSelectionChanged = true;
+                    try { DbSwitcherList.SelectedIndex = 0; }
+                    finally { _suppressDbSwitcherSelectionChanged = false; }
                     var first = (ListBoxItem?)DbSwitcherList.ItemContainerGenerator.ContainerFromIndex(0);
                     first?.Focus();
                     e.Handled = true;
@@ -1056,9 +1073,12 @@ public partial class BulkChangeDialog : Window
     /// <summary>
     /// Mouse selection on the list switches to the picked DB. Resets the
     /// SelectedItem afterwards so the same row can be re-clicked later.
+    /// Skips programmatic selection changes (the Down-arrow navigation in
+    /// the search box) so navigation keys don't trigger an accidental switch.
     /// </summary>
     private void OnDbSwitcherSelectionChanged(object sender, SelectionChangedEventArgs e)
     {
+        if (_suppressDbSwitcherSelectionChanged) return;
         if (DataContext is not BulkChangeViewModel vm) return;
         if (sender is not ListBox lb) return;
         if (lb.SelectedItem is not Models.DataBlockSummary picked) return;

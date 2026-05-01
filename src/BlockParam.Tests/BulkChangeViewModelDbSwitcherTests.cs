@@ -532,11 +532,106 @@ public class BulkChangeViewModelDbSwitcherTests
     }
 
     [Fact]
+    public void StashOnA_KeepToB_ApplyToC_PreservesAStash()
+    {
+        // Regression for the mid-cycle Apply path (#59 review): user stages
+        // on A, picks Keep when switching to B (A enters the stash), then
+        // commits B and switches to C. A's stash must survive B's Apply —
+        // ExecuteApply only refreshes the active tree; the stash dictionary
+        // is independent and must stay untouched.
+        var aXml = TestFixtures.LoadXml("flat-db.xml");
+        var bXml = TestFixtures.LoadXml("nested-struct-db.xml");
+        var cXml = TestFixtures.LoadXml("mixed-types-db.xml");
+        var parser = new SimaticMLParser();
+        var aInfo = parser.Parse(aXml);
+        var bInfo = parser.Parse(bXml);
+        var cInfo = parser.Parse(cXml);
+
+        var enumerated = new[]
+        {
+            new DataBlockSummary(aInfo.Name, ""),
+            new DataBlockSummary(bInfo.Name, ""),
+            new DataBlockSummary(cInfo.Name, ""),
+        };
+
+        // Two-state fake: Keep then Yes (Apply) on the second prompt.
+        var queued = new Queue<YesNoCancelResult>(new[]
+        {
+            YesNoCancelResult.No,   // A → B: Keep (stash A)
+            YesNoCancelResult.Yes,  // B → C: Apply B
+        });
+        var mbx = new ScriptedMessageBox(queued);
+
+        var configLoader = new ConfigLoader(null);
+        var bulkService = new BulkChangeService(new ChangeLogger(), configLoader);
+        var usageTracker = Substitute.For<IUsageTracker>();
+        usageTracker.GetStatus().Returns(new UsageStatus(0, 3));
+        usageTracker.GetInlineStatus().Returns(new UsageStatus(0, 10));
+        usageTracker.RecordInlineEdit().Returns(true);
+        usageTracker.RecordUsage().Returns(true);
+
+        int applyCount = 0;
+        var vm = new BulkChangeViewModel(
+            aInfo, aXml,
+            new HierarchyAnalyzer(), bulkService, usageTracker, configLoader,
+            onApply: _ => applyCount++,
+            messageBox: mbx,
+            enumerateDataBlocks: () => enumerated,
+            switchToDataBlock: s =>
+            {
+                if (string.Equals(s.Name, aInfo.Name, StringComparison.Ordinal)) return aXml;
+                if (string.Equals(s.Name, bInfo.Name, StringComparison.Ordinal)) return bXml;
+                return cXml;
+            });
+
+        // 1. Stage on A.
+        vm.RootMembers.First(m => m.IsLeaf).EditableStartValue = "111";
+        vm.OpenDataBlocksDropdownCommand.Execute(null);
+
+        // 2. Switch to B with Keep — A goes to stash.
+        var bSummary = vm.FilteredDataBlocks.First(b => b.Name == bInfo.Name);
+        vm.SwitchToDataBlock(bSummary).Should().BeTrue();
+        vm.CurrentDataBlockName.Should().Be(bInfo.Name);
+        vm.StashedDbs.Should().HaveCount(1);
+
+        // 3. Stage on B and switch to C with Apply.
+        vm.RootMembers.First(m => m.IsLeaf).EditableStartValue = "222";
+        vm.OpenDataBlocksDropdownCommand.Execute(null);
+        var cSummary = vm.FilteredDataBlocks.First(b => b.Name == cInfo.Name);
+        vm.SwitchToDataBlock(cSummary).Should().BeTrue();
+
+        // Apply must have committed B.
+        applyCount.Should().Be(1);
+        vm.CurrentDataBlockName.Should().Be(cInfo.Name);
+
+        // A's stash must still be there — Apply on B is independent.
+        vm.StashedDbs.Should().HaveCount(1);
+        vm.StashedDbs[0].DbName.Should().Be(aInfo.Name);
+        vm.StashedDbs[0].Edits.Should().HaveCount(1);
+        vm.StashedDbs[0].Edits[0].PendingValue.Should().Be("111");
+    }
+
+    [Fact]
     public void GoToFirstChange_NothingQueued_CommandDisabled()
     {
         var h = CreateVm();
         h.Vm.HasAnyChanges.Should().BeFalse();
         h.Vm.GoToFirstChangeCommand.CanExecute(null).Should().BeFalse();
+    }
+
+    /// <summary>
+    /// Returns a scripted sequence of YesNoCancel answers — used when one
+    /// test runs through multiple prompts and each needs a different choice
+    /// (e.g. Keep on the first switch, Apply on the second).
+    /// </summary>
+    private class ScriptedMessageBox : IMessageBoxService
+    {
+        private readonly Queue<YesNoCancelResult> _answers;
+        public ScriptedMessageBox(Queue<YesNoCancelResult> answers) { _answers = answers; }
+        public bool AskYesNo(string message, string title) => true;
+        public void ShowError(string message, string title) { }
+        public YesNoCancelResult AskYesNoCancel(string message, string title) =>
+            _answers.Count > 0 ? _answers.Dequeue() : YesNoCancelResult.Cancel;
     }
 
     private class FakeMessageBox : IMessageBoxService
