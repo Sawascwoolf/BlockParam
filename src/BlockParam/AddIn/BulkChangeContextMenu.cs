@@ -11,6 +11,7 @@ using BlockParam.Config;
 using BlockParam.Diagnostics;
 using BlockParam.Licensing;
 using BlockParam.Localization;
+using BlockParam.Models;
 using BlockParam.Services;
 using BlockParam.SimaticML;
 using BlockParam.UI;
@@ -295,7 +296,55 @@ public class BulkChangeContextMenu : ContextMenuAddIn
                 udtResolver: udtResolver,
                 commentResolver: commentResolver,
                 editingLanguage: editingLanguage,
-                referenceLanguage: referenceLanguage);
+                referenceLanguage: referenceLanguage,
+                // DB-switcher (#59). Wired only when a PlcSoftware was found —
+                // otherwise enumeration has nowhere to walk and the dropdown
+                // stays hidden.
+                enumerateDataBlocks: plcSoftware != null
+                    ? new Func<IReadOnlyList<DataBlockSummary>>(() => EnumerateDataBlocks(plcSoftware))
+                    : null,
+                switchToDataBlock: plcSoftware != null
+                    ? new Func<DataBlockSummary, string>(summary =>
+                    {
+                        var newSelection = ResolveDataBlock(plcSoftware, summary)
+                            ?? throw new InvalidOperationException(
+                                $"DB '{summary.Name}' not found in project");
+
+                        // Re-export under the same compile-prompt guard the
+                        // initial export used (#19/#27) so an inconsistent
+                        // target DB surfaces the same UX, not a raw stack trace.
+                        string newXmlPath = null!;
+                        if (!TryExportWithCompilePrompt(newSelection, adapter,
+                                () => newXmlPath = adapter.ExportBlock(newSelection, tempDir)))
+                            throw new OperationCanceledException(
+                                "User declined to compile the inconsistent target DB.");
+
+                        var newXml = File.ReadAllText(newXmlPath);
+
+                        // Re-parse with the same resolvers so UDT setpoints /
+                        // comments and tag-table constants stay consistent
+                        // across the switch.
+                        IConstantResolver? newConstantResolver = null;
+                        if (Directory.Exists(tagTableDir)
+                            && Directory.GetFiles(tagTableDir, "*.xml").Length > 0)
+                        {
+                            newConstantResolver = new TagTableConstantResolver(
+                                new TagTableCache(new XmlFileTagTableReader(tagTableDir)));
+                        }
+                        var newParser = new SimaticMLParser(
+                            newConstantResolver, udtResolver, commentResolver);
+                        var newDbInfo = newParser.Parse(newXml);
+
+                        // Update the closure-captured locals so the next Apply
+                        // talks to the right DataBlock instance and uses the
+                        // new DB name in log messages / file paths.
+                        selection = newSelection;
+                        dbInfo = newDbInfo;
+
+                        Log.Information("DB switch: now editing {DbName}", newDbInfo.Name);
+                        return newXml;
+                    })
+                    : null);
 
             licenseService.StartHeartbeat();
             var dialog = new BulkChangeDialog(vm);
@@ -341,6 +390,64 @@ public class BulkChangeContextMenu : ContextMenuAddIn
         }
 
         return count;
+    }
+
+    /// <summary>
+    /// Walks the PLC's Program blocks tree and projects every Data Block to a
+    /// <see cref="DataBlockSummary"/> for the in-dialog DB-switcher dropdown
+    /// (#59). Lazy + on-demand: only invoked when the user opens the dropdown,
+    /// then cached for the dialog session by the VM.
+    /// </summary>
+    private static IReadOnlyList<DataBlockSummary> EnumerateDataBlocks(PlcSoftware plcSoftware)
+    {
+        var list = new List<DataBlockSummary>();
+        foreach (var (db, folderPath) in EnumerateDataBlocksRecursive(plcSoftware.BlockGroup, parentPath: null))
+        {
+            bool isInstance = false;
+            try { isInstance = db.GetType().Name.IndexOf("Instance", StringComparison.OrdinalIgnoreCase) >= 0; }
+            catch { /* type-name probe is best-effort — mislabeled badge is harmless */ }
+            list.Add(new DataBlockSummary(
+                db.Name,
+                folderPath ?? "",
+                blockType: isInstance ? "InstanceDB" : "GlobalDB",
+                isInstanceDb: isInstance));
+        }
+        Log.Information("DB enumeration: {Count} block(s) in project tree", list.Count);
+        return list;
+    }
+
+    /// <summary>
+    /// Resolves a <see cref="DataBlockSummary"/> back to a live
+    /// <see cref="DataBlock"/> by walking the same tree the dropdown was
+    /// populated from. Folder path is part of the match so two DBs with the
+    /// same name in different folders don't collide.
+    /// </summary>
+    private static DataBlock? ResolveDataBlock(PlcSoftware plcSoftware, DataBlockSummary summary)
+    {
+        foreach (var (db, folderPath) in EnumerateDataBlocksRecursive(plcSoftware.BlockGroup, parentPath: null))
+        {
+            if (string.Equals(db.Name, summary.Name, StringComparison.Ordinal)
+                && string.Equals(folderPath ?? "", summary.FolderPath ?? "", StringComparison.Ordinal))
+            {
+                return db;
+            }
+        }
+        return null;
+    }
+
+    private static IEnumerable<(DataBlock db, string? groupPath)> EnumerateDataBlocksRecursive(
+        PlcBlockGroup group, string? parentPath)
+    {
+        foreach (var block in group.Blocks)
+        {
+            if (block is DataBlock db) yield return (db, parentPath);
+        }
+        foreach (var sub in group.Groups)
+        {
+            var subPath = parentPath == null ? sub.Name : $"{parentPath}/{sub.Name}";
+            foreach (var entry in EnumerateDataBlocksRecursive(sub, subPath))
+                yield return entry;
+        }
     }
 
     private static IEnumerable<(PlcType type, string? groupPath)> EnumerateTypesRecursive(

@@ -46,6 +46,16 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     private TagTableCache? _tagTableCache;
 
     private DataBlockInfo _dataBlockInfo;
+    private string _title = "";
+    // DB-switcher state (#59). Lazy-loaded on first dropdown open and cached
+    // for the dialog session; the ↻ button re-enumerates on demand.
+    private readonly Func<IReadOnlyList<DataBlockSummary>>? _enumerateDataBlocks;
+    private readonly Func<DataBlockSummary, string>? _switchToDataBlock;
+    private IReadOnlyList<DataBlockSummary>? _availableDataBlocks;
+    private IReadOnlyList<DataBlockSummary> _filteredDataBlocks = Array.Empty<DataBlockSummary>();
+    private string _dataBlockSearchText = "";
+    private bool _isDataBlocksDropdownOpen;
+    private bool _isLoadingDataBlocks;
     private MemberNodeViewModel? _selectedFlatMember;
     private ScopeLevel? _selectedScope;
     private string _newValue = "";
@@ -106,7 +116,9 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         UdtSetPointResolver? udtResolver = null,
         UdtCommentResolver? commentResolver = null,
         string? editingLanguage = null,
-        string? referenceLanguage = null)
+        string? referenceLanguage = null,
+        Func<IReadOnlyList<DataBlockSummary>>? enumerateDataBlocks = null,
+        Func<DataBlockSummary, string>? switchToDataBlock = null)
     {
         _dispatcher = Dispatcher.CurrentDispatcher;
         _projectLanguages = projectLanguages is { Count: > 0 } ? projectLanguages : new[] { "en-GB" };
@@ -129,6 +141,8 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         _udtResolver = udtResolver;
         _commentResolver = commentResolver;
         _licenseService = licenseService;
+        _enumerateDataBlocks = enumerateDataBlocks;
+        _switchToDataBlock = switchToDataBlock;
         _autocompleteProvider = tagTableCache != null
             ? new AutocompleteProvider(configLoader, tagTableCache)
             : null;
@@ -145,7 +159,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         }
 
         var version = typeof(BulkChangeViewModel).Assembly.GetName().Version;
-        Title = $"BlockParam v{version}: {dataBlockInfo.Name}";
+        _title = $"BlockParam v{version}: {dataBlockInfo.Name}";
 
         InlineRuleExtractor.ApplyTo(configLoader.GetConfig(), dataBlockInfo);
 
@@ -185,6 +199,15 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         ClearManualSelectionCommand = new RelayCommand(ExecuteClearManualSelection,
             () => _manualSelectedPaths.Count > 0);
 
+        OpenDataBlocksDropdownCommand = new RelayCommand(ExecuteOpenDataBlocksDropdown,
+            () => _enumerateDataBlocks != null && _switchToDataBlock != null);
+        CloseDataBlocksDropdownCommand = new RelayCommand(() =>
+        {
+            IsDataBlocksDropdownOpen = false;
+        });
+        RefreshDataBlocksCommand = new RelayCommand(ExecuteRefreshDataBlocks,
+            () => _enumerateDataBlocks != null && !_isLoadingDataBlocks);
+
         if (_licenseService != null)
         {
             _licenseStateChangedHandler = (_, __) =>
@@ -204,7 +227,11 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
 
     // --- Properties ---
 
-    public string Title { get; }
+    public string Title
+    {
+        get => _title;
+        private set => SetProperty(ref _title, value);
+    }
     public ObservableCollection<MemberNodeViewModel> RootMembers { get; }
     public ObservableCollection<ScopeLevel> AvailableScopes { get; }
 
@@ -583,6 +610,201 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     public ICommand CollapseAllCommand { get; }
     public ICommand ClearManualSelectionCommand { get; }
     public ICommand ToggleInspectorCommand { get; }
+
+    // --- DB-switcher dropdown (#59) ---
+
+    public ICommand OpenDataBlocksDropdownCommand { get; }
+    public ICommand CloseDataBlocksDropdownCommand { get; }
+    public ICommand RefreshDataBlocksCommand { get; }
+
+    /// <summary>
+    /// True when the host wired up DB enumeration + switching callbacks.
+    /// The dropdown chevron / popup are hidden in tests + DevLauncher runs
+    /// where no project is available.
+    /// </summary>
+    public bool HasDataBlockSwitcher =>
+        _enumerateDataBlocks != null && _switchToDataBlock != null;
+
+    /// <summary>Header label — the DB name part of the title combo.</summary>
+    public string CurrentDataBlockName => _dataBlockInfo.Name;
+
+    public bool IsDataBlocksDropdownOpen
+    {
+        get => _isDataBlocksDropdownOpen;
+        set => SetProperty(ref _isDataBlocksDropdownOpen, value);
+    }
+
+    public bool IsLoadingDataBlocks
+    {
+        get => _isLoadingDataBlocks;
+        private set
+        {
+            if (SetProperty(ref _isLoadingDataBlocks, value))
+                OnPropertyChanged(nameof(ShowEmptyDataBlocksMessage));
+        }
+    }
+
+    /// <summary>Filtered, alphabetised list shown inside the dropdown.</summary>
+    public IReadOnlyList<DataBlockSummary> FilteredDataBlocks
+    {
+        get => _filteredDataBlocks;
+        private set
+        {
+            if (SetProperty(ref _filteredDataBlocks, value))
+                OnPropertyChanged(nameof(ShowEmptyDataBlocksMessage));
+        }
+    }
+
+    /// <summary>True when enumeration is settled but the filter matches nothing.</summary>
+    public bool ShowEmptyDataBlocksMessage =>
+        !_isLoadingDataBlocks
+        && _availableDataBlocks != null
+        && _filteredDataBlocks.Count == 0;
+
+    /// <summary>Type-to-filter text for the dropdown's search box.</summary>
+    public string DataBlockSearchText
+    {
+        get => _dataBlockSearchText;
+        set
+        {
+            if (SetProperty(ref _dataBlockSearchText, value))
+                ApplyDataBlockFilter();
+        }
+    }
+
+    /// <summary>
+    /// Lazy-load + cache enumeration result. Subsequent opens are O(filter)
+    /// — no re-enumeration unless the user clicks ↻ (#59).
+    /// </summary>
+    private void ExecuteOpenDataBlocksDropdown()
+    {
+        if (_availableDataBlocks == null)
+            LoadAvailableDataBlocks(force: false);
+
+        ApplyDataBlockFilter();
+        IsDataBlocksDropdownOpen = true;
+    }
+
+    private void ExecuteRefreshDataBlocks()
+    {
+        LoadAvailableDataBlocks(force: true);
+        ApplyDataBlockFilter();
+    }
+
+    private void LoadAvailableDataBlocks(bool force)
+    {
+        if (_enumerateDataBlocks == null) return;
+        if (!force && _availableDataBlocks != null) return;
+
+        IsLoadingDataBlocks = true;
+        try
+        {
+            // Enumeration runs on the UI thread today: TIA Openness calls
+            // must originate from the same thread that owns the project.
+            // The visible spinner + the dialog's scoped scope keep this OK
+            // for typical project sizes; if it ever bites we'd move the
+            // enumeration onto a background task with a marshalled call.
+            _availableDataBlocks = DataBlockListFilter.Sort(_enumerateDataBlocks());
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "DB enumeration failed");
+            _availableDataBlocks = Array.Empty<DataBlockSummary>();
+            StatusText = Res.Format("Status_DbEnumFailed", ex.Message);
+        }
+        finally
+        {
+            IsLoadingDataBlocks = false;
+        }
+    }
+
+    private void ApplyDataBlockFilter()
+    {
+        var source = _availableDataBlocks ?? (IReadOnlyList<DataBlockSummary>)Array.Empty<DataBlockSummary>();
+        FilteredDataBlocks = DataBlockListFilter.Filter(source, _dataBlockSearchText);
+    }
+
+    /// <summary>
+    /// Switch the dialog over to a different DB. Confirms before discarding
+    /// staged inline edits; closes the dropdown either way (#59 acceptance
+    /// criteria). Returns true on a successful switch, false on cancel /
+    /// no-op (already on the target DB).
+    /// </summary>
+    public bool SwitchToDataBlock(DataBlockSummary summary)
+    {
+        if (_switchToDataBlock == null) return false;
+        if (string.Equals(summary.Name, _dataBlockInfo.Name, StringComparison.Ordinal)
+            && string.Equals(summary.FolderPath, GetCurrentFolderPath(), StringComparison.Ordinal))
+        {
+            // Already on the target DB — just close the dropdown.
+            IsDataBlocksDropdownOpen = false;
+            return false;
+        }
+
+        if (PendingInlineEditCount > 0)
+        {
+            var message = Res.Format("Dialog_SwitchDb_DiscardConfirm_Text",
+                PendingInlineEditCount, summary.Name);
+            if (!_messageBox.AskYesNo(message, Res.Get("Dialog_SwitchDb_DiscardConfirm_Title")))
+                return false;
+            DiscardPendingSilent();
+        }
+
+        IsDataBlocksDropdownOpen = false;
+
+        try
+        {
+            var newXml = _switchToDataBlock(summary);
+            _currentXml = newXml;
+            // Reset selection / scope before RefreshTree — the path / scope
+            // we'd try to restore belong to a different DB and would log a
+            // warning every switch.
+            _selectedFlatMember = null;
+            _selectedScope = null;
+            _manualSelectedPaths.Clear();
+            _newValue = "";
+            _newValueTouched = false;
+            _suppressSuggestions = true;
+
+            RefreshTree(newXml, _udtResolver, _commentResolver);
+
+            _suppressSuggestions = false;
+            AvailableScopes.Clear();
+
+            var version = typeof(BulkChangeViewModel).Assembly.GetName().Version;
+            Title = $"BlockParam v{version}: {_dataBlockInfo.Name}";
+            OnPropertyChanged(nameof(CurrentDataBlockName));
+            OnPropertyChanged(nameof(SelectedFlatMember));
+            OnPropertyChanged(nameof(SelectedScope));
+            OnPropertyChanged(nameof(HasSelection));
+            OnPropertyChanged(nameof(HasScope));
+            OnPropertyChanged(nameof(NewValue));
+            OnPropertyChanged(nameof(SelectedMemberDisplay));
+
+            StatusText = Res.Format("Status_DbSwitched", _dataBlockInfo.Name);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "DB switch to {Name} failed", summary.Name);
+            StatusText = Res.Format("Status_DbSwitchFailed", summary.Name, ex.Message);
+            _messageBox.ShowError(
+                Res.Format("Dialog_SwitchDb_LoadFailed", summary.Name, ex.Message),
+                Res.Get("Rollback_Title"));
+            return false;
+        }
+    }
+
+    private string GetCurrentFolderPath()
+    {
+        // Best-effort: the cached list is the only place we can look up the
+        // current DB's folder path. Empty fallback keeps dedupe permissive.
+        if (_availableDataBlocks == null) return "";
+        return _availableDataBlocks
+            .FirstOrDefault(b => string.Equals(b.Name, _dataBlockInfo.Name, StringComparison.Ordinal))
+            ?.FolderPath ?? "";
+    }
+
 
     public bool IsInspectorCollapsed
     {

@@ -685,4 +685,50 @@ Compile the block now?</value>
   <data name="Zoom_Tooltip" xml:space="preserve">
     <value>Zoom (Ctrl + mouse wheel, Ctrl + / Ctrl −, Ctrl + 0 to reset)</value>
   </data>
+  <!-- DB-switcher dropdown (#59): in-dialog combo for switching between DBs without closing. -->
+  <data name="Dialog_SwitchDb_Tooltip" xml:space="preserve">
+    <value>Switch to a different Data Block in this project</value>
+  </data>
+  <data name="Dialog_SwitchDb_SearchHint" xml:space="preserve">
+    <value>Type to filter…</value>
+  </data>
+  <data name="Dialog_SwitchDb_Refresh" xml:space="preserve">
+    <value>Re-enumerate DBs from the project</value>
+  </data>
+  <data name="Dialog_SwitchDb_Loading" xml:space="preserve">
+    <value>Loading DBs…</value>
+  </data>
+  <data name="Dialog_SwitchDb_Empty" xml:space="preserve">
+    <value>No matching DB.</value>
+  </data>
+  <data name="Dialog_SwitchDb_InstanceBadge" xml:space="preserve">
+    <value>Instance</value>
+  </data>
+  <data name="Dialog_SwitchDb_DiscardConfirm_Title" xml:space="preserve">
+    <value>Discard staged changes?</value>
+  </data>
+  <data name="Dialog_SwitchDb_DiscardConfirm_Text" xml:space="preserve">
+    <value>You have {0} staged change(s) on this DB. Switching to '{1}' will discard them.
+
+Continue?</value>
+    <comment>{0} = pending edit count, {1} = target DB name</comment>
+  </data>
+  <data name="Dialog_SwitchDb_LoadFailed" xml:space="preserve">
+    <value>Failed to load '{0}':
+
+{1}</value>
+    <comment>{0} = DB name, {1} = error message</comment>
+  </data>
+  <data name="Status_DbSwitched" xml:space="preserve">
+    <value>Switched to {0}</value>
+    <comment>{0} = DB name</comment>
+  </data>
+  <data name="Status_DbSwitchFailed" xml:space="preserve">
+    <value>Could not switch to {0}: {1}</value>
+    <comment>{0} = DB name, {1} = error message</comment>
+  </data>
+  <data name="Status_DbEnumFailed" xml:space="preserve">
+    <value>Could not list DBs: {0}</value>
+    <comment>{0} = error message</comment>
+  </data>
 </root>

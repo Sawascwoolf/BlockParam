@@ -130,6 +130,98 @@
 
             <!-- Left: Toolbar + banner + legend + Member Table (stacked) -->
             <DockPanel Grid.Column="0" LastChildFill="True">
+                <!-- DB-switcher dropdown (#59): combo button shows the active DB
+                     name; popup lazy-enumerates project DBs on first open and
+                     caches the result. Hidden when no enumeration callback was
+                     wired (DevLauncher / unit tests). -->
+                <DockPanel DockPanel.Dock="Top" Margin="0,0,0,6"
+                           Visibility="{Binding HasDataBlockSwitcher, Converter={StaticResource BoolToVis}}">
+                    <Button x:Name="DbSwitcherButton"
+                            Click="OnDbSwitcherButtonClick"
+                            ToolTip="{loc:Loc Dialog_SwitchDb_Tooltip}"
+                            Background="White" BorderBrush="#CCC" BorderThickness="1"
+                            Padding="8,3,8,3"
+                            HorizontalAlignment="Left" MinWidth="240"
+                            HorizontalContentAlignment="Left" Cursor="Hand">
+                        <DockPanel LastChildFill="True">
+                            <Path DockPanel.Dock="Right" Data="M 0,0 L 8,0 L 4,6 Z"
+                                  Fill="#666" Width="8" Height="6"
+                                  VerticalAlignment="Center" Margin="8,0,0,0"/>
+                            <TextBlock Text="{Binding CurrentDataBlockName}"
+                                       FontWeight="SemiBold" VerticalAlignment="Center"/>
+                        </DockPanel>
+                    </Button>
+                    <Popup x:Name="DbSwitcherPopup"
+                           IsOpen="{Binding IsDataBlocksDropdownOpen, Mode=TwoWay}"
+                           PlacementTarget="{Binding ElementName=DbSwitcherButton}"
+                           Placement="Bottom" StaysOpen="False"
+                           AllowsTransparency="True" PopupAnimation="Fade"
+                           Opened="OnDbSwitcherPopupOpened">
+                        <Border Background="White" BorderBrush="#888" BorderThickness="1"
+                                MinWidth="320" MaxWidth="520">
+                            <DockPanel LastChildFill="True" Margin="6">
+                                <DockPanel DockPanel.Dock="Top" Margin="0,0,0,4">
+                                    <Button DockPanel.Dock="Right"
+                                            Command="{Binding RefreshDataBlocksCommand}"
+                                            ToolTip="{loc:Loc Dialog_SwitchDb_Refresh}"
+                                            Width="22" Height="22" Margin="4,0,0,0"
+                                            Background="Transparent" BorderThickness="0"
+                                            Cursor="Hand">
+                                        <Path Data="M17.65,6.35C16.2,4.9 14.21,4 12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20C15.73,20 18.84,17.45 19.73,14H17.65C16.83,16.33 14.61,18 12,18A6,6 0 0,1 6,12A6,6 0 0,1 12,6C13.66,6 15.14,6.69 16.22,7.78L13,11H20V4L17.65,6.35Z"
+                                              Fill="#666" Width="14" Height="14" Stretch="Uniform"/>
+                                    </Button>
+                                    <TextBox x:Name="DbSwitcherSearchBox"
+                                             Text="{Binding DataBlockSearchText, UpdateSourceTrigger=PropertyChanged}"
+                                             Padding="4,3" VerticalContentAlignment="Center"
+                                             KeyDown="OnDbSwitcherSearchKeyDown"/>
+                                </DockPanel>
+                                <TextBlock DockPanel.Dock="Top"
+                                           Text="{loc:Loc Dialog_SwitchDb_Loading}"
+                                           Foreground="#888" Margin="0,4"
+                                           HorizontalAlignment="Center"
+                                           Visibility="{Binding IsLoadingDataBlocks, Converter={StaticResource BoolToVis}}"/>
+                                <TextBlock DockPanel.Dock="Top"
+                                           Text="{loc:Loc Dialog_SwitchDb_Empty}"
+                                           Foreground="#888" Margin="0,4"
+                                           HorizontalAlignment="Center"
+                                           Visibility="{Binding ShowEmptyDataBlocksMessage, Converter={StaticResource BoolToVis}}"/>
+                                <ListBox x:Name="DbSwitcherList"
+                                         ItemsSource="{Binding FilteredDataBlocks}"
+                                         BorderThickness="0" MaxHeight="320"
+                                         VirtualizingStackPanel.IsVirtualizing="True"
+                                         SelectionChanged="OnDbSwitcherSelectionChanged"
+                                         KeyDown="OnDbSwitcherListKeyDown">
+                                    <ListBox.ItemContainerStyle>
+                                        <Style TargetType="ListBoxItem">
+                                            <Setter Property="Padding" Value="6,3"/>
+                                        </Style>
+                                    </ListBox.ItemContainerStyle>
+                                    <ListBox.ItemTemplate>
+                                        <DataTemplate>
+                                            <DockPanel LastChildFill="True">
+                                                <Border DockPanel.Dock="Right" Background="#EEE"
+                                                        Padding="4,0" CornerRadius="2" Margin="6,0,0,0"
+                                                        Visibility="{Binding IsInstanceDb, Converter={StaticResource BoolToVis}}">
+                                                    <TextBlock Text="{loc:Loc Dialog_SwitchDb_InstanceBadge}"
+                                                               FontSize="9" Foreground="#555"
+                                                               VerticalAlignment="Center"/>
+                                                </Border>
+                                                <TextBlock Text="{Binding FolderPath}" Foreground="#888"
+                                                           FontSize="10" Margin="6,0,0,0"
+                                                           VerticalAlignment="Center"
+                                                           DockPanel.Dock="Right"
+                                                           Visibility="{Binding FolderPath, Converter={StaticResource StringToVis}}"/>
+                                                <TextBlock Text="{Binding Name}" FontWeight="SemiBold"
+                                                           VerticalAlignment="Center"/>
+                                            </DockPanel>
+                                        </DataTemplate>
+                                    </ListBox.ItemTemplate>
+                                </ListBox>
+                            </DockPanel>
+                        </Border>
+                    </Popup>
+                </DockPanel>
+
                 <!-- Toolbar -->
                 <DockPanel DockPanel.Dock="Top" Margin="0,0,0,6">
                     <Button DockPanel.Dock="Right"

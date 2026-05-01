@@ -929,4 +929,100 @@ public partial class BulkChangeDialog : Window
             return;
         }
     }
+
+    // --- DB-switcher dropdown (#59) ---
+
+    /// <summary>
+    /// ToggleButton click on the combo. Opens the popup via the VM command
+    /// (which lazy-loads + caches the DB list on first open).
+    /// </summary>
+    private void OnDbSwitcherButtonClick(object sender, RoutedEventArgs e)
+    {
+        if (DataContext is not BulkChangeViewModel vm) return;
+        if (vm.IsDataBlocksDropdownOpen)
+        {
+            vm.IsDataBlocksDropdownOpen = false;
+            return;
+        }
+        if (vm.OpenDataBlocksDropdownCommand.CanExecute(null))
+            vm.OpenDataBlocksDropdownCommand.Execute(null);
+    }
+
+    /// <summary>Focus the search box and clear it whenever the popup opens.</summary>
+    private void OnDbSwitcherPopupOpened(object? sender, EventArgs e)
+    {
+        if (DataContext is BulkChangeViewModel vm)
+            vm.DataBlockSearchText = "";
+        DbSwitcherSearchBox.Focus();
+        Keyboard.Focus(DbSwitcherSearchBox);
+    }
+
+    /// <summary>
+    /// Search-box keys: ↓ jumps to the list, Enter accepts the first match,
+    /// Esc closes the popup.
+    /// </summary>
+    private void OnDbSwitcherSearchKeyDown(object sender, KeyEventArgs e)
+    {
+        if (DataContext is not BulkChangeViewModel vm) return;
+
+        switch (e.Key)
+        {
+            case Key.Escape:
+                vm.IsDataBlocksDropdownOpen = false;
+                e.Handled = true;
+                break;
+            case Key.Down:
+                if (DbSwitcherList.Items.Count > 0)
+                {
+                    DbSwitcherList.SelectedIndex = 0;
+                    var first = (ListBoxItem?)DbSwitcherList.ItemContainerGenerator.ContainerFromIndex(0);
+                    first?.Focus();
+                    e.Handled = true;
+                }
+                break;
+            case Key.Enter:
+                if (DbSwitcherList.Items.Count > 0
+                    && DbSwitcherList.Items[0] is Models.DataBlockSummary first)
+                {
+                    vm.SwitchToDataBlock(first);
+                    e.Handled = true;
+                }
+                break;
+        }
+    }
+
+    /// <summary>List keys: Esc closes; Enter switches to the highlighted DB.</summary>
+    private void OnDbSwitcherListKeyDown(object sender, KeyEventArgs e)
+    {
+        if (DataContext is not BulkChangeViewModel vm) return;
+
+        if (e.Key == Key.Escape)
+        {
+            vm.IsDataBlocksDropdownOpen = false;
+            e.Handled = true;
+        }
+        else if (e.Key == Key.Enter && DbSwitcherList.SelectedItem is Models.DataBlockSummary picked)
+        {
+            vm.SwitchToDataBlock(picked);
+            e.Handled = true;
+        }
+    }
+
+    /// <summary>
+    /// Mouse selection on the list switches to the picked DB. Resets the
+    /// SelectedItem afterwards so the same row can be re-clicked later.
+    /// </summary>
+    private void OnDbSwitcherSelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (DataContext is not BulkChangeViewModel vm) return;
+        if (sender is not ListBox lb) return;
+        if (lb.SelectedItem is not Models.DataBlockSummary picked) return;
+
+        // Defer so the popup can absorb the StaysOpen=False close gracefully.
+        Dispatcher.BeginInvoke(new Action(() =>
+        {
+            vm.SwitchToDataBlock(picked);
+            lb.SelectedItem = null;
+        }), System.Windows.Threading.DispatcherPriority.Background);
+    }
 }
