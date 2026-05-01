@@ -400,6 +400,11 @@ public class BulkChangeContextMenu : ContextMenuAddIn
     /// </summary>
     private static IReadOnlyList<DataBlockSummary> EnumerateDataBlocks(PlcSoftware plcSoftware)
     {
+        // The dialog is scoped to the active PLC software unit (the parent of
+        // the right-clicked DB). DB names + numbers are unique per PLC, not
+        // project-wide — capturing PlcName on each summary keeps the stash key
+        // honest in case cross-PLC discovery is added later.
+        var plcName = SafeGetPlcName(plcSoftware);
         var list = new List<DataBlockSummary>();
         foreach (var (db, folderPath) in EnumerateDataBlocksRecursive(plcSoftware.BlockGroup, parentPath: null))
         {
@@ -410,10 +415,17 @@ public class BulkChangeContextMenu : ContextMenuAddIn
                 db.Name,
                 folderPath ?? "",
                 blockType: isInstance ? "InstanceDB" : "GlobalDB",
-                isInstanceDb: isInstance));
+                isInstanceDb: isInstance,
+                plcName: plcName));
         }
-        Log.Information("DB enumeration: {Count} block(s) in project tree", list.Count);
+        Log.Information("DB enumeration: {Count} block(s) under PLC {Plc}", list.Count, plcName);
         return list;
+    }
+
+    private static string SafeGetPlcName(PlcSoftware plc)
+    {
+        try { return plc.Name ?? ""; }
+        catch { return ""; }
     }
 
     /// <summary>

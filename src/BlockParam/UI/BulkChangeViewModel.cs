@@ -763,9 +763,12 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     {
         if (_switchToDataBlock == null) return false;
         if (string.Equals(summary.Name, _dataBlockInfo.Name, StringComparison.Ordinal)
-            && string.Equals(summary.FolderPath, GetCurrentFolderPath(), StringComparison.Ordinal))
+            && string.Equals(summary.FolderPath, GetCurrentFolderPath(), StringComparison.Ordinal)
+            && string.Equals(summary.PlcName, GetCurrentPlcName(), StringComparison.Ordinal))
         {
-            // Already on the target DB — just close the dropdown.
+            // Already on the target DB — just close the dropdown. PLC is part
+            // of identity because two PLCs can share a DB name (a project with
+            // multiple PLCs can have two DB_Unit_A's at the root).
             IsDataBlocksDropdownOpen = false;
             return false;
         }
@@ -904,7 +907,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     }
 
     private static string StashKey(DataBlockSummary summary) =>
-        summary.FolderPath + "" + summary.Name;
+        $"{summary.PlcName}\u0001{summary.FolderPath}\u0001{summary.Name}";
 
     private void StashCurrentDb(IReadOnlyList<StashedEditEntry> edits)
     {

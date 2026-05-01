@@ -298,6 +298,56 @@ public class BulkChangeViewModelDbSwitcherTests
     }
 
     [Fact]
+    public void StashKey_IncludesPlcName_SoSameDbNameAcrossPlcsDoesNotCollide()
+    {
+        // Regression: DB names + numbers are unique within a software unit,
+        // not across the project. A multi-PLC project can have two
+        // DB_SharedName entries — they must stash to separate slots.
+        // We model this by enumerating two summaries with the same name +
+        // folder but different PlcName, then verify the stash key separates
+        // them by inspecting the StashedDbs collection identity.
+        var primary = TestFixtures.LoadXml("flat-db.xml");
+        var secondary = TestFixtures.LoadXml("nested-struct-db.xml");
+        var parser = new SimaticMLParser();
+        var primaryInfo = parser.Parse(primary);
+
+        // Two summaries that would alias under a (folder, name)-only key.
+        var enumerated = new[]
+        {
+            new DataBlockSummary(primaryInfo.Name, "", plcName: "PLC_Line1"),
+            new DataBlockSummary(parser.Parse(secondary).Name, "", plcName: "PLC_Line2"),
+        };
+
+        var configLoader = new ConfigLoader(null);
+        var bulkService = new BulkChangeService(new ChangeLogger(), configLoader);
+        var usageTracker = Substitute.For<IUsageTracker>();
+        usageTracker.GetStatus().Returns(new UsageStatus(0, 3));
+        usageTracker.GetInlineStatus().Returns(new UsageStatus(0, 10));
+        usageTracker.RecordInlineEdit().Returns(true);
+        var mbx = new FakeMessageBox(YesNoCancelResult.No);
+
+        var vm = new BulkChangeViewModel(
+            primaryInfo, primary,
+            new HierarchyAnalyzer(), bulkService, usageTracker, configLoader,
+            messageBox: mbx,
+            enumerateDataBlocks: () => enumerated,
+            switchToDataBlock: s =>
+                string.Equals(s.Name, primaryInfo.Name, StringComparison.Ordinal)
+                    ? primary
+                    : secondary);
+
+        // Stage on primary (PLC_Line1) and switch (Keep) → 1 stash.
+        vm.RootMembers.First(m => m.IsLeaf).EditableStartValue = "111";
+        vm.OpenDataBlocksDropdownCommand.Execute(null);
+        var second = vm.FilteredDataBlocks.First(b => b.Name != primaryInfo.Name);
+        vm.SwitchToDataBlock(second).Should().BeTrue();
+
+        vm.StashedDbs.Should().HaveCount(1);
+        vm.StashedDbs[0].Summary.PlcName.Should().Be("PLC_Line1",
+            "stash must record which PLC the edits came from");
+    }
+
+    [Fact]
     public void StashKeyedByNameAndFolder_TwoDbsSameNameDifferentFolders_StashIndependently()
     {
         // Two stashes both nominally "DB_X" but in different folders should
