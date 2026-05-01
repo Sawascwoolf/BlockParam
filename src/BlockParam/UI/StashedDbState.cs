@@ -28,6 +28,14 @@ public class StashedDbState
     public string DbName => Summary.Name;
     public string FolderPath => Summary.FolderPath;
     public int Count => Edits.Count;
+
+    /// <summary>
+    /// " / " when this stash carries a PLC name, otherwise empty. Lets the
+    /// XAML header ("PENDING IN {PLC} / {DB}") collapse the prefix without
+    /// a visibility converter when single-PLC hosts stash with PlcName="".
+    /// </summary>
+    public string PlcSeparator =>
+        string.IsNullOrEmpty(Summary.PlcName) ? "" : " / ";
 }
 
 /// <summary>

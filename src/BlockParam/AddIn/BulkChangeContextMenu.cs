@@ -303,6 +303,7 @@ public class BulkChangeContextMenu : ContextMenuAddIn
                 enumerateDataBlocks: plcSoftware != null
                     ? new Func<IReadOnlyList<DataBlockSummary>>(() => EnumerateDataBlocks(plcSoftware))
                     : null,
+                currentPlcName: plcSoftware != null ? SafeGetPlcName(plcSoftware) : null,
                 switchToDataBlock: plcSoftware != null
                     ? new Func<DataBlockSummary, string>(summary =>
                     {

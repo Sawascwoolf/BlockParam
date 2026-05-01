@@ -88,6 +88,41 @@ public class BulkChangeViewModelDbSwitcherTests
     }
 
     [Fact]
+    public void Header_ShowsPlcPrefix_WhenHostSuppliesPlcName()
+    {
+        // Host wires a PLC name → CurrentPlcName / HasCurrentPlcName flip on
+        // and the window title prefixes the DB with "{PLC} / ".
+        var primary = TestFixtures.LoadXml("flat-db.xml");
+        var parser = new SimaticMLParser();
+        var primaryInfo = parser.Parse(primary);
+
+        var configLoader = new ConfigLoader(null);
+        var bulkService = new BulkChangeService(new ChangeLogger(), configLoader);
+        var usageTracker = Substitute.For<IUsageTracker>();
+        usageTracker.GetStatus().Returns(new UsageStatus(0, 3));
+        usageTracker.GetInlineStatus().Returns(new UsageStatus(0, 10));
+
+        var vm = new BulkChangeViewModel(
+            primaryInfo, primary,
+            new HierarchyAnalyzer(), bulkService, usageTracker, configLoader,
+            currentPlcName: "PLC_Line1");
+
+        vm.HasCurrentPlcName.Should().BeTrue();
+        vm.CurrentPlcName.Should().Be("PLC_Line1");
+        vm.Title.Should().Contain("PLC_Line1 / " + primaryInfo.Name);
+    }
+
+    [Fact]
+    public void Header_OmitsPlcPrefix_WhenHostSuppliesNothing()
+    {
+        // Single-PLC / DevLauncher: no PlcName → no prefix, no badge.
+        var h = CreateVm();
+        h.Vm.HasCurrentPlcName.Should().BeFalse();
+        h.Vm.CurrentPlcName.Should().Be("");
+        h.Vm.Title.Should().NotContain(" / ");
+    }
+
+    [Fact]
     public void OpenDropdown_LazyEnumerates_ThenCachesForSubsequentOpens()
     {
         var h = CreateVm();

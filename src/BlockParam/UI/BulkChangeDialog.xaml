@@ -147,6 +147,17 @@
                             <Path DockPanel.Dock="Right" Data="M 0,0 L 8,0 L 4,6 Z"
                                   Fill="#666" Width="8" Height="6"
                                   VerticalAlignment="Center" Margin="8,0,0,0"/>
+                            <!-- Owning PLC: dim prefix so single-PLC users
+                                 see no extra noise (collapsed when empty)
+                                 and multi-PLC users always know which PLC
+                                 they're operating on (#59 follow-up). -->
+                            <TextBlock DockPanel.Dock="Left"
+                                       Foreground="#888" FontWeight="Normal"
+                                       VerticalAlignment="Center"
+                                       Visibility="{Binding HasCurrentPlcName, Converter={StaticResource BoolToVis}}">
+                                <Run Text="{Binding CurrentPlcName, Mode=OneWay}"/>
+                                <Run Text=" / "/>
+                            </TextBlock>
                             <TextBlock Text="{Binding CurrentDataBlockName}"
                                        FontWeight="SemiBold" VerticalAlignment="Center"/>
                         </DockPanel>
@@ -1239,6 +1250,13 @@
                                                                    Foreground="#1e2227"
                                                                    VerticalAlignment="Center">
                                                             <Run Text="PENDING IN "/>
+                                                            <!-- "{PLC} / " prefix: only visible when the
+                                                                 stash carries a non-empty PlcName so
+                                                                 single-PLC stashes stay tidy. -->
+                                                            <Run Text="{Binding Summary.PlcName, Mode=OneWay}"
+                                                                 Foreground="#5b6471"/>
+                                                            <Run Text="{Binding PlcSeparator, Mode=OneWay}"
+                                                                 Foreground="#5b6471"/>
                                                             <Run Text="{Binding DbName, Mode=OneWay}"/>
                                                         </TextBlock>
                                                         <Border DockPanel.Dock="Left" Margin="6,0,0,0" Padding="5,0"

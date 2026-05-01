@@ -56,6 +56,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     private string _dataBlockSearchText = "";
     private bool _isDataBlocksDropdownOpen;
     private bool _isLoadingDataBlocks;
+    private string _currentPlcName = "";
     // In-memory stash of pending edits keyed by DB identity (#59). Lets the
     // user switch DBs without committing or losing work — when they come back
     // to a stashed DB later in the same session, the edits restore.
@@ -123,7 +124,8 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         string? editingLanguage = null,
         string? referenceLanguage = null,
         Func<IReadOnlyList<DataBlockSummary>>? enumerateDataBlocks = null,
-        Func<DataBlockSummary, string>? switchToDataBlock = null)
+        Func<DataBlockSummary, string>? switchToDataBlock = null,
+        string? currentPlcName = null)
     {
         _dispatcher = Dispatcher.CurrentDispatcher;
         _projectLanguages = projectLanguages is { Count: > 0 } ? projectLanguages : new[] { "en-GB" };
@@ -148,6 +150,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         _licenseService = licenseService;
         _enumerateDataBlocks = enumerateDataBlocks;
         _switchToDataBlock = switchToDataBlock;
+        _currentPlcName = currentPlcName ?? "";
         _autocompleteProvider = tagTableCache != null
             ? new AutocompleteProvider(configLoader, tagTableCache)
             : null;
@@ -164,7 +167,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         }
 
         var version = typeof(BulkChangeViewModel).Assembly.GetName().Version;
-        _title = $"BlockParam v{version}: {dataBlockInfo.Name}";
+        _title = BuildTitle(version, _currentPlcName, dataBlockInfo.Name);
 
         InlineRuleExtractor.ApplyTo(configLoader.GetConfig(), dataBlockInfo);
 
@@ -649,6 +652,25 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     /// <summary>Header label — the DB name part of the title combo.</summary>
     public string CurrentDataBlockName => _dataBlockInfo.Name;
 
+    /// <summary>
+    /// Owning PLC name for the active DB, surfaced as a dim prefix in the
+    /// combo button and the window title so multi-PLC projects don't leave
+    /// the user guessing which PLC the dialog is operating on. Empty when
+    /// the host couldn't supply it (DevLauncher, single-PLC stand-ins).
+    /// </summary>
+    public string CurrentPlcName
+    {
+        get => _currentPlcName;
+        private set
+        {
+            if (SetProperty(ref _currentPlcName, value))
+                OnPropertyChanged(nameof(HasCurrentPlcName));
+        }
+    }
+
+    /// <summary>True when <see cref="CurrentPlcName"/> is non-empty.</summary>
+    public bool HasCurrentPlcName => !string.IsNullOrEmpty(_currentPlcName);
+
     public bool IsDataBlocksDropdownOpen
     {
         get => _isDataBlocksDropdownOpen;
@@ -764,7 +786,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         if (_switchToDataBlock == null) return false;
         if (string.Equals(summary.Name, _dataBlockInfo.Name, StringComparison.Ordinal)
             && string.Equals(summary.FolderPath, GetCurrentFolderPath(), StringComparison.Ordinal)
-            && string.Equals(summary.PlcName, GetCurrentPlcName(), StringComparison.Ordinal))
+            && string.Equals(summary.PlcName, _currentPlcName, StringComparison.Ordinal))
         {
             // Already on the target DB — just close the dropdown. PLC is part
             // of identity because two PLCs can share a DB name (a project with
@@ -829,8 +851,11 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             _suppressSuggestions = false;
             AvailableScopes.Clear();
 
+            // Pull the new PLC name off the summary the host gave us — it
+            // already carries the right value from enumeration.
+            CurrentPlcName = summary.PlcName ?? "";
             var version = typeof(BulkChangeViewModel).Assembly.GetName().Version;
-            Title = $"BlockParam v{version}: {_dataBlockInfo.Name}";
+            Title = BuildTitle(version, _currentPlcName, _dataBlockInfo.Name);
             OnPropertyChanged(nameof(CurrentDataBlockName));
             OnPropertyChanged(nameof(SelectedFlatMember));
             OnPropertyChanged(nameof(SelectedScope));
@@ -915,13 +940,27 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             _dataBlockInfo.Name,
             GetCurrentFolderPath(),
             blockType: _dataBlockInfo.BlockType,
-            isInstanceDb: string.Equals(_dataBlockInfo.BlockType, "InstanceDB", StringComparison.Ordinal));
+            isInstanceDb: string.Equals(_dataBlockInfo.BlockType, "InstanceDB", StringComparison.Ordinal),
+            plcName: _currentPlcName);
         var key = StashKey(summary);
         var state = new StashedDbState(summary, edits);
         _stashedDbs[key] = state;
         SyncStashedDbsCollection();
-        Log.Information("Stashed {Count} pending edit(s) for DB {Db}",
-            edits.Count, summary.Name);
+        Log.Information("Stashed {Count} pending edit(s) for DB {Db} (PLC {Plc})",
+            edits.Count, summary.Name,
+            string.IsNullOrEmpty(summary.PlcName) ? "<unset>" : summary.PlcName);
+    }
+
+    /// <summary>
+    /// Builds the dialog window title — adds a "<c>{PLC} / </c>" prefix to the
+    /// DB name when a PLC name is known so multi-PLC projects don't leave
+    /// the user guessing which software unit they're operating on. Single-PLC
+    /// hosts (DevLauncher) pass an empty PLC name and the prefix is dropped.
+    /// </summary>
+    private static string BuildTitle(System.Version? version, string plcName, string dbName)
+    {
+        var location = string.IsNullOrEmpty(plcName) ? dbName : $"{plcName} / {dbName}";
+        return $"BlockParam v{version}: {location}";
     }
 
     /// <summary>
