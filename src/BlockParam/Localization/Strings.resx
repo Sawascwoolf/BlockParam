@@ -676,6 +676,27 @@ Compile the block now?</value>
     <value>Do you want to save {0} pending change(s) before closing?</value>
     <comment>{0} = number of pending inline edits</comment>
   </data>
+  <!-- Combined prompt fired by OnClosing when both active-DB and stashed-DB
+       edits exist (#59 follow-up). Yes applies the active DB only — stashed
+       edits still get discarded; the message spells that out so the user
+       picks knowingly. -->
+  <data name="Dialog_UnsavedChanges_Prompt_WithStash" xml:space="preserve">
+    <value>You have {0} pending change(s) on the current DB and {1} stashed change(s) in other DB(s): {2}.
+
+Yes — Apply the current DB now (stashed changes in other DBs are still discarded on close).
+No  — Discard everything and close.
+Cancel — Stay in the dialog.</value>
+    <comment>{0} = active pending count, {1} = stashed count, {2} = comma-separated stashed DB names</comment>
+  </data>
+  <!-- Stash-only close prompt (#59 follow-up). Active DB is clean but
+       stashes from earlier switches still hold edits the user hasn't
+       reviewed. Yes/No is enough — there's nothing to "Apply" here. -->
+  <data name="Dialog_UnsavedChanges_StashOnly" xml:space="preserve">
+    <value>You have {0} stashed change(s) in other DB(s): {1}.
+
+Closing the dialog will discard them. Close anyway?</value>
+    <comment>{0} = stashed count, {1} = comma-separated stashed DB names</comment>
+  </data>
   <!-- Fallback shown if license activation returns an unrecognised status (defensive — switch is exhaustive today). -->
   <data name="License_UnknownError" xml:space="preserve">
     <value>Unknown error</value>

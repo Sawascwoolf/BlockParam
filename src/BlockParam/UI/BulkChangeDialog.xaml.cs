@@ -895,11 +895,28 @@ public partial class BulkChangeDialog : Window
         base.OnClosing(e);
         if (DataContext is not BulkChangeViewModel vm) return;
 
-        // Unsaved pending edits (yellow) — ask user before closing
-        if (vm.PendingInlineEditCount > 0)
+        // Unsaved pending edits — across the active DB *and* any stashed DBs.
+        // Stash-only loss used to be silent (#59 follow-up); now both states
+        // route through the close-confirm so the user is never surprised by
+        // disappearing work.
+        var active = vm.PendingInlineEditCount;
+        var stashedCount = 0;
+        string stashedDbList = "";
+        if (vm.StashedDbs.Count > 0)
         {
+            stashedCount = vm.StashedDbs.Sum(s => s.Count);
+            stashedDbList = string.Join(", ", vm.StashedDbs.Select(s => s.DbName));
+        }
+
+        if (active > 0)
+        {
+            var message = stashedCount > 0
+                ? Res.Format("Dialog_UnsavedChanges_Prompt_WithStash",
+                    active, stashedCount, stashedDbList)
+                : Res.Format("Dialog_UnsavedChanges_Prompt", active);
+
             var result = MessageBox.Show(
-                Res.Format("Dialog_UnsavedChanges_Prompt", vm.PendingInlineEditCount),
+                message,
                 Res.Get("Dialog_UnsavedChanges_Title"),
                 MessageBoxButton.YesNoCancel,
                 MessageBoxImage.Warning);
@@ -907,6 +924,11 @@ public partial class BulkChangeDialog : Window
             switch (result)
             {
                 case MessageBoxResult.Yes:
+                    // Apply commits the active DB only. Stashed edits in other
+                    // DBs still get discarded on close — the prompt text spells
+                    // that out so the user picks knowingly. Apply-everything-
+                    // across-stashes would need a per-DB switch+commit loop,
+                    // which is a much bigger feature.
                     vm.ApplyCommand.Execute(null);
                     // Apply may have bailed out (e.g. user declined the compile prompt on an
                     // inconsistent block). Pending edits are preserved in that case — keep
@@ -926,6 +948,21 @@ public partial class BulkChangeDialog : Window
                 case MessageBoxResult.Cancel:
                     e.Cancel = true;
                     return;
+            }
+        }
+        else if (stashedCount > 0)
+        {
+            // Active is clean but stashes exist. There's nothing to "Apply"
+            // here, so a 3-way prompt would just confuse — Yes/No suffices.
+            var result = MessageBox.Show(
+                Res.Format("Dialog_UnsavedChanges_StashOnly", stashedCount, stashedDbList),
+                Res.Get("Dialog_UnsavedChanges_Title"),
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Warning);
+            if (result != MessageBoxResult.Yes)
+            {
+                e.Cancel = true;
+                return;
             }
         }
 
