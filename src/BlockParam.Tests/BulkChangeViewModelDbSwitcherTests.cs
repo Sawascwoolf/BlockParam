@@ -427,6 +427,118 @@ public class BulkChangeViewModelDbSwitcherTests
         vm.StashedDbs[0].FolderPath.Should().Be("");
     }
 
+    [Fact]
+    public void RestoreStashedEdits_DoesNotConsumeInlineEditQuota()
+    {
+        // Free-tier users near the daily inline-edit cap could lose half a
+        // restored stash if RestoreStashFor went through OnSingleValueEdited.
+        // Verify the no-quota path: usage tracker's RecordInlineEdit must NOT
+        // be called for the restored entries.
+        var primary = TestFixtures.LoadXml("flat-db.xml");
+        var secondary = TestFixtures.LoadXml("nested-struct-db.xml");
+        var parser = new SimaticMLParser();
+        var primaryInfo = parser.Parse(primary);
+
+        var enumerated = new[]
+        {
+            new DataBlockSummary(primaryInfo.Name, ""),
+            new DataBlockSummary(parser.Parse(secondary).Name, "Recipe"),
+        };
+
+        var configLoader = new ConfigLoader(null);
+        var bulkService = new BulkChangeService(new ChangeLogger(), configLoader);
+        var usageTracker = Substitute.For<IUsageTracker>();
+        usageTracker.GetStatus().Returns(new UsageStatus(0, 3));
+        usageTracker.GetInlineStatus().Returns(new UsageStatus(0, 10));
+        usageTracker.RecordInlineEdit().Returns(true);
+        var mbx = new FakeMessageBox(YesNoCancelResult.No);
+
+        var vm = new BulkChangeViewModel(
+            primaryInfo, primary,
+            new HierarchyAnalyzer(), bulkService, usageTracker, configLoader,
+            messageBox: mbx,
+            enumerateDataBlocks: () => enumerated,
+            switchToDataBlock: s =>
+                string.Equals(s.Name, primaryInfo.Name, StringComparison.Ordinal)
+                    ? primary
+                    : secondary);
+
+        // Stage on primary (consumes 1 inline-edit slot — that's expected).
+        vm.RootMembers.First(m => m.IsLeaf).EditableStartValue = "777";
+        usageTracker.Received(1).RecordInlineEdit();
+        usageTracker.ClearReceivedCalls();
+
+        // Switch away (Keep) → stash. No inline edits on the new tree, so
+        // no further RecordInlineEdit calls should happen yet.
+        vm.OpenDataBlocksDropdownCommand.Execute(null);
+        var target = vm.FilteredDataBlocks.First(b => b.Name != primaryInfo.Name);
+        vm.SwitchToDataBlock(target).Should().BeTrue();
+        usageTracker.DidNotReceive().RecordInlineEdit();
+
+        // Switch back: the stash is restored. RecordInlineEdit MUST NOT fire
+        // for the restored row — that was the bug.
+        var back = vm.FilteredDataBlocks.First(b => b.Name == primaryInfo.Name);
+        vm.SwitchToDataBlock(back).Should().BeTrue();
+
+        usageTracker.DidNotReceive().RecordInlineEdit();
+        vm.PendingInlineEditCount.Should().Be(1, "the stashed edit was restored to the live tree");
+    }
+
+    [Fact]
+    public void GoToFirstChange_ActivePending_FiresJumpEventForFirstPendingNode()
+    {
+        var h = CreateVm();
+        // Stage one inline edit on the active DB.
+        var leaf = h.Vm.RootMembers.First(m => m.IsLeaf);
+        leaf.EditableStartValue = "999";
+
+        MemberNodeViewModel? jumpedTo = null;
+        h.Vm.RequestJumpToMember += node => jumpedTo = node;
+
+        h.Vm.HasAnyChanges.Should().BeTrue();
+        h.Vm.GoToFirstChangeCommand.CanExecute(null).Should().BeTrue();
+
+        h.Vm.GoToFirstChangeCommand.Execute(null);
+
+        jumpedTo.Should().NotBeNull("active-DB pending wins — view should scroll to the first pending member");
+        jumpedTo!.Path.Should().Be(leaf.Path);
+        h.Vm.SelectedFlatMember.Should().Be(leaf);
+    }
+
+    [Fact]
+    public void GoToFirstChange_OnlyStashes_SwitchesToFirstStashedDb()
+    {
+        var h = CreateVm(promptResult: YesNoCancelResult.No);
+
+        // Stage on primary, switch away (Keep) so the active DB ends up clean.
+        var leaf = h.Vm.RootMembers.First(m => m.IsLeaf);
+        var originalDb = h.Vm.CurrentDataBlockName;
+        leaf.EditableStartValue = "888";
+
+        h.Vm.OpenDataBlocksDropdownCommand.Execute(null);
+        var target = h.Vm.FilteredDataBlocks.First(b => b.Name != originalDb);
+        h.Vm.SwitchToDataBlock(target).Should().BeTrue();
+        h.Vm.PendingInlineEditCount.Should().Be(0);
+        h.Vm.HasStashedDbs.Should().BeTrue();
+
+        // Active is clean, stash exists → GoToFirstChange should switch BACK
+        // to the stashed DB (which is the original primary).
+        h.Vm.HasAnyChanges.Should().BeTrue();
+        h.Vm.GoToFirstChangeCommand.Execute(null);
+
+        h.Vm.CurrentDataBlockName.Should().Be(originalDb);
+        h.Vm.PendingInlineEditCount.Should().Be(1, "stash restored on switch-back");
+        h.Vm.HasStashedDbs.Should().BeFalse();
+    }
+
+    [Fact]
+    public void GoToFirstChange_NothingQueued_CommandDisabled()
+    {
+        var h = CreateVm();
+        h.Vm.HasAnyChanges.Should().BeFalse();
+        h.Vm.GoToFirstChangeCommand.CanExecute(null).Should().BeFalse();
+    }
+
     private class FakeMessageBox : IMessageBoxService
     {
         private readonly YesNoCancelResult _result;

@@ -220,6 +220,8 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         {
             if (parameter is StashedDbState stash) SwitchToDataBlock(stash.Summary);
         });
+        GoToFirstChangeCommand = new RelayCommand(ExecuteGoToFirstChange,
+            () => HasAnyChanges);
 
         if (_licenseService != null)
         {
@@ -640,6 +642,22 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     public ICommand CloseDataBlocksDropdownCommand { get; }
     public ICommand RefreshDataBlocksCommand { get; }
     public ICommand SwitchToStashedDbCommand { get; }
+    public ICommand GoToFirstChangeCommand { get; }
+
+    /// <summary>
+    /// True when there's any work to jump to — either an active-DB pending
+    /// edit or a stashed DB. Drives the visibility of the "jump to changes"
+    /// header button so it disappears when nothing's queued.
+    /// </summary>
+    public bool HasAnyChanges => PendingInlineEditCount > 0 || HasStashedDbs;
+
+    /// <summary>
+    /// Raised when <see cref="GoToFirstChangeCommand"/> needs the view to
+    /// scroll + select a member in the live tree. The view subscribes and
+    /// drives <c>ListView.ScrollIntoView</c> + selection — the VM doesn't
+    /// know about the visual list (#59 follow-up).
+    /// </summary>
+    public event Action<MemberNodeViewModel>? RequestJumpToMember;
 
     /// <summary>
     /// True when the host wired up DB enumeration + switching callbacks.
@@ -934,6 +952,31 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     private static string StashKey(DataBlockSummary summary) =>
         $"{summary.PlcName}\u0001{summary.FolderPath}\u0001{summary.Name}";
 
+    /// <summary>
+    /// Jumps to the first DB with pending work (#59 follow-up). Active-DB
+    /// pending edits win — scroll + select the first one. If the active DB
+    /// is clean but stashes exist, switch to the first stashed DB and let
+    /// the restore path surface its edits.
+    /// </summary>
+    private void ExecuteGoToFirstChange()
+    {
+        if (PendingInlineEditCount > 0)
+        {
+            var first = PendingEdits.FirstOrDefault();
+            if (first != null)
+            {
+                first.Node.EnsureVisible();
+                SelectedFlatMember = first.Node;
+                RequestJumpToMember?.Invoke(first.Node);
+            }
+            return;
+        }
+
+        var firstStash = StashedDbs.FirstOrDefault();
+        if (firstStash != null)
+            SwitchToDataBlock(firstStash.Summary);
+    }
+
     private void StashCurrentDb(IReadOnlyList<StashedEditEntry> edits)
     {
         var summary = new DataBlockSummary(
@@ -975,14 +1018,22 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
 
         int restored = 0;
         int dropped = 0;
+        var validator = BuildValidator();
         foreach (var edit in state.Edits)
         {
             var node = FindNodeByPath(edit.Path);
             if (node is { IsLeaf: true })
             {
-                // EditableStartValue setter routes through the same path as
-                // user typing, so validation + pending-list aggregation fires.
-                node.EditableStartValue = edit.PendingValue;
+                // Restore-without-quota: setting EditableStartValue would route
+                // through OnSingleValueEdited and consume one inline-edit slot
+                // per restored row, which would silently drop edits mid-restore
+                // for free-tier users near the daily cap. Set PendingValue
+                // directly + run the same validator OnSingleValueEdited uses
+                // so HasInlineError / InlineErrorMessage stay accurate.
+                node.PendingValue = edit.PendingValue;
+                var error = validator.Validate(node.Model, edit.PendingValue);
+                node.HasInlineError = error != null;
+                node.InlineErrorMessage = error;
                 restored++;
             }
             else
@@ -994,6 +1045,15 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
 
         _stashedDbs.Remove(key);
         SyncStashedDbsCollection();
+        // OnSingleValueEdited normally drives these refreshes; we bypassed it
+        // for the no-quota path so the aggregated views (PendingEdits list,
+        // BulkPreview, sidebar badges) need an explicit nudge.
+        if (restored > 0)
+        {
+            RefreshPendingAndPreview();
+            OnPropertyChanged(nameof(HasInlineErrors));
+            RaiseInvalidPendingChanged();
+        }
         Log.Information("Restored {Restored} stashed edit(s) for {Db} ({Dropped} dropped)",
             restored, summary.Name, dropped);
         return (restored, dropped);
@@ -1010,6 +1070,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             StashedDbs.Add(state);
         }
         OnPropertyChanged(nameof(HasStashedDbs));
+        OnPropertyChanged(nameof(HasAnyChanges));
     }
 
     /// <summary>
@@ -1580,6 +1641,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     {
         OnPropertyChanged(nameof(PendingInlineEditCount));
         OnPropertyChanged(nameof(PendingStatusText));
+        OnPropertyChanged(nameof(HasAnyChanges));
         ComputeBulkPreview();
         RebuildPendingEdits();
     }

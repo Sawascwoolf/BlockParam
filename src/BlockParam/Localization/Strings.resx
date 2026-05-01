@@ -745,6 +745,14 @@ Cancel — Stay on '{1}'.</value>
   <data name="Inspector_StashedDb_Tooltip" xml:space="preserve">
     <value>Click to switch back to this DB. The current DB's edits will be re-prompted.</value>
   </data>
+  <!-- "Jump to changes" header button (#59 follow-up). Visible only while
+       there's something to jump to (active pending or a stashed DB). -->
+  <data name="Dialog_GoToFirstChange_Label" xml:space="preserve">
+    <value>Jump to changes</value>
+  </data>
+  <data name="Dialog_GoToFirstChange_Tooltip" xml:space="preserve">
+    <value>Jump to the first pending change — in the current DB if any, otherwise switches to the first stashed DB.</value>
+  </data>
   <data name="Dialog_SwitchDb_LoadFailed" xml:space="preserve">
     <value>Failed to load '{0}':
 

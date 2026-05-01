@@ -162,6 +162,22 @@
                                        FontWeight="SemiBold" VerticalAlignment="Center"/>
                         </DockPanel>
                     </Button>
+                    <!-- Quick "jump to first change" button (#59 follow-up).
+                         Auto-collapses when nothing's queued so the header
+                         stays clean in the empty state. Active-DB pending
+                         wins; otherwise switches to the first stashed DB. -->
+                    <Button Margin="6,0,0,0" Padding="8,3"
+                            Background="Transparent" BorderBrush="#7c63b5"
+                            BorderThickness="1" Foreground="#3f2d6b"
+                            Cursor="Hand" FontSize="11" FontWeight="SemiBold"
+                            Command="{Binding GoToFirstChangeCommand}"
+                            Visibility="{Binding HasAnyChanges, Converter={StaticResource BoolToVis}}"
+                            ToolTip="{loc:Loc Dialog_GoToFirstChange_Tooltip}">
+                        <TextBlock>
+                            <Run Text="↓ "/>
+                            <Run Text="{loc:Loc Dialog_GoToFirstChange_Label}"/>
+                        </TextBlock>
+                    </Button>
                     <Popup x:Name="DbSwitcherPopup"
                            IsOpen="{Binding IsDataBlocksDropdownOpen, Mode=TwoWay}"
                            PlacementTarget="{Binding ElementName=DbSwitcherButton}"

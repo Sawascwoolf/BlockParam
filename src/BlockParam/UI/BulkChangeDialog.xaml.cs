@@ -30,6 +30,14 @@ public partial class BulkChangeDialog : Window
         viewModel.RequestClose += () => Close();
         viewModel.FlatListRefreshed += RehydrateManualSelection;
         viewModel.PropertyChanged += OnViewModelPropertyChanged;
+        // VM raises this when "go to first change" picks a member to scroll
+        // into view (#59 follow-up). VM owns the selection logic; we just
+        // do the visual scroll the ListView needs.
+        viewModel.RequestJumpToMember += target =>
+        {
+            target.EnsureVisible();
+            MemberListView.ScrollIntoView(target);
+        };
         Closed += (_, _) => viewModel.Dispose();
 
         // Briefly set Topmost to appear above TIA Portal, then release
