@@ -15,6 +15,7 @@
         <local:NullToVisibilityConverter x:Key="NullToVis"/>
         <local:StringNotEmptyToVisibilityConverter x:Key="StringToVis"/>
         <local:InvertBoolConverter x:Key="InvertBool"/>
+        <local:BoolToGridLengthConverter x:Key="BoolToGridLength"/>
 
         <!-- Suggestion row style: hover-preview paints the entry as if the
              mouse were over it. Set by capture scripts so a still frame
@@ -559,14 +560,31 @@
                         </Grid>
                     </StackPanel>
 
-                    <!-- Expanded content: three stacked sections -->
-                    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
-                                  Visibility="{Binding IsInspectorExpanded, Converter={StaticResource BoolToVis}}">
-                        <StackPanel>
+                    <!-- Expanded content: per-section header/body row pairs (#64).
+                         Section headers always sit in Auto rows so they stay pinned
+                         regardless of how long any one body grows. List bodies share
+                         remaining vertical space (* rows) and scroll inside their
+                         own bounded ScrollViewer instead of pushing other section
+                         headers off the top. -->
+                    <Grid Visibility="{Binding IsInspectorExpanded, Converter={StaticResource BoolToVis}}">
+                        <Grid.RowDefinitions>
+                            <!-- Section 1: BULK EDIT — Auto-sized form (header + body
+                                 collapse together inside the section's own Grid) -->
+                            <RowDefinition Height="Auto"/>
+                            <!-- Section 2: BULK PREVIEW — header (Auto) + body (* / 0) -->
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="{Binding IsBulkPreviewExpanded, Converter={StaticResource BoolToGridLength}}" MinHeight="0"/>
+                            <!-- Section 3: PENDING EDITS — header (Auto) + body (* / 0) -->
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="{Binding IsPendingExpanded, Converter={StaticResource BoolToGridLength}}" MinHeight="0"/>
+                            <!-- Section 4: ISSUES — header (Auto) + body (* / 0) -->
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="{Binding IsIssuesExpanded, Converter={StaticResource BoolToGridLength}}" MinHeight="0"/>
+                        </Grid.RowDefinitions>
                             <!-- =========================================================
                                  Section 1 — BULK EDIT (input)
                                  ========================================================= -->
-                            <Grid>
+                            <Grid Grid.Row="0">
                                 <StackPanel>
                                     <Border Background="#EEF0F3" BorderBrush="#B9BEC6"
                                             BorderThickness="0,0,0,1">
@@ -783,7 +801,7 @@
                             <!-- =========================================================
                                  Section 2 — BULK PREVIEW (live)
                                  ========================================================= -->
-                            <Border Background="#EEF0F3" BorderBrush="#B9BEC6"
+                            <Border Grid.Row="1" Background="#EEF0F3" BorderBrush="#B9BEC6"
                                     BorderThickness="0,1,0,1">
                                 <DockPanel>
                                     <Button DockPanel.Dock="Left"
@@ -822,6 +840,12 @@
                                                VerticalAlignment="Center" Margin="0,0,10,0"/>
                                 </DockPanel>
                             </Border>
+                            <!-- Body (#64): own ScrollViewer bounded to row 2 so a long
+                                 preview list scrolls inside this section instead of
+                                 pushing the Pending Edits and Issues headers off the top. -->
+                            <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto"
+                                          HorizontalScrollBarVisibility="Disabled">
+                                <Grid>
                             <!-- Empty state -->
                             <Border Background="White" Padding="12,10" MinHeight="52">
                                 <Border.Style>
@@ -859,8 +883,6 @@
                                         </Style.Triggers>
                                     </Style>
                                 </ItemsControl.Style>
-                                <!-- No inner ScrollViewer: the sidebar's outer ScrollViewer
-                                     handles wheel events for the whole inspector. -->
                                 <ItemsControl.Template>
                                     <ControlTemplate TargetType="ItemsControl">
                                         <Border Background="White">
@@ -913,11 +935,13 @@
                                     </DataTemplate>
                                 </ItemsControl.ItemTemplate>
                             </ItemsControl>
+                                </Grid>
+                            </ScrollViewer>
 
                             <!-- =========================================================
                                  Section 3 — PENDING EDITS
                                  ========================================================= -->
-                            <Border Background="#EEF0F3" BorderBrush="#B9BEC6"
+                            <Border Grid.Row="3" Background="#EEF0F3" BorderBrush="#B9BEC6"
                                     BorderThickness="0,1,0,1">
                                 <DockPanel>
                                     <Button DockPanel.Dock="Left"
@@ -968,6 +992,10 @@
                                             Visibility="{Binding HasPendingEdits, Converter={StaticResource BoolToVis}}"/>
                                 </DockPanel>
                             </Border>
+                            <!-- Body (#64): own ScrollViewer bounded to row 4. -->
+                            <ScrollViewer Grid.Row="4" VerticalScrollBarVisibility="Auto"
+                                          HorizontalScrollBarVisibility="Disabled">
+                                <Grid>
                             <!-- Empty state -->
                             <Border Background="White" Padding="12,10" MinHeight="52">
                                 <Border.Style>
@@ -1006,8 +1034,6 @@
                                         </Style.Triggers>
                                     </Style>
                                 </ItemsControl.Style>
-                                <!-- No inner ScrollViewer: the sidebar's outer ScrollViewer
-                                     handles wheel events for the whole inspector. -->
                                 <ItemsControl.Template>
                                     <ControlTemplate TargetType="ItemsControl">
                                         <Border Background="White">
@@ -1112,6 +1138,8 @@
                                     </DataTemplate>
                                 </ItemsControl.ItemTemplate>
                             </ItemsControl>
+                                </Grid>
+                            </ScrollViewer>
 
                             <!-- =========================================================
                                  Section 4 — ISSUES (#26)
@@ -1119,7 +1147,7 @@
                                  a configured rule. Click a row to jump to the member in the
                                  tree. Does NOT block Apply.
                                  ========================================================= -->
-                            <Border Background="#EEF0F3" BorderBrush="#B9BEC6"
+                            <Border Grid.Row="5" Background="#EEF0F3" BorderBrush="#B9BEC6"
                                     BorderThickness="0,1,0,1">
                                 <DockPanel ToolTip="{loc:Loc Issues_Tooltip}">
                                     <Button DockPanel.Dock="Left"
@@ -1157,6 +1185,10 @@
                                     <Border/>
                                 </DockPanel>
                             </Border>
+                            <!-- Body (#64): own ScrollViewer bounded to row 6. -->
+                            <ScrollViewer Grid.Row="6" VerticalScrollBarVisibility="Auto"
+                                          HorizontalScrollBarVisibility="Disabled">
+                                <Grid>
                             <!-- Empty state -->
                             <Border Background="White" Padding="12,10" MinHeight="52">
                                 <Border.Style>
@@ -1239,8 +1271,9 @@
                                     </DataTemplate>
                                 </ItemsControl.ItemTemplate>
                             </ItemsControl>
-                        </StackPanel>
-                    </ScrollViewer>
+                                </Grid>
+                            </ScrollViewer>
+                    </Grid>
                 </DockPanel>
             </Border>
         </Grid>
