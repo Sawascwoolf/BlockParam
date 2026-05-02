@@ -1037,8 +1037,8 @@ public partial class BulkChangeDialog : Window
                     _suppressDbSwitcherSelectionChanged = true;
                     try { DbSwitcherList.SelectedIndex = 0; }
                     finally { _suppressDbSwitcherSelectionChanged = false; }
-                    var first = (ListBoxItem?)DbSwitcherList.ItemContainerGenerator.ContainerFromIndex(0);
-                    first?.Focus();
+                    var firstItem = (ListBoxItem?)DbSwitcherList.ItemContainerGenerator.ContainerFromIndex(0);
+                    firstItem?.Focus();
                     e.Handled = true;
                 }
                 break;

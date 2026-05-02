@@ -349,23 +349,18 @@ class Program
         {
             try
             {
-                using var reader = System.Xml.XmlReader.Create(path);
-                while (reader.Read())
-                {
-                    if (reader.NodeType != System.Xml.XmlNodeType.Element) continue;
-                    var local = reader.LocalName;
-                    if (local == "GlobalDB" || local == "InstanceDB")
-                    {
-                        list.Add(new DataBlockSummary(
-                            Path.GetFileNameWithoutExtension(path),
-                            folderPath: "",
-                            blockType: local,
-                            isInstanceDb: local == "InstanceDB"));
-                        break;
-                    }
-                    // Stop at the first non-DB SimaticML element
-                    if (local.Length > 0 && local != "Document") break;
-                }
+                var doc = System.Xml.Linq.XDocument.Load(path);
+                var dbElement = doc.Descendants().FirstOrDefault(e =>
+                    e.Name.LocalName == "SW.Blocks.GlobalDB" ||
+                    e.Name.LocalName == "SW.Blocks.InstanceDB");
+                if (dbElement == null) continue;
+
+                var blockType = dbElement.Name.LocalName.Replace("SW.Blocks.", "");
+                list.Add(new DataBlockSummary(
+                    Path.GetFileNameWithoutExtension(path),
+                    folderPath: "",
+                    blockType: blockType,
+                    isInstanceDb: blockType == "InstanceDB"));
             }
             catch (Exception ex)
             {
