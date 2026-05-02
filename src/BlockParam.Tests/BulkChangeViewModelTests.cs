@@ -146,4 +146,62 @@ public class BulkChangeViewModelTests : IDisposable
         vm.ApplyCommand.CanExecute(null).Should().BeTrue(
             "a pre-existing violation on Speed must not block applying a valid pending edit on Enable");
     }
+
+    /// <summary>
+    /// #62: Free-tier cap is per-change, not per-Apply. When the user stages
+    /// more pending edits than they have quota left, Apply must be disabled
+    /// (no partial apply, no silent over-cap write).
+    /// </summary>
+    [Fact]
+    public void ApplyCommand_Disabled_WhenPendingExceedsRemainingQuota()
+    {
+        var xml = TestFixtures.LoadXml("flat-db.xml");
+        var parser = new SimaticMLParser();
+        var db = parser.Parse(xml);
+        var analyzer = new HierarchyAnalyzer();
+        var configLoader = new ConfigLoader(null);
+        var bulkService = new BulkChangeService(new ChangeLogger(), configLoader);
+
+        // Free-tier with only 1 change left today.
+        var usageTracker = Substitute.For<IUsageTracker>();
+        usageTracker.GetStatus().Returns(new UsageStatus(199, 200));
+        usageTracker.RecordUsage(Arg.Any<int>()).Returns(true);
+
+        var vm = new BulkChangeViewModel(db, xml, analyzer, bulkService, usageTracker, configLoader);
+
+        // Stage two pending edits — one would fit (remaining=1), two will not.
+        vm.RootMembers.Single(m => m.Name == "Enable").EditableStartValue = "false";
+        vm.RootMembers.Single(m => m.Name == "Speed").EditableStartValue = "42";
+
+        vm.PendingInlineEditCount.Should().Be(2);
+        vm.ApplyCommand.CanExecute(null).Should().BeFalse(
+            "Apply must be blocked when pending count > remaining quota — no partial-apply state");
+    }
+
+    /// <summary>
+    /// #62 follow-up: when remaining quota covers the pending batch, Apply
+    /// stays enabled. Sanity check that the over-cap gate doesn't false-positive.
+    /// </summary>
+    [Fact]
+    public void ApplyCommand_Enabled_WhenPendingFitsUnderQuota()
+    {
+        var xml = TestFixtures.LoadXml("flat-db.xml");
+        var parser = new SimaticMLParser();
+        var db = parser.Parse(xml);
+        var analyzer = new HierarchyAnalyzer();
+        var configLoader = new ConfigLoader(null);
+        var bulkService = new BulkChangeService(new ChangeLogger(), configLoader);
+
+        var usageTracker = Substitute.For<IUsageTracker>();
+        usageTracker.GetStatus().Returns(new UsageStatus(190, 200));
+        usageTracker.RecordUsage(Arg.Any<int>()).Returns(true);
+
+        var vm = new BulkChangeViewModel(db, xml, analyzer, bulkService, usageTracker, configLoader);
+
+        vm.RootMembers.Single(m => m.Name == "Enable").EditableStartValue = "false";
+        vm.RootMembers.Single(m => m.Name == "Speed").EditableStartValue = "42";
+
+        vm.ApplyCommand.CanExecute(null).Should().BeTrue(
+            "two pending edits fit under remaining=10");
+    }
 }

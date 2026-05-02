@@ -97,6 +97,7 @@ Nein = Aktuelles (möglicherweise unvollständiges) Ergebnis behalten</value></d
   <data name="Status_LimitReached" xml:space="preserve"><value>Tageslimit erreicht. Upgrade für unbegrenzte Nutzung.</value></data>
   <data name="Status_Remaining" xml:space="preserve"><value>Verbleibend: {0}/{1} kostenlose Änderungen heute</value></data>
   <data name="Status_WouldExceedLimit" xml:space="preserve"><value>Dieses Übernehmen würde {0} Änderungen schreiben, aber nur {1} sind heute übrig. Auswahl reduzieren oder auf Pro upgraden für unbegrenzte Nutzung.</value></data>
+  <data name="Status_AppliedOverCap" xml:space="preserve"><value>{0} Werte in '{1}' geschrieben — Tageslimit überschritten (parallele Nutzung). Upgrade für unbegrenzte Nutzung.</value></data>
   <data name="LimitReached_Modal_Title" xml:space="preserve"><value>Kostenloses Tageslimit erreicht</value></data>
   <data name="LimitReached_Modal_Message" xml:space="preserve"><value>Sie haben alle heutigen kostenlosen Änderungen aufgebraucht. Sie können weiter Änderungen vorbereiten, aber Übernehmen ist bis morgen deaktiviert — oder upgraden Sie auf Pro für unbegrenzte Nutzung.</value></data>
   <data name="Status_Ready" xml:space="preserve"><value>Bereit</value></data>

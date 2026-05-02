@@ -2008,11 +2008,22 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             }
 
             // Charge the daily quota — one unit per value actually written.
-            // We pre-checked above, but re-check here in case parallel writes
-            // from another instance consumed quota in the meantime.
+            // We pre-checked above, but the post-write call can still reject
+            // if a parallel writer (other Add-In instance, same machine)
+            // consumed quota between pre-check and write. The TIA mutation is
+            // already committed at this point, so we can't roll back — but we
+            // CAN consume whatever quota remains so the next Apply is blocked
+            // by CanExecuteApply, and warn the user that they're over-cap.
             if (totalChanged > 0 && !_usageTracker.RecordUsage(totalChanged))
             {
-                Log.Warning("ExecuteApply: quota race — wrote {N} but RecordUsage rejected", totalChanged);
+                var remaining = _usageTracker.GetStatus().RemainingToday;
+                if (remaining > 0)
+                    _usageTracker.RecordUsage(remaining);
+                StatusText = Res.Format("Status_AppliedOverCap",
+                    totalChanged, _dataBlockInfo.Name);
+                Log.Warning(
+                    "ExecuteApply: quota race — wrote {N} past cap; counter pinned to limit",
+                    totalChanged);
             }
 
             // Re-export from TIA to get the canonical XML after import

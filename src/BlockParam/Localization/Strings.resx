@@ -173,6 +173,10 @@ No = Keep the current (possibly partial) result</value>
     <value>This Apply would write {0} changes, but only {1} are left today. Reduce the selection or upgrade for unlimited use.</value>
     <comment>{0} = pending changes count, {1} = remaining quota today</comment>
   </data>
+  <data name="Status_AppliedOverCap" xml:space="preserve">
+    <value>{0} values written in '{1}' — daily limit exceeded (parallel use). Upgrade for unlimited use.</value>
+    <comment>{0} = applied count, {1} = DB name. Shown only on the rare cross-instance race.</comment>
+  </data>
   <data name="LimitReached_Modal_Title" xml:space="preserve">
     <value>Free daily limit reached</value>
   </data>
