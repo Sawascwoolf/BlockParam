@@ -40,10 +40,10 @@
         <Comment>Resolve SpecialFolder.ApplicationData and MachineName for per-user storage paths and machine-bound license obfuscation.</Comment>
       </System.Security.Permissions.EnvironmentPermission>
       <System.Net.WebPermission>
-        <Comment>HttpClient calls to the BlockParam license server for online license activation and validation.</Comment>
+        <Comment>HttpClient calls to the BlockParam license server for online license activation and validation, and an anonymous once-per-day GET to api.github.com/repos/Sawascwoolf/BlockParam/releases/latest for the in-app "update available" notice (#61).</Comment>
       </System.Net.WebPermission>
       <Siemens.Engineering.AddIn.Permissions.ProcessStartPermission>
-        <Comment>Launch default browser via Process.Start(UseShellExecute=true) to open shop checkout and customer-portal URLs from the license dialog.</Comment>
+        <Comment>Launch default browser via Process.Start(UseShellExecute=true) to open shop checkout and customer-portal URLs from the license dialog, and the GitHub release page from the "update available" dialog (#61).</Comment>
       </Siemens.Engineering.AddIn.Permissions.ProcessStartPermission>
       <System.Security.Permissions.SecurityPermission.UnmanagedCode>
         <Comment>Required transitively by WPF rendering, HttpClient socket I/O, and Newtonsoft.Json reflection-emit serialization.</Comment>

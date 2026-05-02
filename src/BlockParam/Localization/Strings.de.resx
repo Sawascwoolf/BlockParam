@@ -274,4 +274,20 @@ Datenbaustein jetzt kompilieren?</value></data>
   <data name="License_UnknownError" xml:space="preserve"><value>Unbekannter Fehler</value></data>
   <!-- Zoom-Anzeige (#28) -->
   <data name="Zoom_Tooltip" xml:space="preserve"><value>Zoom (Strg + Mausrad, Strg + / Strg −, Strg + 0 zum Zurücksetzen)</value></data>
+  <!-- In-App-Update-Hinweis (#61) -->
+  <data name="Update_BadgeText" xml:space="preserve"><value>{0} → {1} verfügbar</value></data>
+  <data name="Update_BadgeTooltip" xml:space="preserve"><value>Eine neuere Version ist verfügbar: {0}. Klicken Sie für Änderungen und Download.</value></data>
+  <data name="Update_DialogTitle" xml:space="preserve"><value>Update verfügbar</value></data>
+  <data name="Update_VersionDelta" xml:space="preserve"><value>Sie verwenden {0}. Die aktuelle Version ist {1}.</value></data>
+  <data name="Update_PublishedAt" xml:space="preserve"><value>Veröffentlicht am {0}</value></data>
+  <data name="Update_PublishedAtPrerelease" xml:space="preserve"><value>Veröffentlicht am {0} (Vorabversion)</value></data>
+  <data name="Update_NoChangelog" xml:space="preserve"><value>(Zu dieser Version sind keine Versionshinweise hinterlegt.)</value></data>
+  <data name="Update_OpenDownload" xml:space="preserve"><value>Download-Seite öffnen</value></data>
+  <data name="Update_RemindLater" xml:space="preserve"><value>Später erinnern</value></data>
+  <data name="Update_SkipVersion" xml:space="preserve"><value>Diese Version überspringen</value></data>
+  <data name="Update_CheckEnabled" xml:space="preserve"><value>Nach Updates suchen</value></data>
+  <data name="Update_CheckEnabledTooltip" xml:space="preserve"><value>Wenn aktiviert, fragt BlockParam höchstens einmal pro Tag GitHub Releases nach neuen Versionen ab. Es werden keine Telemetriedaten gesendet.</value></data>
+  <data name="Update_IncludePrereleases" xml:space="preserve"><value>Vorabversionen einbeziehen</value></data>
+  <data name="Update_IncludePrereleasesTooltip" xml:space="preserve"><value>Release-Candidate- / Beta-Versionen (z. B. v0.4.0-rc1) als Updates anzeigen.</value></data>
+  <data name="Update_ManagedHint" xml:space="preserve"><value>Die Update-Prüfung wird zentral verwaltet und kann lokal nicht geändert werden.</value></data>
 </root>

@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Threading;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Threading;
@@ -13,6 +14,7 @@ using BlockParam.Localization;
 using BlockParam.Models;
 using BlockParam.Services;
 using BlockParam.SimaticML;
+using BlockParam.Updates;
 
 namespace BlockParam.UI;
 
@@ -84,6 +86,8 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     private readonly CommentLanguagePolicy _commentLanguagePolicy;
     private readonly Dispatcher _dispatcher;
     private readonly ILicenseService? _licenseService;
+    private readonly IUpdateCheckService? _updateCheckService;
+    private UpdateInfo? _availableUpdate;
 
     public BulkChangeViewModel(
         DataBlockInfo dataBlockInfo,
@@ -106,7 +110,8 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         UdtSetPointResolver? udtResolver = null,
         UdtCommentResolver? commentResolver = null,
         string? editingLanguage = null,
-        string? referenceLanguage = null)
+        string? referenceLanguage = null,
+        IUpdateCheckService? updateCheckService = null)
     {
         _dispatcher = Dispatcher.CurrentDispatcher;
         _projectLanguages = projectLanguages is { Count: > 0 } ? projectLanguages : new[] { "en-GB" };
@@ -129,6 +134,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         _udtResolver = udtResolver;
         _commentResolver = commentResolver;
         _licenseService = licenseService;
+        _updateCheckService = updateCheckService;
         _autocompleteProvider = tagTableCache != null
             ? new AutocompleteProvider(configLoader, tagTableCache)
             : null;
@@ -174,6 +180,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         EditConfigCommand = new RelayCommand(ExecuteEditConfig);
         RefreshConstantsCommand = new RelayCommand(ExecuteRefreshConstants);
         EnterLicenseKeyCommand = new RelayCommand(ExecuteEnterLicenseKey);
+        ShowUpdateDetailsCommand = new RelayCommand(ExecuteShowUpdateDetails, () => HasUpdateAvailable);
         UpgradeToProCommand = new RelayCommand(ExecuteUpgradeToPro);
         ExpandAllCommand = new RelayCommand(ExecuteExpandAll);
         CollapseAllCommand = new RelayCommand(ExecuteCollapseAll);
@@ -196,6 +203,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         ApplyAllFilters();
         RefreshFlatList();
         UpdateUsageStatus();
+        InitializeUpdateCheck();
 
         // #26: Surface pre-existing rule violations on dialog load. Runs after
         // RefreshRuleHints so RuleHint is available for the issue tooltip.
@@ -579,6 +587,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     public ICommand EditConfigCommand { get; }
     public ICommand EnterLicenseKeyCommand { get; }
     public ICommand UpgradeToProCommand { get; }
+    public ICommand ShowUpdateDetailsCommand { get; }
     public ICommand ExpandAllCommand { get; }
     public ICommand CollapseAllCommand { get; }
     public ICommand ClearManualSelectionCommand { get; }
@@ -2423,10 +2432,96 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     {
         if (_licenseService == null) return;
 
-        var dialog = new LicenseKeyDialog(_licenseService);
+        var dialog = new LicenseKeyDialog(_licenseService, _updateCheckService, _configLoader);
         dialog.Owner = Application.Current?.Windows.OfType<Window>().FirstOrDefault(w => w.IsActive);
         dialog.ShowDialog();
         UpdateUsageStatus();
+        // The user may have toggled "Check for updates" — re-evaluate the badge.
+        InitializeUpdateCheck(forceRefresh: false);
+    }
+
+    /// <summary>
+    /// Update available (#61). Null when no newer version is on offer
+    /// (offline / opted out / already on latest / skipped).
+    /// </summary>
+    public UpdateInfo? AvailableUpdate
+    {
+        get => _availableUpdate;
+        private set
+        {
+            if (ReferenceEquals(_availableUpdate, value)) return;
+            _availableUpdate = value;
+            OnPropertyChanged(nameof(AvailableUpdate));
+            OnPropertyChanged(nameof(HasUpdateAvailable));
+            OnPropertyChanged(nameof(UpdateBadgeText));
+            OnPropertyChanged(nameof(UpdateBadgeTooltip));
+            (ShowUpdateDetailsCommand as RelayCommand)?.RaiseCanExecuteChanged();
+        }
+    }
+
+    public bool HasUpdateAvailable => _availableUpdate != null;
+
+    public string UpdateBadgeText
+    {
+        get
+        {
+            if (_availableUpdate == null) return "";
+            var current = typeof(BulkChangeViewModel).Assembly.GetName().Version;
+            var currentText = current != null
+                ? $"v{current.Major}.{Math.Max(0, current.Minor)}.{Math.Max(0, current.Build)}"
+                : "v?";
+            var latest = _availableUpdate.TagName;
+            if (latest.Length > 0 && latest[0] != 'v' && latest[0] != 'V') latest = "v" + latest;
+            return Res.Format("Update_BadgeText", currentText, latest);
+        }
+    }
+
+    public string UpdateBadgeTooltip => _availableUpdate == null
+        ? ""
+        : Res.Format("Update_BadgeTooltip",
+            string.IsNullOrEmpty(_availableUpdate.Name)
+                ? _availableUpdate.TagName
+                : _availableUpdate.Name);
+
+    private void InitializeUpdateCheck(bool forceRefresh = true)
+    {
+        if (_updateCheckService == null) return;
+
+        // Synchronous cached read so the badge shows up the moment the
+        // dialog opens — no flash where it appears half a second later.
+        try { AvailableUpdate = _updateCheckService.GetCached(); }
+        catch (Exception ex) { Log.Warning(ex, "UpdateCheck: GetCached threw"); }
+
+        if (!forceRefresh) return;
+
+        // Fire-and-forget refresh — never blocks the UI thread, never
+        // surfaces an error. Cache TTL gates the actual network hit.
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                var info = await _updateCheckService.CheckAsync().ConfigureAwait(false);
+                _dispatcher.BeginInvoke(new Action(() => AvailableUpdate = info));
+            }
+            catch (Exception ex)
+            {
+                Log.Warning(ex, "UpdateCheck: background CheckAsync threw");
+            }
+        });
+    }
+
+    private void ExecuteShowUpdateDetails()
+    {
+        var info = _availableUpdate;
+        if (info == null || _updateCheckService == null) return;
+
+        var dialog = new UpdateAvailableDialog(info, _updateCheckService);
+        dialog.Owner = Application.Current?.Windows.OfType<Window>().FirstOrDefault(w => w.IsActive);
+        dialog.ShowDialog();
+
+        // The user may have skipped the version — re-evaluate the badge.
+        try { AvailableUpdate = _updateCheckService.GetCached(); }
+        catch (Exception ex) { Log.Warning(ex, "UpdateCheck: post-dialog GetCached threw"); }
     }
 
     /// <summary>

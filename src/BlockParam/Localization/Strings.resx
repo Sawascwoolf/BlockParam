@@ -685,4 +685,56 @@ Compile the block now?</value>
   <data name="Zoom_Tooltip" xml:space="preserve">
     <value>Zoom (Ctrl + mouse wheel, Ctrl + / Ctrl −, Ctrl + 0 to reset)</value>
   </data>
+  <!-- In-app update notice (#61). The badge is intentionally compact —
+       full release notes live in the details popup. -->
+  <data name="Update_BadgeText" xml:space="preserve">
+    <value>{0} → {1} available</value>
+    <comment>{0} = current version (e.g. "v0.3.0"), {1} = latest version (e.g. "v0.4.0")</comment>
+  </data>
+  <data name="Update_BadgeTooltip" xml:space="preserve">
+    <value>A newer release is available: {0}. Click for changelog and download.</value>
+    <comment>{0} = release name or tag</comment>
+  </data>
+  <data name="Update_DialogTitle" xml:space="preserve">
+    <value>Update available</value>
+  </data>
+  <data name="Update_VersionDelta" xml:space="preserve">
+    <value>You are running {0}. Latest release is {1}.</value>
+    <comment>{0} = current version, {1} = latest version</comment>
+  </data>
+  <data name="Update_PublishedAt" xml:space="preserve">
+    <value>Published on {0}</value>
+    <comment>{0} = local date, e.g. "2026-05-02"</comment>
+  </data>
+  <data name="Update_PublishedAtPrerelease" xml:space="preserve">
+    <value>Published on {0} (pre-release)</value>
+    <comment>{0} = local date, e.g. "2026-05-02"</comment>
+  </data>
+  <data name="Update_NoChangelog" xml:space="preserve">
+    <value>(No release notes were attached to this release.)</value>
+  </data>
+  <data name="Update_OpenDownload" xml:space="preserve">
+    <value>Open download page</value>
+  </data>
+  <data name="Update_RemindLater" xml:space="preserve">
+    <value>Remind me later</value>
+  </data>
+  <data name="Update_SkipVersion" xml:space="preserve">
+    <value>Skip this version</value>
+  </data>
+  <data name="Update_CheckEnabled" xml:space="preserve">
+    <value>Check for updates</value>
+  </data>
+  <data name="Update_CheckEnabledTooltip" xml:space="preserve">
+    <value>When enabled, BlockParam queries GitHub Releases at most once per day to detect new versions. No telemetry is sent.</value>
+  </data>
+  <data name="Update_IncludePrereleases" xml:space="preserve">
+    <value>Include pre-releases</value>
+  </data>
+  <data name="Update_IncludePrereleasesTooltip" xml:space="preserve">
+    <value>Show release-candidate / beta builds (e.g. v0.4.0-rc1) as updates.</value>
+  </data>
+  <data name="Update_ManagedHint" xml:space="preserve">
+    <value>Update-check policy is managed by IT and cannot be changed locally.</value>
+  </data>
 </root>
