@@ -30,8 +30,8 @@ public class BulkChangeViewModelTests : IDisposable
         var configLoader = new ConfigLoader(null);
         var bulkService = new BulkChangeService(new ChangeLogger(), configLoader);
         var usageTracker = Substitute.For<IUsageTracker>();
-        usageTracker.GetStatus().Returns(new UsageStatus(0, 3));
-        usageTracker.GetInlineStatus().Returns(new UsageStatus(0, 10));
+        usageTracker.GetStatus().Returns(new UsageStatus(0, 200));
+        usageTracker.RecordUsage(Arg.Any<int>()).Returns(true);
 
         return new BulkChangeViewModel(db, xml, analyzer, bulkService, usageTracker, configLoader);
     }
@@ -61,10 +61,8 @@ public class BulkChangeViewModelTests : IDisposable
         var configLoader = CreateConfigLoaderWithRule(ruleJson);
         var bulkService = new BulkChangeService(new ChangeLogger(), configLoader);
         var usageTracker = Substitute.For<IUsageTracker>();
-        usageTracker.GetStatus().Returns(new UsageStatus(0, 3));
-        usageTracker.GetInlineStatus().Returns(new UsageStatus(0, 10));
-        usageTracker.RecordInlineEdit().Returns(true);
-        usageTracker.RecordUsage().Returns(true);
+        usageTracker.GetStatus().Returns(new UsageStatus(0, 200));
+        usageTracker.RecordUsage(Arg.Any<int>()).Returns(true);
 
         return new BulkChangeViewModel(db, xml, analyzer, bulkService, usageTracker, configLoader);
     }
