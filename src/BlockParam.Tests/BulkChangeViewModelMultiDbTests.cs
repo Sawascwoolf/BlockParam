@@ -258,6 +258,71 @@ public class BulkChangeViewModelMultiDbTests
     }
 
     [Fact]
+    public void Phase2Cancel_ChargesPartialSum_AndClearsPendingOnCommittedDbsOnly()
+    {
+        // #58 review: verify the partial-commit accounting added in 3e530a0.
+        // Setup: focused + companion each have one staged inline edit; the
+        // companion's OnApply throws OperationCanceledException to simulate
+        // a TIA compile-prompt user-cancel. Expectation: focused DB commits
+        // (tracker charged for 1), companion is not double-committed,
+        // companion's pending edit stays (so the user can retry), focused
+        // DB's pending flag clears.
+        var focusedXml = TestFixtures.LoadXml("flat-db.xml");
+        var companionXml = TestFixtures.LoadXml("nested-struct-db.xml");
+        var parser = new SimaticMLParser();
+        var focused = parser.Parse(focusedXml);
+        var companion = parser.Parse(companionXml);
+
+        var configLoader = new ConfigLoader(null);
+        var bulkService = new BulkChangeService(new ChangeLogger(), configLoader);
+        var tracker = Substitute.For<IUsageTracker>();
+        tracker.GetStatus().Returns(new UsageStatus(0, 100));
+        tracker.RecordUsage(Arg.Any<int>()).Returns(true);
+
+        var focusedApplied = false;
+        var companionDb = new ActiveDb(
+            companion, companionXml,
+            onApply: _ => throw new OperationCanceledException(
+                "simulated compile-prompt cancel"));
+
+        var vm = new BulkChangeViewModel(
+            focused, focusedXml,
+            new HierarchyAnalyzer(), bulkService, tracker, configLoader,
+            onApply: _ => focusedApplied = true,
+            additionalActiveDbs: new[] { companionDb });
+
+        // Stage one leaf edit in each DB.
+        var focusedLeaf = vm.RootMembers
+            .First(r => r.Name == focused.Name)
+            .AllDescendants().First(n => n.IsLeaf);
+        focusedLeaf.PendingValue = focusedLeaf.StartValue == "0" ? "1" : "0";
+
+        var companionLeaf = vm.RootMembers
+            .First(r => r.Name == companion.Name)
+            .AllDescendants().First(n => n.IsLeaf);
+        companionLeaf.PendingValue = companionLeaf.StartValue == "0" ? "1" : "0";
+
+        vm.ApplyCommand.Execute(null);
+
+        // Focused DB committed; companion's OnApply threw. We can't re-assert
+        // companionApplied because OnApply is invoked even though it throws.
+        focusedApplied.Should().BeTrue("focused DB Apply must have run");
+
+        // Quota: charged for the 1 committed change, not 2 — the cancelled
+        // DB's edit never reached TIA. RecordUsage was called with exactly 1.
+        tracker.Received().RecordUsage(1);
+        tracker.DidNotReceive().RecordUsage(2);
+
+        // Pending state: focused DB's pending value cleared (committed),
+        // companion's stays (user can retry after fixing whatever caused
+        // the cancel).
+        focusedLeaf.IsPendingInlineEdit.Should().BeFalse(
+            "committed DB's pending value should be cleared");
+        companionLeaf.IsPendingInlineEdit.Should().BeTrue(
+            "cancelled DB's pending value should remain for retry");
+    }
+
+    [Fact]
     public void CommitChanges_InvokesEveryActiveDbsOnApply()
     {
         // The dialog-close auto-commit (CommitChanges) used to call only
