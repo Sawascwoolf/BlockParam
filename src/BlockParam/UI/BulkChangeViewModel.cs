@@ -76,6 +76,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     private bool _suppressSuggestions;
     private bool _lastApplySucceeded;
     private bool _hasPendingChanges;
+    private bool _limitWarningShown;
     private bool _isInspectorCollapsed;
     private bool _isBulkEditExpanded = true;
     private bool _isBulkPreviewExpanded = true;
@@ -655,8 +656,38 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         _licenseService?.IsProActive == true
             ? Res.Get("License_ManageKey")
             : Res.Get("License_EnterKey");
-    public bool IsLimitReached => _usageTracker.GetStatus().IsLimitReached
-                               || _usageTracker.GetInlineStatus().IsLimitReached;
+    public bool IsLimitReached => _usageTracker.GetStatus().IsLimitReached;
+
+    /// <summary>
+    /// Picked so a few back-to-back bulk applies on a normal day stay quiet, but
+    /// the user gets a nudge once they're close enough that the next batch could
+    /// push them over. Tied to the 200/day free-tier cap; revisit if that changes.
+    /// </summary>
+    private const int TightHeadroomThreshold = 50;
+
+    /// <summary>
+    /// Tooltip for the Apply button(s). Pro tier and the unsurprising free-tier
+    /// case (single change, plenty of headroom) get the plain advisory; otherwise
+    /// the cost line is appended so users see "this Apply uses N of M" before
+    /// they click.
+    /// </summary>
+    public string ApplyTooltip
+    {
+        get
+        {
+            var baseText = Res.Get("Dialog_ApplyTooltip");
+            if (_licenseService?.IsProActive == true) return baseText;
+
+            var cost = PendingInlineEditCount;
+            if (cost == 0) return baseText;
+
+            var remaining = _usageTracker.GetStatus().RemainingToday;
+            if (cost <= 1 && remaining >= TightHeadroomThreshold) return baseText;
+
+            return baseText + Environment.NewLine + Environment.NewLine +
+                Res.Format("Dialog_ApplyTooltip_CostLine", cost, remaining);
+        }
+    }
 
     /// <summary>Number of individual inline edits waiting to be applied.</summary>
     public int PendingInlineEditCount => CountPendingInlineEdits(RootMembers);
@@ -1136,6 +1167,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     {
         OnPropertyChanged(nameof(PendingInlineEditCount));
         OnPropertyChanged(nameof(PendingStatusText));
+        OnPropertyChanged(nameof(ApplyTooltip));
         ComputeBulkPreview();
         RebuildPendingEdits();
     }
@@ -1741,9 +1773,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     /// <summary>Can stage bulk scope or manual-selection values as pending.</summary>
     private bool CanExecuteSetPending()
     {
-        if (string.IsNullOrWhiteSpace(_newValue)
-            || HasValidationError
-            || _usageTracker.GetStatus().IsLimitReached)
+        if (string.IsNullOrWhiteSpace(_newValue) || HasValidationError)
             return false;
 
         if (IsManualMode)
@@ -1797,12 +1827,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
 
         if (_selectedScope == null) return;
 
-        if (!_usageTracker.RecordUsage())
-        {
-            StatusText = Res.Get("Status_LimitReached");
-            UpdateUsageStatus();
-            return;
-        }
+        MaybeWarnLimitReachedOnce();
 
         var affectedPaths = new HashSet<string>(
             _selectedScope.MatchingMembers.Select(m => m.Path));
@@ -1832,12 +1857,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     /// </summary>
     private void ExecuteSetPendingManual()
     {
-        if (!_usageTracker.RecordUsage())
-        {
-            StatusText = Res.Get("Status_LimitReached");
-            UpdateUsageStatus();
-            return;
-        }
+        MaybeWarnLimitReachedOnce();
 
         int count = 0;
         foreach (var path in _manualSelectedPaths)
@@ -1903,8 +1923,15 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     /// <summary>Can apply when there are any pending changes (inline or bulk-staged).</summary>
     private bool CanExecuteApply()
     {
-        return (PendingInlineEditCount > 0 || HasPendingChanges)
-            && !HasInlineErrors;
+        if (HasInlineErrors) return false;
+        if (PendingInlineEditCount == 0 && !HasPendingChanges) return false;
+
+        // Free-tier cap: block Apply when the pending batch would push past
+        // the daily quota. The user has to drop some edits or upgrade.
+        var status = _usageTracker.GetStatus();
+        if (PendingInlineEditCount > status.RemainingToday) return false;
+
+        return true;
     }
 
     public bool HasInlineErrors => HasInlineErrorsRecursive(RootMembers);
@@ -1948,6 +1975,20 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
 
         if (pendingEdits.Count == 0 && !_hasPendingChanges)
             return;
+
+        // Pre-check the daily cap: each pending edit is charged as one unit
+        // against the free-tier quota on Apply. Block the entire batch if it
+        // would push past the limit — partial Apply leaves the user in a
+        // confusing half-applied state. Pro tier always passes (DailyLimit
+        // is int.MaxValue via LicensedUsageTracker).
+        var status = _usageTracker.GetStatus();
+        if (pendingEdits.Count > status.RemainingToday)
+        {
+            StatusText = Res.Format("Status_WouldExceedLimit",
+                pendingEdits.Count, status.RemainingToday);
+            UpdateUsageStatus();
+            return;
+        }
 
         Log.Information("ExecuteApply: {Count} pending changes", pendingEdits.Count);
 
@@ -2007,6 +2048,25 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
                 return;
             }
 
+            // Charge the daily quota — one unit per value actually written.
+            // We pre-checked above, but the post-write call can still reject
+            // if a parallel writer (other Add-In instance, same machine)
+            // consumed quota between pre-check and write. The TIA mutation is
+            // already committed at this point, so we can't roll back — but we
+            // CAN consume whatever quota remains so the next Apply is blocked
+            // by CanExecuteApply, and warn the user that they're over-cap.
+            if (totalChanged > 0 && !_usageTracker.RecordUsage(totalChanged))
+            {
+                var remaining = _usageTracker.GetStatus().RemainingToday;
+                if (remaining > 0)
+                    _usageTracker.RecordUsage(remaining);
+                StatusText = Res.Format("Status_AppliedOverCap",
+                    totalChanged, _dataBlockInfo.Name);
+                Log.Warning(
+                    "ExecuteApply: quota race — wrote {N} past cap; counter pinned to limit",
+                    totalChanged);
+            }
+
             // Re-export from TIA to get the canonical XML after import
             RefreshTree(_currentXml);
 
@@ -2039,13 +2099,6 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         var config = _configLoader.GetConfig();
         if (config == null || _selectedScope == null) return;
         if (!config.Rules.Any(r => !string.IsNullOrEmpty(r.CommentTemplate))) return;
-
-        if (!_usageTracker.RecordUsage())
-        {
-            StatusText = Res.Get("Status_LimitReached");
-            UpdateUsageStatus();
-            return;
-        }
 
         try
         {
@@ -2082,7 +2135,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
 
     private bool CanExecuteUpdateComments()
     {
-        return HasScope && HasCommentConfig && !_usageTracker.GetStatus().IsLimitReached;
+        return HasScope && HasCommentConfig;
     }
 
     /// <summary>
@@ -2179,23 +2232,12 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             return;
         }
 
-        // Only count against inline limit if this is a new edit, not a correction of an existing pending value
+        // Single counter (issue #62): inline edits are free to stage. Quota is
+        // charged per-change on successful Apply, not per keystroke. Warn once
+        // per dialog open if the user starts editing while already at 0 left,
+        // so they aren't blindsided when Apply is disabled.
         if (!memberVm.IsPendingInlineEdit)
-        {
-            if (_usageTracker.GetInlineStatus().IsLimitReached)
-            {
-                StatusText = Res.Get("Status_InlineLimitReached");
-                UpdateUsageStatus();
-                return;
-            }
-
-            if (!_usageTracker.RecordInlineEdit())
-            {
-                StatusText = Res.Get("Status_InlineLimitReached");
-                UpdateUsageStatus();
-                return;
-            }
-        }
+            MaybeWarnLimitReachedOnce();
 
         // Shared validator → same rule language as the bulk inspector (#7).
         var error = BuildValidator().Validate(memberVm.Model, newValue);
@@ -2414,10 +2456,8 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         else
         {
             var status = _usageTracker.GetStatus();
-            var inlineStatus = _usageTracker.GetInlineStatus();
-            UsageStatusText = Res.Format("Status_RemainingBoth",
-                status.RemainingToday, status.DailyLimit,
-                inlineStatus.RemainingToday, inlineStatus.DailyLimit);
+            UsageStatusText = Res.Format("Status_Remaining",
+                status.RemainingToday, status.DailyLimit);
             LicenseTierText = Res.Get("License_Tier_Free");
         }
 
@@ -2426,6 +2466,24 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(ShowLicenseKeyButton));
         OnPropertyChanged(nameof(LicenseKeyButtonText));
         OnPropertyChanged(nameof(IsLimitReached));
+        OnPropertyChanged(nameof(ApplyTooltip));
+    }
+
+    /// <summary>
+    /// Shows the daily-cap-reached modal once per dialog open, when the user
+    /// first attempts to stage or edit a change while at 0 remaining quota.
+    /// Staging itself isn't blocked — Apply is the choke point — but a single
+    /// proactive heads-up beats discovering it via a disabled Apply button.
+    /// </summary>
+    private void MaybeWarnLimitReachedOnce()
+    {
+        if (_limitWarningShown) return;
+        if (!_usageTracker.GetStatus().IsLimitReached) return;
+
+        _limitWarningShown = true;
+        _messageBox.ShowInfo(
+            Res.Get("LimitReached_Modal_Message"),
+            Res.Get("LimitReached_Modal_Title"));
     }
 
     private void ExecuteEnterLicenseKey()

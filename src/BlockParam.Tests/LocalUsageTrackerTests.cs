@@ -1,5 +1,6 @@
 using FluentAssertions;
 using BlockParam.Licensing;
+using Newtonsoft.Json;
 using Xunit;
 
 namespace BlockParam.Tests;
@@ -27,7 +28,7 @@ public class LocalUsageTrackerTests : IDisposable
     {
         var tracker = CreateTracker();
 
-        tracker.RecordUsage().Should().BeTrue();
+        tracker.RecordUsage(1).Should().BeTrue();
         var status = tracker.GetStatus();
 
         status.UsedToday.Should().Be(1);
@@ -40,9 +41,9 @@ public class LocalUsageTrackerTests : IDisposable
     {
         var tracker = CreateTracker();
 
-        tracker.RecordUsage();
-        tracker.RecordUsage();
-        tracker.RecordUsage().Should().BeTrue();
+        tracker.RecordUsage(1);
+        tracker.RecordUsage(1);
+        tracker.RecordUsage(1).Should().BeTrue();
 
         var status = tracker.GetStatus();
         status.UsedToday.Should().Be(3);
@@ -55,10 +56,10 @@ public class LocalUsageTrackerTests : IDisposable
     {
         var tracker = CreateTracker();
 
-        tracker.RecordUsage();
-        tracker.RecordUsage();
-        tracker.RecordUsage();
-        tracker.RecordUsage().Should().BeFalse();
+        tracker.RecordUsage(1);
+        tracker.RecordUsage(1);
+        tracker.RecordUsage(1);
+        tracker.RecordUsage(1).Should().BeFalse();
 
         tracker.GetStatus().UsedToday.Should().Be(3);
     }
@@ -69,9 +70,9 @@ public class LocalUsageTrackerTests : IDisposable
         var currentDate = new DateTime(2024, 1, 1);
         var tracker = CreateTracker(dateProvider: () => currentDate);
 
-        tracker.RecordUsage();
-        tracker.RecordUsage();
-        tracker.RecordUsage();
+        tracker.RecordUsage(1);
+        tracker.RecordUsage(1);
+        tracker.RecordUsage(1);
         tracker.GetStatus().IsLimitReached.Should().BeTrue();
 
         // Simulate next day with a new tracker instance
@@ -102,7 +103,7 @@ public class LocalUsageTrackerTests : IDisposable
         File.Exists(_storagePath).Should().BeFalse();
 
         var tracker = CreateTracker();
-        tracker.RecordUsage();
+        tracker.RecordUsage(1);
 
         File.Exists(_storagePath).Should().BeTrue();
     }
@@ -113,8 +114,8 @@ public class LocalUsageTrackerTests : IDisposable
         var date = new DateTime(2024, 6, 15);
 
         var tracker1 = CreateTracker(dateProvider: () => date);
-        tracker1.RecordUsage();
-        tracker1.RecordUsage();
+        tracker1.RecordUsage(1);
+        tracker1.RecordUsage(1);
 
         // New instance, same file, same day
         var tracker2 = CreateTracker(dateProvider: () => date);
@@ -122,6 +123,64 @@ public class LocalUsageTrackerTests : IDisposable
 
         status.UsedToday.Should().Be(2);
         status.RemainingToday.Should().Be(1);
+    }
+
+    [Fact]
+    public void RecordUsage_BatchFitsUnderCap_Charges()
+    {
+        var tracker = CreateTracker(dailyLimit: 200);
+
+        tracker.RecordUsage(50).Should().BeTrue();
+        tracker.RecordUsage(120).Should().BeTrue();
+
+        tracker.GetStatus().UsedToday.Should().Be(170);
+        tracker.GetStatus().RemainingToday.Should().Be(30);
+    }
+
+    [Fact]
+    public void RecordUsage_BatchOverflowsCap_Atomic_Reject()
+    {
+        var tracker = CreateTracker(dailyLimit: 200);
+        tracker.RecordUsage(180);
+
+        // 30 more would push to 210 — should reject the WHOLE batch, not write 20.
+        tracker.RecordUsage(30).Should().BeFalse();
+        tracker.GetStatus().UsedToday.Should().Be(180);
+        tracker.GetStatus().RemainingToday.Should().Be(20);
+
+        // The remaining 20 still fit and should succeed.
+        tracker.RecordUsage(20).Should().BeTrue();
+        tracker.GetStatus().IsLimitReached.Should().BeTrue();
+    }
+
+    [Fact]
+    public void RecordUsage_ZeroOrNegative_NoOp()
+    {
+        var tracker = CreateTracker();
+
+        tracker.RecordUsage(0).Should().BeTrue();
+        tracker.RecordUsage(-5).Should().BeTrue();
+        tracker.GetStatus().UsedToday.Should().Be(0);
+    }
+
+    [Fact]
+    public void Read_LegacyFileWithInlineCount_IgnoresAndKeepsCount()
+    {
+        // Simulate a saved file from the old dual-counter version.
+        var date = new DateTime(2024, 6, 15);
+        var legacyJson = JsonConvert.SerializeObject(new
+        {
+            Date = date.ToString("yyyy-MM-dd"),
+            Count = 3,
+            InlineCount = 17
+        });
+        File.WriteAllBytes(_storagePath, Obfuscation.Obfuscate(legacyJson));
+
+        var tracker = CreateTracker(dailyLimit: 200, dateProvider: () => date);
+        var status = tracker.GetStatus();
+
+        // Legacy InlineCount is dropped; Count is preserved.
+        status.UsedToday.Should().Be(3);
     }
 
     private LocalUsageTracker CreateTracker(

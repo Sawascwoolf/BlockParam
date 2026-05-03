@@ -69,17 +69,17 @@ A handful of root causes:
 - The pending queue is empty. The status bar shows *"0 pending edits"*.
 - All pending values are invalid (red rows). The Apply button is disabled until
   you fix them.
-- You hit the **Free-tier daily quota** (3 bulk operations or 50 inline edits).
-  The status bar shows *"Daily limit reached — upgrade to Pro for unlimited"*.
-  See [Licensing](licensing.md).
+- You hit the **Free-tier daily quota** (200 value changes per day) — or your
+  pending batch would push past it. Apply is disabled with a tooltip; the
+  status bar shows *"This Apply would write N changes, but only M are left
+  today."* See [Licensing](licensing.md).
 
 ## "Daily limit reached"
 
-You've used your 3 free bulk operations or 50 free inline edits for the calendar
-day. Options:
+You've used all 200 free value changes for the calendar day. Options:
 
 - Wait until **local midnight** for the counter to reset.
-- Upgrade to [Pro](licensing.md#activating-pro) for unlimited operations.
+- Upgrade to [Pro](licensing.md#activating-pro) for unlimited changes.
 
 The counter is local — there's no way to "borrow" tomorrow's quota by changing
 the system clock (the Add-In detects backwards clock changes and the counter

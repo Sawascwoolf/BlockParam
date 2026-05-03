@@ -16,7 +16,6 @@ public class LicensedUsageTracker : IUsageTracker
     }
 
     public int DailyLimit => _licenseService.IsProActive ? int.MaxValue : _freeTracker.DailyLimit;
-    public int InlineEditDailyLimit => _licenseService.IsProActive ? int.MaxValue : _freeTracker.InlineEditDailyLimit;
 
     public UsageStatus GetStatus()
     {
@@ -26,27 +25,11 @@ public class LicensedUsageTracker : IUsageTracker
         return _freeTracker.GetStatus();
     }
 
-    public UsageStatus GetInlineStatus()
-    {
-        if (_licenseService.IsProActive)
-            return new UsageStatus(0, int.MaxValue);
-
-        return _freeTracker.GetInlineStatus();
-    }
-
-    public bool RecordUsage()
+    public bool RecordUsage(int count)
     {
         if (_licenseService.IsProActive)
             return true;
 
-        return _freeTracker.RecordUsage();
-    }
-
-    public bool RecordInlineEdit()
-    {
-        if (_licenseService.IsProActive)
-            return true;
-
-        return _freeTracker.RecordInlineEdit();
+        return _freeTracker.RecordUsage(count);
     }
 }
