@@ -263,7 +263,7 @@ public class BulkChangeContextMenu : ContextMenuAddIn
                         throw new OperationCanceledException("User declined to compile the inconsistent block.");
                     }
 
-                    var modifiedPath = Path.Combine(tempDir, $"{dbInfo.Name}_modified.xml");
+                    var modifiedPath = Path.Combine(tempDir, $"{SafeFileName.Sanitize(dbInfo.Name)}_modified.xml");
                     File.WriteAllText(modifiedPath, modifiedXml);
                     var blockGroup = (PlcBlockGroup)adapter.GetBlockGroup(selection);
                     adapter.ImportBlock(blockGroup, modifiedPath);
@@ -318,29 +318,42 @@ public class BulkChangeContextMenu : ContextMenuAddIn
     {
         Directory.CreateDirectory(exportDir);
 
-        var tagGroup = plcSoftware.TagTableGroup;
-        int count = 0;
-
-        foreach (var table in tagGroup.TagTables)
+        // Wipe stale exports from previous runs so renamed/moved/deleted tables
+        // don't linger as ghost constants in the validator cache.
+        foreach (var stale in Directory.GetFiles(exportDir, "*.xml"))
         {
-            var filePath = Path.Combine(exportDir, $"{table.Name}.xml");
-            if (File.Exists(filePath)) File.Delete(filePath);
+            try { File.Delete(stale); }
+            catch (Exception ex) { Log.Warning(ex, "Could not delete stale tag table cache file {Path}", stale); }
+        }
+
+        int count = 0;
+        foreach (var table in EnumerateTagTablesRecursive(plcSoftware.TagTableGroup))
+        {
+            // TIA enforces tag-table name uniqueness across the PLC, so a flat
+            // <table.Name>.xml layout has no collisions and lets rule references
+            // by table name match the file regardless of nesting depth (#63).
+            var filePath = Path.Combine(exportDir, $"{SafeFileName.Sanitize(table.Name)}.xml");
             table.Export(new FileInfo(filePath), ExportOptions.WithDefaults);
             count++;
         }
-
-        foreach (var subGroup in tagGroup.Groups)
-        {
-            foreach (var table in subGroup.TagTables)
-            {
-                var filePath = Path.Combine(exportDir, $"{subGroup.Name}_{table.Name}.xml");
-                if (File.Exists(filePath)) File.Delete(filePath);
-                table.Export(new FileInfo(filePath), ExportOptions.WithDefaults);
-                count++;
-            }
-        }
-
         return count;
+    }
+
+    /// <summary>
+    /// Walks the tag-table group tree depth-first, yielding every table at any
+    /// nesting depth. The previous implementation only handled root + one
+    /// subgroup level, silently dropping anything deeper — real customer
+    /// projects nest 4+ levels and the missing constants surfaced as ~200
+    /// false "value out of range" inspector entries (#63).
+    /// </summary>
+    private static IEnumerable<PlcTagTable> EnumerateTagTablesRecursive(PlcTagTableGroup group)
+    {
+        foreach (var table in group.TagTables)
+            yield return table;
+
+        foreach (var sub in group.Groups)
+            foreach (var table in EnumerateTagTablesRecursive(sub))
+                yield return table;
     }
 
     private static IEnumerable<(PlcType type, string? groupPath)> EnumerateTypesRecursive(
@@ -358,7 +371,10 @@ public class BulkChangeContextMenu : ContextMenuAddIn
     }
 
     private static string FileNameFor(PlcType type, string? groupPath)
-        => groupPath == null ? type.Name : $"{groupPath.Replace('/', '_')}_{type.Name}";
+    {
+        var raw = groupPath == null ? type.Name : $"{groupPath.Replace('/', '_')}_{type.Name}";
+        return SafeFileName.Sanitize(raw);
+    }
 
     /// <summary>
     /// Re-exports any UDT whose TIA <c>ModifiedDate</c> (or <c>InterfaceModifiedDate</c>)
