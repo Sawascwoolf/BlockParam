@@ -187,14 +187,14 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         ExistingIssues = new ObservableCollection<ExistingIssueEntry>();
         StashedDbs = new ObservableCollection<StashedDbState>();
 
-        // Build tree view models
+        // Build tree view models. Multi-DB workflow (#58): when companions
+        // exist, every DB (focused + each companion) becomes a synthetic
+        // top-level "DB" group whose children are that DB's actual members.
+        // The user picked this shape over a flat union so each match in the
+        // tree carries a visible DB-of-origin label, and scope walks
+        // naturally extend one level deeper.
         RootMembers = new ObservableCollection<MemberNodeViewModel>();
-        foreach (var member in dataBlockInfo.Members)
-        {
-            var vm = new MemberNodeViewModel(member, null, _commentLanguagePolicy);
-            SubscribeStartValueEdited(vm);
-            RootMembers.Add(vm);
-        }
+        BuildRootMembersFromActiveDbs();
         RefreshRuleHints();
 
         AvailableScopes = new ObservableCollection<ScopeLevel>();
@@ -720,6 +720,57 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
 
     /// <summary>Header label — the DB name part of the title combo.</summary>
     public string CurrentDataBlockName => _active.Info.Name;
+
+    /// <summary>
+    /// Populates <see cref="RootMembers"/> from the focused DB plus any
+    /// companions (#58). Single-DB sessions get a flat list of the DB's
+    /// top-level members (unchanged behavior); multi-DB sessions get one
+    /// synthetic <see cref="MemberNode"/> per DB at the top level, whose
+    /// children are that DB's actual members. Synthetic roots are tagged
+    /// <c>Datatype="DB"</c> so the tree template can render them with a
+    /// distinct chrome.
+    /// </summary>
+    private void BuildRootMembersFromActiveDbs()
+    {
+        if (_companions.Count == 0)
+        {
+            // Single-DB: flat list of top-level members, identical to legacy.
+            foreach (var member in _active.Info.Members)
+            {
+                var vm = new MemberNodeViewModel(member, null, _commentLanguagePolicy);
+                SubscribeStartValueEdited(vm);
+                RootMembers.Add(vm);
+            }
+            return;
+        }
+
+        // Multi-DB: one synthetic group node per DB. Children are the DB's
+        // real top-level members, reused by reference — Path strings stay
+        // unchanged, so existing rule patterns / scope-detection on member
+        // paths still match across DBs.
+        AddDbGroupRoot(_active.Info);
+        foreach (var companion in _companions)
+            AddDbGroupRoot(companion.Info);
+    }
+
+    private void AddDbGroupRoot(DataBlockInfo info)
+    {
+        var synthetic = new MemberNode(
+            name: info.Name,
+            datatype: "DB",
+            startValue: null,
+            path: info.Name,
+            parent: null,
+            children: info.Members);
+        var groupVm = new MemberNodeViewModel(synthetic, null, _commentLanguagePolicy);
+        // Subscribe edited-value events on every leaf descendant so inline
+        // edits inside a companion DB still bubble up to the VM the same
+        // way single-DB edits do.
+        foreach (var descendant in groupVm.AllDescendants())
+            SubscribeStartValueEdited(descendant);
+        groupVm.IsExpanded = true;
+        RootMembers.Add(groupVm);
+    }
 
     /// <summary>
     /// All DBs currently being edited in this dialog session (#58). Always
@@ -2975,12 +3026,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         InlineRuleExtractor.ApplyTo(_configLoader.GetConfig(), _active.Info);
 
         RootMembers.Clear();
-        foreach (var member in _active.Info.Members)
-        {
-            var vm = new MemberNodeViewModel(member, null, _commentLanguagePolicy);
-            SubscribeStartValueEdited(vm);
-            RootMembers.Add(vm);
-        }
+        BuildRootMembersFromActiveDbs();
         RefreshRuleHints();
         RebuildExistingIssues();
 
