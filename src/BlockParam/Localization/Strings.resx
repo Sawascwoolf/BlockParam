@@ -357,6 +357,22 @@ This cannot be undone.</value>
   <data name="Dialog_SetTooltip" xml:space="preserve">
     <value>Stage bulk values as pending (yellow)</value>
   </data>
+  <data name="Dialog_SetTooltip_ScopeIdle" xml:space="preserve">
+    <value>{0} member(s) in '{1}'</value>
+    <comment>{0} = total scope size, {1} = ancestor name. Shown when no value is typed.</comment>
+  </data>
+  <data name="Dialog_SetTooltip_ManualIdle" xml:space="preserve">
+    <value>{0} member(s) selected</value>
+    <comment>{0} = total manual selection. Shown when no value is typed.</comment>
+  </data>
+  <data name="Dialog_SetTooltip_ScopeBreakdown" xml:space="preserve">
+    <value>{0} of {1} in '{2}' will be staged · {3} already at this value</value>
+    <comment>{0} = will-stage count, {1} = total scope, {2} = ancestor name, {3} = already-match count</comment>
+  </data>
+  <data name="Dialog_SetTooltip_ManualBreakdown" xml:space="preserve">
+    <value>{0} of {1} selected will be staged · {2} already at this value</value>
+    <comment>{0} = will-stage count, {1} = total selected, {2} = already-match count</comment>
+  </data>
   <data name="Dialog_LimitReachedOverlay_Title" xml:space="preserve">
     <value>Daily free limit reached</value>
   </data>

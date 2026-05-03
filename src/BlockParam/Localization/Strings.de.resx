@@ -144,6 +144,10 @@ Dies kann nicht rückgängig gemacht werden.</value></data>
   <data name="Dialog_Constants" xml:space="preserve"><value>Konstanten</value></data>
   <data name="Dialog_RefreshConstants" xml:space="preserve"><value>Konstanten aktualisieren</value></data>
   <data name="Dialog_SetTooltip" xml:space="preserve"><value>Bulk-Werte als ausstehend markieren (gelb)</value></data>
+  <data name="Dialog_SetTooltip_ScopeIdle" xml:space="preserve"><value>{0} Element(e) in '{1}'</value></data>
+  <data name="Dialog_SetTooltip_ManualIdle" xml:space="preserve"><value>{0} Element(e) ausgewählt</value></data>
+  <data name="Dialog_SetTooltip_ScopeBreakdown" xml:space="preserve"><value>{0} von {1} in '{2}' werden gesetzt · {3} bereits auf diesem Wert</value></data>
+  <data name="Dialog_SetTooltip_ManualBreakdown" xml:space="preserve"><value>{0} von {1} ausgewählten werden gesetzt · {2} bereits auf diesem Wert</value></data>
   <data name="Dialog_LimitReachedOverlay_Title" xml:space="preserve"><value>Tägliches Gratis-Limit erreicht</value></data>
   <data name="Dialog_LimitReachedOverlay_Text" xml:space="preserve"><value>Upgrade auf Pro für unbegrenzte Massenänderungen, oder bis morgen warten.</value></data>
   <!-- Manuelle Mehrfachauswahl -->

@@ -357,6 +357,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
                 OnPropertyChanged(nameof(HasScope));
                 OnPropertyChanged(nameof(CanEdit));
                 OnPropertyChanged(nameof(SetButtonText));
+                OnPropertyChanged(nameof(SetButtonTooltip));
             }
         }
     }
@@ -381,6 +382,8 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
                         ValidateValue();
                         UpdateFilteredSuggestions();
                         UpdateHighlighting();
+                        OnPropertyChanged(nameof(SetButtonText));
+                        OnPropertyChanged(nameof(SetButtonTooltip));
                     }));
                 }, null, 150, Timeout.Infinite);
             }
@@ -523,10 +526,44 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         get
         {
             if (IsManualMode)
-                return Res.Format("Dialog_SetManualCount", _manualSelectedPaths.Count);
+                return Res.Format("Dialog_SetManualCount", CountWouldChangeMembers());
             return _selectedScope != null
-                ? $"Set {_selectedScope.MatchCount} in '{_selectedScope.AncestorName}'"
+                ? $"Set {CountWouldChangeMembers()} in '{_selectedScope.AncestorName}'"
                 : "Set";
+        }
+    }
+
+    /// <summary>
+    /// Two-line tooltip for the Set button: action description + count breakdown.
+    /// Surfaces the total scope size so users still see "40 valves selected" even
+    /// when the button label drops to "Set 35" because 5 already match (#65).
+    /// </summary>
+    public string SetButtonTooltip
+    {
+        get
+        {
+            var action = Res.Get("Dialog_SetTooltip");
+            if (!CanEdit) return action;
+
+            int total = TotalCandidateMembers();
+            int willChange = CountWouldChangeMembers();
+            int alreadyMatch = total - willChange;
+
+            string breakdown;
+            if (string.IsNullOrEmpty(_newValue))
+            {
+                breakdown = IsManualMode
+                    ? Res.Format("Dialog_SetTooltip_ManualIdle", total)
+                    : Res.Format("Dialog_SetTooltip_ScopeIdle", total, _selectedScope?.AncestorName ?? "");
+            }
+            else
+            {
+                breakdown = IsManualMode
+                    ? Res.Format("Dialog_SetTooltip_ManualBreakdown", willChange, total, alreadyMatch)
+                    : Res.Format("Dialog_SetTooltip_ScopeBreakdown",
+                        willChange, total, _selectedScope?.AncestorName ?? "", alreadyMatch);
+            }
+            return action + "\n" + breakdown;
         }
     }
 
@@ -1778,39 +1815,68 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
 
         if (IsManualMode)
         {
-            // Blocked when selection mixes datatypes.
             if (!IsSelectionTypeHomogeneous) return false;
-
-            // At least one selected member must actually change.
-            return _manualSelectedPaths.Any(p =>
-            {
-                var node = FindNodeByPath(p);
-                if (node == null || !node.IsLeaf) return false;
-                var effective = node.IsPendingInlineEdit
-                    ? (node.EditableStartValue ?? node.StartValue ?? "")
-                    : (node.StartValue ?? "");
-                return !string.Equals(effective, _newValue, StringComparison.OrdinalIgnoreCase);
-            });
+            return CountWouldChangeMembers() > 0;
         }
 
         if (!HasSelection || !HasScope) return false;
 
-        // Disabled when all affected members already have the target value
-        if (_selectedScope != null)
+        return CountWouldChangeMembers() > 0;
+    }
+
+    /// <summary>
+    /// Count of members that will actually be staged when Set Pending runs —
+    /// i.e. those whose effective start value differs from <c>NewValue</c>.
+    /// Shared by <see cref="CanExecuteSetPending"/> and <see cref="SetButtonText"/>
+    /// so the button's enable state and advertised count cannot drift apart (#65).
+    /// </summary>
+    private int CountWouldChangeMembers()
+    {
+        if (IsManualMode)
         {
-            var wouldChange = _selectedScope.MatchingMembers.Any(m =>
+            return _manualSelectedPaths.Count(p =>
             {
-                var node = FindNodeByPath(m.Path);
-                if (node == null) return true;
-                var effective = node.IsPendingInlineEdit
-                    ? (node.EditableStartValue ?? node.StartValue ?? "")
-                    : (node.StartValue ?? "");
-                return !string.Equals(effective, _newValue, StringComparison.OrdinalIgnoreCase);
+                var node = FindNodeByPath(p);
+                if (node == null || !node.IsLeaf) return false;
+                return WouldChange(node);
             });
-            if (!wouldChange) return false;
         }
 
-        return true;
+        if (_selectedScope == null) return 0;
+
+        return _selectedScope.MatchingMembers.Count(m =>
+        {
+            var node = FindNodeByPath(m.Path);
+            // Unresolved paths can't be staged by SetPendingOnNodes, so don't
+            // count them — that's exactly the inflation the old label had.
+            return node != null && WouldChange(node);
+        });
+    }
+
+    private bool WouldChange(MemberNodeViewModel node)
+    {
+        var effective = node.IsPendingInlineEdit
+            ? (node.EditableStartValue ?? node.StartValue ?? "")
+            : (node.StartValue ?? "");
+        return !string.Equals(effective, _newValue ?? "", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Total members in the active scope or manual selection — the denominator
+    /// for the tooltip's "X of Y will be staged" breakdown. Counts only paths
+    /// that resolve to a leaf so it matches what SetPendingOnNodes can act on.
+    /// </summary>
+    private int TotalCandidateMembers()
+    {
+        if (IsManualMode)
+        {
+            return _manualSelectedPaths.Count(p =>
+            {
+                var node = FindNodeByPath(p);
+                return node != null && node.IsLeaf;
+            });
+        }
+        return _selectedScope?.MatchCount ?? 0;
     }
 
     /// <summary>
@@ -2619,6 +2685,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(HasScope));
         OnPropertyChanged(nameof(CanEdit));
         OnPropertyChanged(nameof(SetButtonText));
+        OnPropertyChanged(nameof(SetButtonTooltip));
         OnPropertyChanged(nameof(SelectedMemberDisplay));
 
         // Entering manual mode: the scope-based highlighting from the single
@@ -2712,6 +2779,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(HasScope));
         OnPropertyChanged(nameof(CanEdit));
         OnPropertyChanged(nameof(SetButtonText));
+        OnPropertyChanged(nameof(SetButtonTooltip));
         OnPropertyChanged(nameof(SelectedMemberDisplay));
 
         ValidateValue();
