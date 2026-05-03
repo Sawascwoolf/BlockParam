@@ -897,13 +897,100 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
 
     private void OnDataBlockListItemToggled(DataBlockListItem item)
     {
-        // Subsequent commit (multi-DB Apply) wires the actual add/remove +
-        // stash flow. For now this is a no-op stub so toggles don't throw.
-        // The checkbox visual still flips because IsActive setter ran first.
-        Log.Information("DB toggle requested: {Name} → IsActive={State} (handler not yet wired)",
-            item.Name, item.IsActive);
-        // Until the handler is wired, snap the row back to authoritative state.
-        RefreshFilteredDataBlockItemsActiveState();
+        // The IsActive setter has already flipped to the new value. Reflect
+        // that into the active set: checked → add as companion; unchecked →
+        // remove (with a guard preventing the focused DB from being
+        // unchecked while it still owns pending edits).
+        var (wasActive, wasFocused) = GetActiveStatusFor(item.Summary);
+        bool wantActive = item.IsActive;
+
+        try
+        {
+            if (wantActive && !wasActive)
+            {
+                AddCompanionFromSummary(item.Summary);
+            }
+            else if (!wantActive && wasActive)
+            {
+                if (wasFocused)
+                {
+                    // Unchecking the focused DB is intentionally blocked in
+                    // this commit — it would require promoting a companion
+                    // to focus and re-driving the title / scope state, which
+                    // is a follow-up. Snap the checkbox back so the user
+                    // sees the rejection without an error dialog.
+                    Log.Information(
+                        "Refusing to remove focused DB {Name} via dropdown — uncheck a companion instead",
+                        item.Name);
+                }
+                else
+                {
+                    RemoveCompanionByName(item.Summary.Name);
+                }
+            }
+        }
+        finally
+        {
+            // Always re-sync the row checkbox states from the authoritative
+            // active set so a refused toggle snaps back visually.
+            RefreshFilteredDataBlockItemsActiveState();
+            // The tree depends on the active set: rebuild it so the new DB
+            // appears as a synthetic-rooted subtree (or vanishes on remove).
+            RootMembers.Clear();
+            BuildRootMembersFromActiveDbs();
+            OnPropertyChanged(nameof(HasMultipleActiveDbs));
+        }
+    }
+
+    /// <summary>
+    /// Loads + parses a DB picked from the dropdown and appends it to
+    /// <see cref="_companions"/> (#58). Reuses the host's
+    /// <see cref="_switchToDataBlock"/> callback for export — it already
+    /// handles the compile-prompt for inconsistent DBs and re-parses with
+    /// the same resolvers as the focused DB.
+    /// </summary>
+    private void AddCompanionFromSummary(DataBlockSummary summary)
+    {
+        if (_switchToDataBlock == null)
+        {
+            Log.Information("DB enable ignored: no switchToDataBlock callback wired");
+            return;
+        }
+        try
+        {
+            var xml = _switchToDataBlock(summary);
+            var constantResolver = _tagTableCache != null
+                ? new TagTableConstantResolver(_tagTableCache)
+                : (IConstantResolver?)null;
+            var parser = new SimaticMLParser(constantResolver, _udtResolver, _commentResolver);
+            var info = parser.Parse(xml);
+            // The dropdown-driven add path has no per-DB OnApply yet — host
+            // wires those only for context-menu multi-selection (#58). This
+            // companion participates in Apply read-only until the host
+            // surfaces a per-DB import callback for dropdown adds in a
+            // follow-up.
+            _companions.Add(new ActiveDb(info, xml, onApply: null));
+            Log.Information("Companion DB enabled via dropdown: {Name}", info.Name);
+        }
+        catch (Exception ex)
+        {
+            Log.Warning(ex, "Failed to enable companion DB {Name}", summary.Name);
+            StatusText = Res.Format("Status_DbSwitchFailed", summary.Name, ex.Message);
+        }
+    }
+
+    /// <summary>Removes a companion by DB name (#58). No-op if not found.</summary>
+    private void RemoveCompanionByName(string name)
+    {
+        for (int i = 0; i < _companions.Count; i++)
+        {
+            if (string.Equals(_companions[i].Info.Name, name, StringComparison.Ordinal))
+            {
+                _companions.RemoveAt(i);
+                Log.Information("Companion DB disabled via dropdown: {Name}", name);
+                return;
+            }
+        }
     }
 
     /// <summary>True when enumeration is settled but the filter matches nothing.</summary>
@@ -2694,6 +2781,18 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     /// </summary>
     private void ExecuteApply()
     {
+        // Multi-DB Apply (#58): when companions exist, iterate every active
+        // DB, write each one's pending edits into its own xml, charge the
+        // total against the daily quota once, and call each DB's OnApply
+        // inside the same dialog tick. Host wires all OnApply invocations
+        // into a single ExclusiveAccess block so multi-DB Apply is one TIA
+        // undo step (matches issue #58 decision).
+        if (_companions.Count > 0)
+        {
+            ExecuteApplyMultiDb();
+            return;
+        }
+
         _lastApplySucceeded = false;
         var pendingEdits = CollectPendingInlineEdits(RootMembers);
 
@@ -2812,6 +2911,161 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         ExecuteApply();
         if (_lastApplySucceeded)
             RequestClose?.Invoke();
+    }
+
+    /// <summary>
+    /// Multi-DB Apply (#58). Walks each top-level synthetic root in
+    /// <see cref="RootMembers"/>, resolves its owning <see cref="ActiveDb"/>
+    /// by name, collects pending edits from that subtree, writes them into
+    /// that DB's XML, and finally calls every DB's OnApply in one pass.
+    /// Quota is charged once on the sum across all DBs — a single
+    /// freemium counter increment (#58 decision: no separate multi-DB cap).
+    /// </summary>
+    private void ExecuteApplyMultiDb()
+    {
+        _lastApplySucceeded = false;
+
+        // Pair every synthetic root with its ActiveDb so each pending edit
+        // is routed to the correct XML buffer + OnApply callback.
+        var perDb = new List<(ActiveDb db, List<(MemberNode Member, string Value)> edits)>();
+        int totalChanges = 0;
+        foreach (var synthetic in RootMembers)
+        {
+            var db = ResolveActiveDbByName(synthetic.Name);
+            if (db == null) continue;
+            var edits = CollectPendingInlineEdits(synthetic.Children);
+            totalChanges += edits.Count;
+            perDb.Add((db, edits));
+        }
+
+        if (totalChanges == 0 && !_hasPendingChanges) return;
+
+        // Pre-check the daily cap against the SUM across all DBs (#58:
+        // unified counter, no per-DB quota).
+        var status = _usageTracker.GetStatus();
+        if (totalChanges > status.RemainingToday)
+        {
+            StatusText = Res.Format("Status_WouldExceedLimit",
+                totalChanges, status.RemainingToday);
+            UpdateUsageStatus();
+            return;
+        }
+
+        Log.Information("ExecuteApplyMultiDb: {Total} pending changes across {DbCount} DBs",
+            totalChanges, perDb.Count);
+
+        string? backupPath = null;
+        try
+        {
+            backupPath = _onBackup?.Invoke();
+            Log.Information("Backup created: {BackupPath}", backupPath);
+        }
+        catch (Exception backupEx)
+        {
+            Log.Warning(backupEx, "Backup failed, continuing without backup");
+        }
+
+        try
+        {
+            int totalChanged = 0;
+
+            // Phase 1: write every DB's modified XML in memory. We don't
+            // hand any of them to the host yet — if a write fails partway
+            // through, no TIA mutation has happened so the abort is clean.
+            foreach (var (db, edits) in perDb)
+            {
+                foreach (var (member, value) in edits)
+                {
+                    var writeResult = _writer.ModifyStartValues(
+                        db.Xml, new[] { member }, value);
+                    if (writeResult.IsSuccess)
+                    {
+                        db.Xml = writeResult.ModifiedXml;
+                        totalChanged++;
+                    }
+                    else
+                    {
+                        Log.Warning("Failed for {Db}/{Path}: {Errors}",
+                            db.Info.Name, member.Path,
+                            string.Join("; ", writeResult.Errors));
+                    }
+                }
+            }
+
+            _lastApplySucceeded = true;
+            HasPendingChanges = true;
+
+            // Phase 2: hand each DB's modified XML to its host callback.
+            // The host wires these into a single ExclusiveAccess block per
+            // #58 (decision: one undo step across the whole multi-DB
+            // Apply). User-cancel inside any callback aborts the rest.
+            foreach (var (db, _) in perDb)
+            {
+                try { db.OnApply?.Invoke(db.Xml); }
+                catch (OperationCanceledException)
+                {
+                    _lastApplySucceeded = false;
+                    UpdateUsageStatus();
+                    return;
+                }
+            }
+            HasPendingChanges = false;
+
+            // Phase 3: charge the unified daily counter once for the sum
+            // (#58 decision: no separate multi-DB counter). Race handling
+            // mirrors the single-DB path.
+            if (totalChanged > 0 && !_usageTracker.RecordUsage(totalChanged))
+            {
+                var remaining = _usageTracker.GetStatus().RemainingToday;
+                if (remaining > 0) _usageTracker.RecordUsage(remaining);
+                Log.Warning(
+                    "ExecuteApplyMultiDb: quota race — wrote {N} past cap; counter pinned to limit",
+                    totalChanged);
+            }
+
+            StatusText = Res.Format("Status_Changed", totalChanged,
+                $"{perDb.Count} DBs");
+
+            // Phase 4: re-parse each DB from its post-import XML and rebuild
+            // the synthetic-rooted tree so subsequent edits target the
+            // canonical structure. The simplest correct approach is to
+            // RefreshTree using the focused DB's xml — companions get
+            // re-parsed inside RefreshTree's BuildRootMembersFromActiveDbs.
+            for (int i = 0; i < perDb.Count; i++)
+            {
+                var (db, _) = perDb[i];
+                if (ReferenceEquals(db, _active)) continue;
+                var parser = new SimaticMLParser(
+                    _tagTableCache != null
+                        ? new TagTableConstantResolver(_tagTableCache)
+                        : null,
+                    _udtResolver, _commentResolver);
+                db.Info = parser.Parse(db.Xml);
+            }
+            RefreshTree(_active.Xml);
+            RefreshPendingAndPreview();
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "Multi-DB Apply threw");
+            HandleErrorWithRollback(ex, backupPath);
+        }
+
+        UpdateUsageStatus();
+    }
+
+    /// <summary>
+    /// Looks up an active DB by its TIA name. Used by multi-DB Apply to
+    /// route synthetic-root subtrees to the right XML buffer (#58).
+    /// </summary>
+    private ActiveDb? ResolveActiveDbByName(string name)
+    {
+        if (string.Equals(_active.Info.Name, name, StringComparison.Ordinal))
+            return _active;
+        foreach (var c in _companions)
+            if (string.Equals(c.Info.Name, name, StringComparison.Ordinal))
+                return c;
+        return null;
     }
 
     /// <summary>
