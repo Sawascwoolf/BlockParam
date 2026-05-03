@@ -48,6 +48,22 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     private TagTableCache? _tagTableCache;
 
     private DataBlockInfo _dataBlockInfo;
+    private string _title = "";
+    // DB-switcher state (#59). Lazy-loaded on first dropdown open and cached
+    // for the dialog session; the ↻ button re-enumerates on demand.
+    private readonly Func<IReadOnlyList<DataBlockSummary>>? _enumerateDataBlocks;
+    private readonly Func<DataBlockSummary, string>? _switchToDataBlock;
+    private IReadOnlyList<DataBlockSummary>? _availableDataBlocks;
+    private IReadOnlyList<DataBlockSummary> _filteredDataBlocks = Array.Empty<DataBlockSummary>();
+    private string _dataBlockSearchText = "";
+    private bool _isDataBlocksDropdownOpen;
+    private bool _isLoadingDataBlocks;
+    private string _currentPlcName = "";
+    // In-memory stash of pending edits keyed by DB identity (#59). Lets the
+    // user switch DBs without committing or losing work — when they come back
+    // to a stashed DB later in the same session, the edits restore.
+    private readonly Dictionary<string, StashedDbState> _stashedDbs =
+        new(StringComparer.Ordinal);
     private MemberNodeViewModel? _selectedFlatMember;
     private ScopeLevel? _selectedScope;
     private string _newValue = "";
@@ -112,7 +128,10 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         UdtCommentResolver? commentResolver = null,
         string? editingLanguage = null,
         string? referenceLanguage = null,
-        IUpdateCheckService? updateCheckService = null)
+        IUpdateCheckService? updateCheckService = null,
+        Func<IReadOnlyList<DataBlockSummary>>? enumerateDataBlocks = null,
+        Func<DataBlockSummary, string>? switchToDataBlock = null,
+        string? currentPlcName = null)
     {
         _dispatcher = Dispatcher.CurrentDispatcher;
         _projectLanguages = projectLanguages is { Count: > 0 } ? projectLanguages : new[] { "en-GB" };
@@ -136,6 +155,9 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         _commentResolver = commentResolver;
         _licenseService = licenseService;
         _updateCheckService = updateCheckService;
+        _enumerateDataBlocks = enumerateDataBlocks;
+        _switchToDataBlock = switchToDataBlock;
+        _currentPlcName = currentPlcName ?? "";
         _autocompleteProvider = tagTableCache != null
             ? new AutocompleteProvider(configLoader, tagTableCache)
             : null;
@@ -152,13 +174,14 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         }
 
         var version = typeof(BulkChangeViewModel).Assembly.GetName().Version;
-        Title = $"BlockParam v{version}: {dataBlockInfo.Name}";
+        _title = BuildTitle(version, _currentPlcName, dataBlockInfo.Name);
 
         InlineRuleExtractor.ApplyTo(configLoader.GetConfig(), dataBlockInfo);
 
         BulkPreview = new ObservableCollection<BulkPreviewEntry>();
         PendingEdits = new ObservableCollection<PendingEditEntry>();
         ExistingIssues = new ObservableCollection<ExistingIssueEntry>();
+        StashedDbs = new ObservableCollection<StashedDbState>();
 
         // Build tree view models
         RootMembers = new ObservableCollection<MemberNodeViewModel>();
@@ -193,6 +216,21 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         ClearManualSelectionCommand = new RelayCommand(ExecuteClearManualSelection,
             () => _manualSelectedPaths.Count > 0);
 
+        OpenDataBlocksDropdownCommand = new RelayCommand(ExecuteOpenDataBlocksDropdown,
+            () => _enumerateDataBlocks != null && _switchToDataBlock != null);
+        CloseDataBlocksDropdownCommand = new RelayCommand(() =>
+        {
+            IsDataBlocksDropdownOpen = false;
+        });
+        RefreshDataBlocksCommand = new RelayCommand(ExecuteRefreshDataBlocks,
+            () => _enumerateDataBlocks != null && !_isLoadingDataBlocks);
+        SwitchToStashedDbCommand = new RelayCommand(parameter =>
+        {
+            if (parameter is StashedDbState stash) SwitchToDataBlock(stash.Summary);
+        });
+        GoToFirstChangeCommand = new RelayCommand(ExecuteGoToFirstChange,
+            () => HasAnyChanges);
+
         if (_licenseService != null)
         {
             _licenseStateChangedHandler = (_, __) =>
@@ -213,7 +251,11 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
 
     // --- Properties ---
 
-    public string Title { get; }
+    public string Title
+    {
+        get => _title;
+        private set => SetProperty(ref _title, value);
+    }
     public ObservableCollection<MemberNodeViewModel> RootMembers { get; }
     public ObservableCollection<ScopeLevel> AvailableScopes { get; }
 
@@ -238,6 +280,16 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     /// edits. They never block Apply (#26).
     /// </summary>
     public ObservableCollection<ExistingIssueEntry> ExistingIssues { get; }
+
+    /// <summary>
+    /// One entry per DB the user has switched away from with un-applied
+    /// pending edits (#59). Each entry renders as its own inspector section
+    /// so the staged work stays visible across switches; clicking the section
+    /// header switches back to that DB (running the same prompt again).
+    /// </summary>
+    public ObservableCollection<StashedDbState> StashedDbs { get; }
+
+    public bool HasStashedDbs => StashedDbs.Count > 0;
 
     public bool HasBulkPreview => BulkPreview.Count > 0;
     public int BulkPreviewCount => BulkPreview.Count;
@@ -630,6 +682,468 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     public ICommand CollapseAllCommand { get; }
     public ICommand ClearManualSelectionCommand { get; }
     public ICommand ToggleInspectorCommand { get; }
+
+    // --- DB-switcher dropdown (#59) ---
+
+    public ICommand OpenDataBlocksDropdownCommand { get; }
+    public ICommand CloseDataBlocksDropdownCommand { get; }
+    public ICommand RefreshDataBlocksCommand { get; }
+    public ICommand SwitchToStashedDbCommand { get; }
+    public ICommand GoToFirstChangeCommand { get; }
+
+    /// <summary>
+    /// True when there's any work to jump to — either an active-DB pending
+    /// edit or a stashed DB. Drives the visibility of the "jump to changes"
+    /// header button so it disappears when nothing's queued.
+    /// </summary>
+    public bool HasAnyChanges => PendingInlineEditCount > 0 || HasStashedDbs;
+
+    /// <summary>
+    /// Raised when <see cref="GoToFirstChangeCommand"/> needs the view to
+    /// scroll + select a member in the live tree. The view subscribes and
+    /// drives <c>ListView.ScrollIntoView</c> + selection — the VM doesn't
+    /// know about the visual list (#59 follow-up).
+    /// </summary>
+    public event Action<MemberNodeViewModel>? RequestJumpToMember;
+
+    /// <summary>
+    /// True when the host wired up DB enumeration + switching callbacks.
+    /// The dropdown chevron / popup are hidden in tests + DevLauncher runs
+    /// where no project is available.
+    /// </summary>
+    public bool HasDataBlockSwitcher =>
+        _enumerateDataBlocks != null && _switchToDataBlock != null;
+
+    /// <summary>Header label — the DB name part of the title combo.</summary>
+    public string CurrentDataBlockName => _dataBlockInfo.Name;
+
+    /// <summary>
+    /// Owning PLC name for the active DB, surfaced as a dim prefix in the
+    /// combo button and the window title so multi-PLC projects don't leave
+    /// the user guessing which PLC the dialog is operating on. Empty when
+    /// the host couldn't supply it (DevLauncher, single-PLC stand-ins).
+    /// </summary>
+    public string CurrentPlcName
+    {
+        get => _currentPlcName;
+        private set
+        {
+            if (SetProperty(ref _currentPlcName, value))
+                OnPropertyChanged(nameof(HasCurrentPlcName));
+        }
+    }
+
+    /// <summary>True when <see cref="CurrentPlcName"/> is non-empty.</summary>
+    public bool HasCurrentPlcName => !string.IsNullOrEmpty(_currentPlcName);
+
+    public bool IsDataBlocksDropdownOpen
+    {
+        get => _isDataBlocksDropdownOpen;
+        set => SetProperty(ref _isDataBlocksDropdownOpen, value);
+    }
+
+    public bool IsLoadingDataBlocks
+    {
+        get => _isLoadingDataBlocks;
+        private set
+        {
+            if (SetProperty(ref _isLoadingDataBlocks, value))
+                OnPropertyChanged(nameof(ShowEmptyDataBlocksMessage));
+        }
+    }
+
+    /// <summary>Filtered, alphabetised list shown inside the dropdown.</summary>
+    public IReadOnlyList<DataBlockSummary> FilteredDataBlocks
+    {
+        get => _filteredDataBlocks;
+        private set
+        {
+            if (SetProperty(ref _filteredDataBlocks, value))
+                OnPropertyChanged(nameof(ShowEmptyDataBlocksMessage));
+        }
+    }
+
+    /// <summary>True when enumeration is settled but the filter matches nothing.</summary>
+    public bool ShowEmptyDataBlocksMessage =>
+        !_isLoadingDataBlocks
+        && _availableDataBlocks != null
+        && _filteredDataBlocks.Count == 0;
+
+    /// <summary>Type-to-filter text for the dropdown's search box.</summary>
+    public string DataBlockSearchText
+    {
+        get => _dataBlockSearchText;
+        set
+        {
+            if (SetProperty(ref _dataBlockSearchText, value))
+                ApplyDataBlockFilter();
+        }
+    }
+
+    /// <summary>
+    /// Lazy-load + cache enumeration result. Subsequent opens are O(filter)
+    /// — no re-enumeration unless the user clicks ↻ (#59).
+    /// </summary>
+    private void ExecuteOpenDataBlocksDropdown()
+    {
+        if (_availableDataBlocks == null)
+            LoadAvailableDataBlocks(force: false);
+
+        ApplyDataBlockFilter();
+        IsDataBlocksDropdownOpen = true;
+    }
+
+    private void ExecuteRefreshDataBlocks()
+    {
+        LoadAvailableDataBlocks(force: true);
+        ApplyDataBlockFilter();
+    }
+
+    private void LoadAvailableDataBlocks(bool force)
+    {
+        if (_enumerateDataBlocks == null) return;
+        if (!force && _availableDataBlocks != null) return;
+
+        IsLoadingDataBlocks = true;
+        try
+        {
+            // Enumeration runs on the UI thread today: TIA Openness calls
+            // must originate from the same thread that owns the project.
+            // The visible spinner + the dialog's scoped scope keep this OK
+            // for typical project sizes; if it ever bites we'd move the
+            // enumeration onto a background task with a marshalled call.
+            _availableDataBlocks = DataBlockListFilter.Sort(_enumerateDataBlocks());
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "DB enumeration failed");
+            _availableDataBlocks = Array.Empty<DataBlockSummary>();
+            StatusText = Res.Format("Status_DbEnumFailed", ex.Message);
+        }
+        finally
+        {
+            IsLoadingDataBlocks = false;
+        }
+    }
+
+    private void ApplyDataBlockFilter()
+    {
+        var source = _availableDataBlocks ?? (IReadOnlyList<DataBlockSummary>)Array.Empty<DataBlockSummary>();
+        FilteredDataBlocks = DataBlockListFilter.Filter(source, _dataBlockSearchText);
+    }
+
+    /// <summary>
+    /// Switch the dialog over to a different DB (#59). When the current DB
+    /// has staged inline edits, prompts a 3-way choice:
+    /// <list type="bullet">
+    ///   <item><b>Yes</b> — apply staged edits to TIA, then switch.</item>
+    ///   <item><b>No</b> — keep staged edits in an in-memory stash so the user
+    ///     can come back to this DB later in the same session, then switch.</item>
+    ///   <item><b>Cancel</b> — stay on the current DB.</item>
+    /// </list>
+    /// On switch in, looks up <see cref="_stashedDbs"/> for any prior stash and
+    /// re-applies it to the freshly loaded tree (orphan paths drop silently
+    /// with a status note when the DB structure has changed since stashing).
+    /// Returns true on a successful switch, false on cancel / no-op.
+    /// </summary>
+    public bool SwitchToDataBlock(DataBlockSummary summary)
+    {
+        if (_switchToDataBlock == null) return false;
+        if (string.Equals(summary.Name, _dataBlockInfo.Name, StringComparison.Ordinal)
+            && string.Equals(summary.FolderPath, GetCurrentFolderPath(), StringComparison.Ordinal)
+            && string.Equals(summary.PlcName, _currentPlcName, StringComparison.Ordinal))
+        {
+            // Already on the target DB — just close the dropdown. PLC is part
+            // of identity because two PLCs can share a DB name (a project with
+            // multiple PLCs can have two DB_Unit_A's at the root).
+            IsDataBlocksDropdownOpen = false;
+            return false;
+        }
+
+        // Snapshot any active pending edits so we can either commit them, stash
+        // them, or (on Cancel) leave them untouched on the live tree.
+        var pendingSnapshot = SnapshotPendingEdits();
+
+        if (pendingSnapshot.Count > 0)
+        {
+            var message = Res.Format("Dialog_SwitchDb_KeepConfirm_Text",
+                pendingSnapshot.Count, _dataBlockInfo.Name, summary.Name);
+            var choice = _messageBox.AskYesNoCancel(
+                message, Res.Get("Dialog_SwitchDb_KeepConfirm_Title"));
+
+            switch (choice)
+            {
+                case YesNoCancelResult.Cancel:
+                    return false;
+                case YesNoCancelResult.Yes:
+                    // Apply path: commit staged edits to TIA before leaving the
+                    // current DB. CommitChanges returns false if the user
+                    // cancels the inconsistent-block compile prompt — abort
+                    // the switch so their work isn't silently dropped.
+                    if (!ExecuteApplyForSwitch())
+                        return false;
+                    // After Apply succeeds the tree's PendingValue fields are
+                    // cleared by RefreshTree, so nothing to stash.
+                    break;
+                case YesNoCancelResult.No:
+                    // Stash path: capture the snapshot under the current DB's
+                    // identity. Replaces any prior stash for this DB so the
+                    // newest edits win.
+                    StashCurrentDb(pendingSnapshot);
+                    DiscardPendingSilent();
+                    break;
+            }
+        }
+
+        IsDataBlocksDropdownOpen = false;
+
+        try
+        {
+            var newXml = _switchToDataBlock(summary);
+            _currentXml = newXml;
+            // Reset selection / scope before RefreshTree — the path / scope
+            // we'd try to restore belong to a different DB and would log a
+            // warning every switch.
+            _selectedFlatMember = null;
+            _selectedScope = null;
+            _manualSelectedPaths.Clear();
+            _newValue = "";
+            _newValueTouched = false;
+            _suppressSuggestions = true;
+
+            RefreshTree(newXml, _udtResolver, _commentResolver);
+
+            _suppressSuggestions = false;
+            AvailableScopes.Clear();
+
+            // Pull the new PLC name off the summary the host gave us — it
+            // already carries the right value from enumeration.
+            CurrentPlcName = summary.PlcName ?? "";
+            var version = typeof(BulkChangeViewModel).Assembly.GetName().Version;
+            Title = BuildTitle(version, _currentPlcName, _dataBlockInfo.Name);
+            OnPropertyChanged(nameof(CurrentDataBlockName));
+            OnPropertyChanged(nameof(SelectedFlatMember));
+            OnPropertyChanged(nameof(SelectedScope));
+            OnPropertyChanged(nameof(HasSelection));
+            OnPropertyChanged(nameof(HasScope));
+            OnPropertyChanged(nameof(NewValue));
+            OnPropertyChanged(nameof(SelectedMemberDisplay));
+
+            // Restore any prior stash for this DB. Removes the stash entry on
+            // success — once edits are back on the live tree they're tracked
+            // there, not in the stash.
+            var (restored, dropped) = RestoreStashFor(summary);
+
+            if (restored > 0 || dropped > 0)
+            {
+                StatusText = dropped == 0
+                    ? Res.Format("Status_DbSwitched_StashRestored", _dataBlockInfo.Name, restored)
+                    : Res.Format("Status_DbSwitched_StashPartial",
+                        _dataBlockInfo.Name, restored, dropped);
+            }
+            else
+            {
+                StatusText = Res.Format("Status_DbSwitched", _dataBlockInfo.Name);
+            }
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "DB switch to {Name} failed", summary.Name);
+            StatusText = Res.Format("Status_DbSwitchFailed", summary.Name, ex.Message);
+            _messageBox.ShowError(
+                Res.Format("Dialog_SwitchDb_LoadFailed", summary.Name, ex.Message),
+                Res.Get("Rollback_Title"));
+            return false;
+        }
+    }
+
+    private string GetCurrentFolderPath()
+    {
+        // Best-effort: the cached list is the only place we can look up the
+        // current DB's folder path. Empty fallback keeps dedupe permissive.
+        if (_availableDataBlocks == null) return "";
+        return _availableDataBlocks
+            .FirstOrDefault(b => string.Equals(b.Name, _dataBlockInfo.Name, StringComparison.Ordinal))
+            ?.FolderPath ?? "";
+    }
+
+    /// <summary>
+    /// Walks the live tree and snapshots every node with a <c>PendingValue</c>
+    /// into inert <see cref="StashedEditEntry"/> rows. Used both before a
+    /// switch (to populate the stash) and to render the badge count.
+    /// </summary>
+    private IReadOnlyList<StashedEditEntry> SnapshotPendingEdits()
+    {
+        var list = new List<StashedEditEntry>();
+        SnapshotRecursive(RootMembers, list);
+        return list;
+    }
+
+    private static void SnapshotRecursive(
+        IEnumerable<MemberNodeViewModel> nodes, List<StashedEditEntry> output)
+    {
+        foreach (var node in nodes)
+        {
+            if (node.PendingValue != null)
+            {
+                output.Add(new StashedEditEntry(
+                    node.Path,
+                    node.StartValue ?? "",
+                    node.PendingValue));
+            }
+            SnapshotRecursive(node.Children, output);
+        }
+    }
+
+    private static string StashKey(DataBlockSummary summary) =>
+        $"{summary.PlcName}\u0001{summary.FolderPath}\u0001{summary.Name}";
+
+    /// <summary>
+    /// Jumps to the first DB with pending work (#59 follow-up). Active-DB
+    /// pending edits win — scroll + select the first one. If the active DB
+    /// is clean but stashes exist, switch to the first stashed DB and let
+    /// the restore path surface its edits.
+    /// </summary>
+    private void ExecuteGoToFirstChange()
+    {
+        if (PendingInlineEditCount > 0)
+        {
+            var first = PendingEdits.FirstOrDefault();
+            if (first != null)
+            {
+                first.Node.EnsureVisible();
+                SelectedFlatMember = first.Node;
+                RequestJumpToMember?.Invoke(first.Node);
+            }
+            return;
+        }
+
+        var firstStash = StashedDbs.FirstOrDefault();
+        if (firstStash != null)
+            SwitchToDataBlock(firstStash.Summary);
+    }
+
+    private void StashCurrentDb(IReadOnlyList<StashedEditEntry> edits)
+    {
+        var summary = new DataBlockSummary(
+            _dataBlockInfo.Name,
+            GetCurrentFolderPath(),
+            blockType: _dataBlockInfo.BlockType,
+            isInstanceDb: string.Equals(_dataBlockInfo.BlockType, "InstanceDB", StringComparison.Ordinal),
+            plcName: _currentPlcName);
+        var key = StashKey(summary);
+        var state = new StashedDbState(summary, edits);
+        _stashedDbs[key] = state;
+        SyncStashedDbsCollection();
+        Log.Information("Stashed {Count} pending edit(s) for DB {Db} (PLC {Plc})",
+            edits.Count, summary.Name,
+            string.IsNullOrEmpty(summary.PlcName) ? "<unset>" : summary.PlcName);
+    }
+
+    /// <summary>
+    /// Builds the dialog window title — adds a "<c>{PLC} / </c>" prefix to the
+    /// DB name when a PLC name is known so multi-PLC projects don't leave
+    /// the user guessing which software unit they're operating on. Single-PLC
+    /// hosts (DevLauncher) pass an empty PLC name and the prefix is dropped.
+    /// </summary>
+    private static string BuildTitle(System.Version? version, string plcName, string dbName)
+    {
+        var location = string.IsNullOrEmpty(plcName) ? dbName : $"{plcName} / {dbName}";
+        return $"BlockParam v{version}: {location}";
+    }
+
+    /// <summary>
+    /// Re-applies a stash to the freshly loaded tree. Returns (restored, dropped)
+    /// so the caller can surface a status line when paths no longer resolve
+    /// (DB was edited externally between stash and restore).
+    /// </summary>
+    private (int restored, int dropped) RestoreStashFor(DataBlockSummary summary)
+    {
+        var key = StashKey(summary);
+        if (!_stashedDbs.TryGetValue(key, out var state)) return (0, 0);
+
+        int restored = 0;
+        int dropped = 0;
+        var validator = BuildValidator();
+        foreach (var edit in state.Edits)
+        {
+            var node = FindNodeByPath(edit.Path);
+            if (node is { IsLeaf: true })
+            {
+                // Restore-without-quota: setting EditableStartValue would route
+                // through OnSingleValueEdited and consume one inline-edit slot
+                // per restored row, which would silently drop edits mid-restore
+                // for free-tier users near the daily cap. Set PendingValue
+                // directly + run the same validator OnSingleValueEdited uses
+                // so HasInlineError / InlineErrorMessage stay accurate.
+                node.PendingValue = edit.PendingValue;
+                var error = validator.Validate(node.Model, edit.PendingValue);
+                node.HasInlineError = error != null;
+                node.InlineErrorMessage = error;
+                restored++;
+            }
+            else
+            {
+                dropped++;
+                Log.Information("Stashed edit dropped (path no longer exists): {Path}", edit.Path);
+            }
+        }
+
+        _stashedDbs.Remove(key);
+        SyncStashedDbsCollection();
+        // OnSingleValueEdited normally drives these refreshes; we bypassed it
+        // for the no-quota path so the aggregated views (PendingEdits list,
+        // BulkPreview, sidebar badges) need an explicit nudge.
+        if (restored > 0)
+        {
+            RefreshPendingAndPreview();
+            OnPropertyChanged(nameof(HasInlineErrors));
+            RaiseInvalidPendingChanged();
+        }
+        Log.Information("Restored {Restored} stashed edit(s) for {Db} ({Dropped} dropped)",
+            restored, summary.Name, dropped);
+        return (restored, dropped);
+    }
+
+    /// <summary>Mirrors the dictionary into the bound <see cref="StashedDbs"/> collection.</summary>
+    private void SyncStashedDbsCollection()
+    {
+        StashedDbs.Clear();
+        foreach (var state in _stashedDbs.Values
+            .OrderBy(s => s.FolderPath, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(s => s.DbName, StringComparer.OrdinalIgnoreCase))
+        {
+            StashedDbs.Add(state);
+        }
+        OnPropertyChanged(nameof(HasStashedDbs));
+        OnPropertyChanged(nameof(HasAnyChanges));
+    }
+
+    /// <summary>
+    /// Yes-on-prompt path: commits staged edits to TIA via the existing Apply
+    /// path. Used by the DB-switcher 3-way prompt (#59) so the user's "Apply
+    /// before switching" choice goes through the same code path as the Apply
+    /// button and surfaces the same compile-prompt UX on inconsistent blocks.
+    /// </summary>
+    private bool ExecuteApplyForSwitch()
+    {
+        if (!ApplyCommand.CanExecute(null))
+        {
+            // Mirror the Apply button's gating — invalid pending edits, license
+            // limit, etc. shouldn't be silently bypassed by the switch flow.
+            StatusText = Res.Get("Status_DbSwitch_ApplyBlocked");
+            return false;
+        }
+
+        ExecuteApply();
+        // ExecuteApply leaves _hasPendingChanges=true and StatusText set on
+        // success; HasInlineErrors stays false. Treat success as "no errors
+        // on the tree after the call" — failed Apply paths set status and
+        // leave pending edits in place.
+        return PendingInlineEditCount == 0;
+    }
+
 
     public bool IsInspectorCollapsed
     {
@@ -1205,6 +1719,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(PendingInlineEditCount));
         OnPropertyChanged(nameof(PendingStatusText));
         OnPropertyChanged(nameof(ApplyTooltip));
+        OnPropertyChanged(nameof(HasAnyChanges));
         ComputeBulkPreview();
         RebuildPendingEdits();
     }

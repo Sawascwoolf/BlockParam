@@ -11,6 +11,7 @@ using System.Windows.Media.Imaging;
 using Serilog;
 using BlockParam.Config;
 using BlockParam.Licensing;
+using BlockParam.Models;
 using BlockParam.Services;
 using BlockParam.SimaticML;
 using BlockParam.UI;
@@ -208,6 +209,11 @@ class Program
             Log.Error(e.Exception, "UNHANDLED EXCEPTION");
             e.Handled = true; // prevent crash, log instead
         };
+        // DB-switcher (#59) for DevLauncher: simulate the project block tree
+        // by enumerating every *.xml under %TEMP%\BlockParam\ that parses as a
+        // SimaticML DB. Lets the dropdown be exercised without a real TIA
+        // project — pick a few real exports and drop them in the dir.
+        IConstantResolver? switchConstantResolver = constantResolver;
         var vm = new BulkChangeViewModel(
             dbInfo, xml, analyzer, bulkService, usageTracker, configLoader,
             onApply: modifiedXml =>
@@ -224,7 +230,20 @@ class Program
             udtDir: udtDir,
             udtResolver: udtResolver,
             commentResolver: commentResolver,
-            updateCheckService: updateCheckService);
+            updateCheckService: updateCheckService,
+            enumerateDataBlocks: () => EnumerateDevLauncherDbs(tiaExportDir),
+            switchToDataBlock: summary =>
+            {
+                var path = Path.Combine(tiaExportDir, summary.Name + ".xml");
+                if (!File.Exists(path))
+                    throw new FileNotFoundException($"Fixture missing: {path}");
+                var newXml = File.ReadAllText(path);
+                var newParser = new SimaticMLParser(switchConstantResolver, udtResolver, commentResolver);
+                dbInfo = newParser.Parse(newXml);
+                xml = newXml;
+                Log.Information("DevLauncher DB switch: now editing {Name}", dbInfo.Name);
+                return newXml;
+            });
 
         licenseService.StartHeartbeat();
         var dialog = new BulkChangeDialog(vm);
@@ -327,6 +346,40 @@ class Program
         encoder.Frames.Add(BitmapFrame.Create(rtb));
         using var fs = File.Create(outputPath);
         encoder.Save(fs);
+    }
+
+    /// <summary>
+    /// DevLauncher stand-in for project DB enumeration (#59): every <c>*.xml</c>
+    /// under <c>%TEMP%\BlockParam\</c> whose root element is one of the SimaticML
+    /// DB block tags is offered as a switchable target.
+    /// </summary>
+    private static IReadOnlyList<DataBlockSummary> EnumerateDevLauncherDbs(string dir)
+    {
+        if (!Directory.Exists(dir)) return Array.Empty<DataBlockSummary>();
+        var list = new List<DataBlockSummary>();
+        foreach (var path in Directory.GetFiles(dir, "*.xml"))
+        {
+            try
+            {
+                var doc = System.Xml.Linq.XDocument.Load(path);
+                var dbElement = doc.Descendants().FirstOrDefault(e =>
+                    e.Name.LocalName == "SW.Blocks.GlobalDB" ||
+                    e.Name.LocalName == "SW.Blocks.InstanceDB");
+                if (dbElement == null) continue;
+
+                var blockType = dbElement.Name.LocalName.Replace("SW.Blocks.", "");
+                list.Add(new DataBlockSummary(
+                    Path.GetFileNameWithoutExtension(path),
+                    folderPath: "",
+                    blockType: blockType,
+                    isInstanceDb: blockType == "InstanceDB"));
+            }
+            catch (Exception ex)
+            {
+                Log.Warning(ex, "DevLauncher: skipping {Path} (not a parseable DB XML)", path);
+            }
+        }
+        return list;
     }
 
     private static string? FindFile(params string[] candidates)

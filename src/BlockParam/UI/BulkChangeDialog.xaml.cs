@@ -29,6 +29,11 @@ public partial class BulkChangeDialog : Window
     }
 
     private bool _suppressSelectionEvents;
+    // Set true while OnDbSwitcherSearchKeyDown navigates into the result list
+    // — prevents the resulting SelectionChanged from being interpreted as a
+    // user-initiated switch (#59 review: Down arrow used to accidentally
+    // switch to the first DB).
+    private bool _suppressDbSwitcherSelectionChanged;
 
     // Inspector collapse: remember the expanded width so we can restore it.
     // 340 matches the XAML default; overwritten once the user resizes.
@@ -41,7 +46,21 @@ public partial class BulkChangeDialog : Window
         viewModel.RequestClose += () => Close();
         viewModel.FlatListRefreshed += RehydrateManualSelection;
         viewModel.PropertyChanged += OnViewModelPropertyChanged;
-        Closed += (_, _) => viewModel.Dispose();
+        // VM raises this when "go to first change" picks a member to scroll
+        // into view (#59 follow-up). VM owns the selection logic; we just
+        // do the visual scroll the ListView needs. Named so we can unhook
+        // on close — matches the _licenseStateChangedHandler cleanup pattern.
+        Action<MemberNodeViewModel> jumpHandler = target =>
+        {
+            target.EnsureVisible();
+            MemberListView.ScrollIntoView(target);
+        };
+        viewModel.RequestJumpToMember += jumpHandler;
+        Closed += (_, _) =>
+        {
+            viewModel.RequestJumpToMember -= jumpHandler;
+            viewModel.Dispose();
+        };
 
         // Briefly set Topmost to appear above TIA Portal, then release
         // so other windows (non-TIA) can go in front.
@@ -898,11 +917,28 @@ public partial class BulkChangeDialog : Window
         base.OnClosing(e);
         if (DataContext is not BulkChangeViewModel vm) return;
 
-        // Unsaved pending edits (yellow) — ask user before closing
-        if (vm.PendingInlineEditCount > 0)
+        // Unsaved pending edits — across the active DB *and* any stashed DBs.
+        // Stash-only loss used to be silent (#59 follow-up); now both states
+        // route through the close-confirm so the user is never surprised by
+        // disappearing work.
+        var active = vm.PendingInlineEditCount;
+        var stashedCount = 0;
+        string stashedDbList = "";
+        if (vm.StashedDbs.Count > 0)
         {
+            stashedCount = vm.StashedDbs.Sum(s => s.Count);
+            stashedDbList = string.Join(", ", vm.StashedDbs.Select(s => s.DbName));
+        }
+
+        if (active > 0)
+        {
+            var message = stashedCount > 0
+                ? Res.Format("Dialog_UnsavedChanges_Prompt_WithStash",
+                    active, stashedCount, stashedDbList)
+                : Res.Format("Dialog_UnsavedChanges_Prompt", active);
+
             var result = MessageBox.Show(
-                Res.Format("Dialog_UnsavedChanges_Prompt", vm.PendingInlineEditCount),
+                message,
                 Res.Get("Dialog_UnsavedChanges_Title"),
                 MessageBoxButton.YesNoCancel,
                 MessageBoxImage.Warning);
@@ -910,6 +946,11 @@ public partial class BulkChangeDialog : Window
             switch (result)
             {
                 case MessageBoxResult.Yes:
+                    // Apply commits the active DB only. Stashed edits in other
+                    // DBs still get discarded on close — the prompt text spells
+                    // that out so the user picks knowingly. Apply-everything-
+                    // across-stashes would need a per-DB switch+commit loop,
+                    // which is a much bigger feature.
                     vm.ApplyCommand.Execute(null);
                     // Apply may have bailed out (e.g. user declined the compile prompt on an
                     // inconsistent block). Pending edits are preserved in that case — keep
@@ -929,6 +970,21 @@ public partial class BulkChangeDialog : Window
                 case MessageBoxResult.Cancel:
                     e.Cancel = true;
                     return;
+            }
+        }
+        else if (stashedCount > 0)
+        {
+            // Active is clean but stashes exist. There's nothing to "Apply"
+            // here, so a 3-way prompt would just confuse — Yes/No suffices.
+            var result = MessageBox.Show(
+                Res.Format("Dialog_UnsavedChanges_StashOnly", stashedCount, stashedDbList),
+                Res.Get("Dialog_UnsavedChanges_Title"),
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Warning);
+            if (result != MessageBoxResult.Yes)
+            {
+                e.Cancel = true;
+                return;
             }
         }
 
@@ -1029,5 +1085,110 @@ public partial class BulkChangeDialog : Window
             sumBefore += heights[i];
             sumAfter -= heights[i];
         }
+    }
+
+    // --- DB-switcher dropdown (#59) ---
+
+    /// <summary>
+    /// ToggleButton click on the combo. Opens the popup via the VM command
+    /// (which lazy-loads + caches the DB list on first open).
+    /// </summary>
+    private void OnDbSwitcherButtonClick(object sender, RoutedEventArgs e)
+    {
+        if (DataContext is not BulkChangeViewModel vm) return;
+        if (vm.IsDataBlocksDropdownOpen)
+        {
+            vm.IsDataBlocksDropdownOpen = false;
+            return;
+        }
+        if (vm.OpenDataBlocksDropdownCommand.CanExecute(null))
+            vm.OpenDataBlocksDropdownCommand.Execute(null);
+    }
+
+    /// <summary>Focus the search box and clear it whenever the popup opens.</summary>
+    private void OnDbSwitcherPopupOpened(object? sender, EventArgs e)
+    {
+        if (DataContext is BulkChangeViewModel vm)
+            vm.DataBlockSearchText = "";
+        DbSwitcherSearchBox.Focus();
+        Keyboard.Focus(DbSwitcherSearchBox);
+    }
+
+    /// <summary>
+    /// Search-box keys: ↓ jumps to the list, Enter accepts the first match,
+    /// Esc closes the popup.
+    /// </summary>
+    private void OnDbSwitcherSearchKeyDown(object sender, KeyEventArgs e)
+    {
+        if (DataContext is not BulkChangeViewModel vm) return;
+
+        switch (e.Key)
+        {
+            case Key.Escape:
+                vm.IsDataBlocksDropdownOpen = false;
+                e.Handled = true;
+                break;
+            case Key.Down:
+                if (DbSwitcherList.Items.Count > 0)
+                {
+                    // Highlight the first row and move focus to it. The
+                    // SelectionChanged that fires here is *navigation*, not
+                    // a user pick — gate it so the switch only triggers on
+                    // explicit Enter / mouse click.
+                    _suppressDbSwitcherSelectionChanged = true;
+                    try { DbSwitcherList.SelectedIndex = 0; }
+                    finally { _suppressDbSwitcherSelectionChanged = false; }
+                    var firstItem = (ListBoxItem?)DbSwitcherList.ItemContainerGenerator.ContainerFromIndex(0);
+                    firstItem?.Focus();
+                    e.Handled = true;
+                }
+                break;
+            case Key.Enter:
+                if (DbSwitcherList.Items.Count > 0
+                    && DbSwitcherList.Items[0] is Models.DataBlockSummary first)
+                {
+                    vm.SwitchToDataBlock(first);
+                    e.Handled = true;
+                }
+                break;
+        }
+    }
+
+    /// <summary>List keys: Esc closes; Enter switches to the highlighted DB.</summary>
+    private void OnDbSwitcherListKeyDown(object sender, KeyEventArgs e)
+    {
+        if (DataContext is not BulkChangeViewModel vm) return;
+
+        if (e.Key == Key.Escape)
+        {
+            vm.IsDataBlocksDropdownOpen = false;
+            e.Handled = true;
+        }
+        else if (e.Key == Key.Enter && DbSwitcherList.SelectedItem is Models.DataBlockSummary picked)
+        {
+            vm.SwitchToDataBlock(picked);
+            e.Handled = true;
+        }
+    }
+
+    /// <summary>
+    /// Mouse selection on the list switches to the picked DB. Resets the
+    /// SelectedItem afterwards so the same row can be re-clicked later.
+    /// Skips programmatic selection changes (the Down-arrow navigation in
+    /// the search box) so navigation keys don't trigger an accidental switch.
+    /// </summary>
+    private void OnDbSwitcherSelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_suppressDbSwitcherSelectionChanged) return;
+        if (DataContext is not BulkChangeViewModel vm) return;
+        if (sender is not ListBox lb) return;
+        if (lb.SelectedItem is not Models.DataBlockSummary picked) return;
+
+        // Defer so the popup can absorb the StaysOpen=False close gracefully.
+        Dispatcher.BeginInvoke(new Action(() =>
+        {
+            vm.SwitchToDataBlock(picked);
+            lb.SelectedItem = null;
+        }), System.Windows.Threading.DispatcherPriority.Background);
     }
 }
