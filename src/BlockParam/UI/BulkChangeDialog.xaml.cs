@@ -2,6 +2,7 @@ using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Media;
 using BlockParam.Diagnostics;
 using BlockParam.Localization;
 using BlockParam.Services;
@@ -15,6 +16,16 @@ public partial class BulkChangeDialog : Window
         InitializeComponent();
         WindowIconHelper.SetIcon(this);
         ZoomHost.Attach(this);
+
+        // #64: capture sticky-header references once. The handler reads these
+        // on every ScrollChanged to keep all four section headers visible —
+        // pinned at viewport top once scrolled past, pinned at viewport bottom
+        // before reached, in flow when their natural Y is inside the viewport.
+        _stickyHeaders = new FrameworkElement[]
+            { StickyHeader1, StickyHeader2, StickyHeader3, StickyHeader4 };
+        _stickyTransforms = new[]
+            { StickyTransform1, StickyTransform2, StickyTransform3, StickyTransform4 };
+        InspectorScroll.ScrollChanged += OnInspectorScrollChanged;
     }
 
     private bool _suppressSelectionEvents;
@@ -927,6 +938,96 @@ public partial class BulkChangeDialog : Window
         {
             e.Cancel = true;
             return;
+        }
+    }
+
+    // ---- Sticky inspector section headers (#64) ----------------------------
+    private readonly FrameworkElement[] _stickyHeaders;
+    private readonly TranslateTransform[] _stickyTransforms;
+
+    /// <summary>
+    /// Click anywhere on a section header → expand that section and scroll
+    /// it to the top of the inspector so its body is unveiled. The toggle
+    /// caret (a Button inside the header) keeps its independent
+    /// expand-or-collapse behavior; we filter clicks that bubbled up from
+    /// it so the caret remains a true toggle rather than a one-way expander.
+    /// </summary>
+    private void OnInspectorHeaderClick(object sender, MouseButtonEventArgs e)
+    {
+        if (e.OriginalSource is DependencyObject dep && FindAncestor<Button>(dep) != null) return;
+        if (sender is not FrameworkElement header) return;
+        if (DataContext is not BulkChangeViewModel vm) return;
+
+        int idx = Array.IndexOf(_stickyHeaders, header);
+        if (idx < 0) return;
+
+        // Expand the section before scrolling so the body's height counts in
+        // ExtentHeight — otherwise ScrollToVerticalOffset clamps short.
+        switch (idx)
+        {
+            case 0: vm.IsBulkEditExpanded = true; break;
+            case 1: vm.IsBulkPreviewExpanded = true; break;
+            case 2: vm.IsPendingExpanded = true; break;
+            case 3: vm.IsIssuesExpanded = true; break;
+        }
+        UpdateLayout();
+
+        // Compute the header's natural Y in scroll-content coords (back out
+        // the sticky transform that's currently applied to it).
+        var p = header.TransformToVisual(InspectorContent).Transform(new Point(0, 0));
+        double naturalY = p.Y - _stickyTransforms[idx].Y;
+
+        // Scrolling to naturalY would stop with the clicked header at the
+        // viewport top — but the sticky logic then pushes it DOWN by the
+        // combined height of all preceding sticky headers (which stack above),
+        // so those bands cover the start of this section's body. Pre-subtract
+        // sumBefore so the body starts exactly below the full sticky stack.
+        double sumBefore = 0;
+        for (int i = 0; i < idx; i++) sumBefore += _stickyHeaders[i].ActualHeight;
+        InspectorScroll.ScrollToVerticalOffset(naturalY - sumBefore);
+    }
+
+    /// <summary>
+    /// Keeps each inspector section header visible as the user scrolls:
+    /// headers above the viewport stack at the top, headers below the
+    /// viewport stack at the bottom, in-view headers stay in flow. Headers
+    /// preserve document order — preceding headers reserve room above, and
+    /// following headers reserve room below, so their bands never overlap.
+    /// </summary>
+    private void OnInspectorScrollChanged(object sender, ScrollChangedEventArgs e)
+    {
+        var n = _stickyHeaders.Length;
+        var heights = new double[n];
+        var naturalY = new double[n];
+        for (int i = 0; i < n; i++)
+        {
+            heights[i] = _stickyHeaders[i].ActualHeight;
+            // Position with current RenderTransform applied; subtract the
+            // current translate to recover the natural (untransformed) Y.
+            var p = _stickyHeaders[i]
+                .TransformToVisual(InspectorContent)
+                .Transform(new Point(0, 0));
+            naturalY[i] = p.Y - _stickyTransforms[i].Y;
+        }
+
+        double scrollTop = InspectorScroll.VerticalOffset;
+        double scrollBot = scrollTop + InspectorScroll.ViewportHeight;
+
+        double sumBefore = 0;
+        double sumAfter = 0;
+        for (int i = 0; i < n; i++) sumAfter += heights[i];
+
+        for (int i = 0; i < n; i++)
+        {
+            double topLimit = scrollTop + sumBefore;
+            double bottomLimit = scrollBot - sumAfter;
+            // If the viewport is too small to fit all headers, topLimit can
+            // exceed bottomLimit — pinning to the top wins (Math.Max last).
+            double newY = Math.Max(topLimit, Math.Min(bottomLimit, naturalY[i]));
+            _stickyTransforms[i].Y = newY - naturalY[i];
+
+            sumBefore += heights[i];
+            sumAfter -= heights[i];
         }
     }
 }
