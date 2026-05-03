@@ -222,7 +222,10 @@ public partial class BulkChangeDialog : Window
             MemberListView.SelectedItems.Clear();
             foreach (var m in MemberListView.Items.OfType<MemberNodeViewModel>())
             {
-                if (vm.ManualSelectedPaths.Contains(m.Path))
+                // ManualSelectedPaths is keyed by VM reference now (#58),
+                // so a same-path leaf in a companion DB is a different
+                // entry — Contains(m) picks the right one without alias.
+                if (vm.ManualSelectedPaths.Contains(m))
                 {
                     MemberListView.SelectedItems.Add(m);
                 }

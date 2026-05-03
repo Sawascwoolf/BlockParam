@@ -90,7 +90,11 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     private MemberNodeViewModel? _selectedFlatMember;
     private ScopeLevel? _selectedScope;
     private string _newValue = "";
-    private readonly HashSet<string> _manualSelectedPaths = new(StringComparer.Ordinal);
+    // Multi-DB safe (#58): keyed by MemberNodeViewModel reference, not path
+    // string. Two leaves in different DBs that happen to share a Path would
+    // alias under string keying — Ctrl+click selection on companion DB
+    // members would silently target the focused DB's same-path leaf.
+    private readonly HashSet<MemberNodeViewModel> _manualSelectedPaths = new();
     private readonly HashSet<string> _bulkErrorPaths = new(StringComparer.Ordinal);
     // True once the user has typed in the NewValue textbox. Prefills from the
     // current selection are skipped while this is true, so user-entered input
@@ -665,8 +669,13 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     /// <summary>Number of manually selected leaf members (includes ones hidden by filter).</summary>
     public int ManualSelectionCount => _manualSelectedPaths.Count;
 
-    /// <summary>Read-only view of manually selected member paths (for code-behind rehydration).</summary>
-    public IReadOnlyCollection<string> ManualSelectedPaths => _manualSelectedPaths;
+    /// <summary>
+    /// Read-only view of manually selected member VMs (for code-behind
+    /// rehydration). Multi-DB safe (#58): keyed by reference, so the
+    /// dialog's ListView rehydration test (Contains(m)) picks the right
+    /// VM in whichever DB it lives.
+    /// </summary>
+    public IReadOnlyCollection<MemberNodeViewModel> ManualSelectedPaths => _manualSelectedPaths;
 
     /// <summary>
     /// Bulk panel is visible when the user can edit — either scope mode (single selection)
@@ -2225,10 +2234,9 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         {
             if (IsManualMode)
             {
-                foreach (var path in _manualSelectedPaths)
+                foreach (var node in _manualSelectedPaths)
                 {
-                    var node = FindNodeByPath(path);
-                    if (node == null || !node.IsLeaf) continue;
+                    if (!node.IsLeaf) continue;
                     TryAddPreviewEntry(node);
                 }
             }
@@ -2622,10 +2630,9 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
 
             string? firstError = null;
             string? firstErrorName = null;
-            foreach (var path in _manualSelectedPaths)
+            foreach (var node in _manualSelectedPaths)
             {
-                var node = FindNodeByPath(path);
-                if (node == null || !node.IsLeaf) continue;
+                if (!node.IsLeaf) continue;
                 var memberError = ValidateValueForMember(node, _newValue);
                 if (memberError != null)
                 {
@@ -2983,12 +2990,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     {
         if (IsManualMode)
         {
-            return _manualSelectedPaths.Count(p =>
-            {
-                var node = FindNodeByPath(p);
-                if (node == null || !node.IsLeaf) return false;
-                return WouldChange(node);
-            });
+            return _manualSelectedPaths.Count(node => node.IsLeaf && WouldChange(node));
         }
 
         if (_selectedScope == null) return 0;
@@ -3019,11 +3021,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     {
         if (IsManualMode)
         {
-            return _manualSelectedPaths.Count(p =>
-            {
-                var node = FindNodeByPath(p);
-                return node != null && node.IsLeaf;
-            });
+            return _manualSelectedPaths.Count(node => node.IsLeaf);
         }
         return _selectedScope?.MatchCount ?? 0;
     }
@@ -3079,10 +3077,9 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         MaybeWarnLimitReachedOnce();
 
         int count = 0;
-        foreach (var path in _manualSelectedPaths)
+        foreach (var node in _manualSelectedPaths)
         {
-            var node = FindNodeByPath(path);
-            if (node == null || !node.IsLeaf) continue;
+            if (!node.IsLeaf) continue;
             var startsEqualsNew = string.Equals(node.StartValue, _newValue, StringComparison.OrdinalIgnoreCase);
             if (!startsEqualsNew)
             {
@@ -4075,14 +4072,14 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         foreach (var m in addedList)
         {
             if (!m.IsLeaf) continue;
-            if (_manualSelectedPaths.Add(m.Path)) changed = true;
+            if (_manualSelectedPaths.Add(m)) changed = true;
         }
 
         if (!isFilterRehydration)
         {
             foreach (var m in removedList)
             {
-                if (_manualSelectedPaths.Remove(m.Path)) changed = true;
+                if (_manualSelectedPaths.Remove(m)) changed = true;
             }
         }
 
@@ -4158,10 +4155,8 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
 
     private void PinManuallySelectedVisibility()
     {
-        foreach (var path in _manualSelectedPaths)
+        foreach (var node in _manualSelectedPaths)
         {
-            var node = FindNodeByPath(path);
-            if (node == null) continue;
             var p = node.Parent;
             while (p != null)
             {
@@ -4205,10 +4200,9 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     private IReadOnlyCollection<string> GetSelectedDatatypes()
     {
         var types = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var path in _manualSelectedPaths)
+        foreach (var node in _manualSelectedPaths)
         {
-            var node = FindNodeByPath(path);
-            if (node is { IsLeaf: true })
+            if (node.IsLeaf)
                 types.Add(node.Datatype);
         }
         return types;
