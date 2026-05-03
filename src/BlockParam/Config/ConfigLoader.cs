@@ -157,9 +157,6 @@ public class ConfigLoader
     /// the licensing pattern from #20 — IT can deploy a single
     /// <c>{"updateCheck":{"enabled":false}}</c> file to disable checks
     /// fleet-wide on air-gapped engineering networks.
-    ///
-    /// User-set fields the admin file doesn't override (e.g.
-    /// <c>skippedVersion</c>) are preserved.
     /// </summary>
     public UpdateCheckSettings ReadUpdateCheckSettings()
     {
@@ -168,13 +165,10 @@ public class ConfigLoader
         var managed = ReadManagedUpdateCheckSettings();
         if (managed != null)
         {
-            // Only fields the admin actually set should win — leaving the
-            // user's SkippedVersion alone, for example.
+            // Only fields the admin actually set should win.
             if (managed.EnabledExplicit) settings.Enabled = managed.Settings.Enabled;
             if (managed.IncludePrereleasesExplicit)
                 settings.IncludePrereleases = managed.Settings.IncludePrereleases;
-            if (managed.SkippedExplicit)
-                settings.SkippedVersion = managed.Settings.SkippedVersion;
         }
         return settings;
     }
@@ -245,7 +239,6 @@ public class ConfigLoader
                 Settings = settings,
                 EnabledExplicit = node.Property("enabled") != null,
                 IncludePrereleasesExplicit = node.Property("includePrereleases") != null,
-                SkippedExplicit = node.Property("skippedVersion") != null,
             };
         }
         catch (Exception ex)
@@ -260,7 +253,6 @@ public class ConfigLoader
         public UpdateCheckSettings Settings { get; set; } = new();
         public bool EnabledExplicit { get; set; }
         public bool IncludePrereleasesExplicit { get; set; }
-        public bool SkippedExplicit { get; set; }
     }
 
     private BulkChangeConfig? TryReadConfig(string context)

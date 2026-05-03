@@ -719,9 +719,6 @@ Compile the block now?</value>
   <data name="Update_RemindLater" xml:space="preserve">
     <value>Remind me later</value>
   </data>
-  <data name="Update_SkipVersion" xml:space="preserve">
-    <value>Skip this version</value>
-  </data>
   <data name="Update_CheckEnabled" xml:space="preserve">
     <value>Check for updates</value>
   </data>

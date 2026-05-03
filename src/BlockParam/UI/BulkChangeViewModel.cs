@@ -2515,13 +2515,9 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         var info = _availableUpdate;
         if (info == null || _updateCheckService == null) return;
 
-        var dialog = new UpdateAvailableDialog(info, _updateCheckService);
+        var dialog = new UpdateAvailableDialog(info);
         dialog.Owner = Application.Current?.Windows.OfType<Window>().FirstOrDefault(w => w.IsActive);
         dialog.ShowDialog();
-
-        // The user may have skipped the version — re-evaluate the badge.
-        try { AvailableUpdate = _updateCheckService.GetCached(); }
-        catch (Exception ex) { Log.Warning(ex, "UpdateCheck: post-dialog GetCached threw"); }
     }
 
     /// <summary>

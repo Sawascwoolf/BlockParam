@@ -284,7 +284,6 @@ Datenbaustein jetzt kompilieren?</value></data>
   <data name="Update_NoChangelog" xml:space="preserve"><value>(Zu dieser Version sind keine Versionshinweise hinterlegt.)</value></data>
   <data name="Update_OpenDownload" xml:space="preserve"><value>Download-Seite öffnen</value></data>
   <data name="Update_RemindLater" xml:space="preserve"><value>Später erinnern</value></data>
-  <data name="Update_SkipVersion" xml:space="preserve"><value>Diese Version überspringen</value></data>
   <data name="Update_CheckEnabled" xml:space="preserve"><value>Nach Updates suchen</value></data>
   <data name="Update_CheckEnabledTooltip" xml:space="preserve"><value>Wenn aktiviert, fragt BlockParam höchstens einmal pro Tag GitHub Releases nach neuen Versionen ab. Es werden keine Telemetriedaten gesendet.</value></data>
   <data name="Update_IncludePrereleases" xml:space="preserve"><value>Vorabversionen einbeziehen</value></data>

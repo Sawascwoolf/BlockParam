@@ -30,10 +30,4 @@ public interface IUpdateCheckService
     /// or the GitHub call failed and there is no usable cache.
     /// </returns>
     Task<UpdateInfo?> CheckAsync(CancellationToken ct = default);
-
-    /// <summary>
-    /// Persists <c>skippedVersion</c> in the user's config so the dialog
-    /// stops showing the badge until something newer ships.
-    /// </summary>
-    void SkipVersion(string tagName);
 }

@@ -161,40 +161,6 @@ public class UpdateCheckServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task SkippedVersion_SuppressesBadge()
-    {
-        var release = new UpdateInfo { TagName = "v0.4.0" };
-        var fetcher = new RecordingFetcher(release);
-        var service = Build(
-            fetcher,
-            current: "v0.3.0",
-            settings: new UpdateCheckSettings
-            {
-                Enabled = true,
-                SkippedVersion = "v0.4.0",
-            });
-
-        (await service.CheckAsync()).Should().BeNull();
-    }
-
-    [Fact]
-    public async Task SkippedVersion_NewerVersionStillSurfaces()
-    {
-        var release = new UpdateInfo { TagName = "v0.5.0" };
-        var fetcher = new RecordingFetcher(release);
-        var service = Build(
-            fetcher,
-            current: "v0.3.0",
-            settings: new UpdateCheckSettings
-            {
-                Enabled = true,
-                SkippedVersion = "v0.4.0",
-            });
-
-        (await service.CheckAsync()).Should().NotBeNull();
-    }
-
-    [Fact]
     public void GetCached_ReturnsCachedReleaseEvenWhenStale()
     {
         // Write a stale cache directly so we don't rely on the fetcher.
@@ -216,22 +182,6 @@ public class UpdateCheckServiceTests : IDisposable
     }
 
     [Fact]
-    public void SkipVersion_PersistsToSettings()
-    {
-        var saved = new UpdateCheckSettings();
-        var fetcher = new RecordingFetcher(null);
-        var service = new UpdateCheckService(
-            fetcher,
-            VersionTag.FromSystemVersion(new System.Version(0, 3, 0)),
-            _cachePath,
-            readSettings: () => saved,
-            writeSettings: s => saved = s);
-
-        service.SkipVersion("v0.4.0");
-        saved.SkippedVersion.Should().Be("v0.4.0");
-    }
-
-    [Fact]
     public async Task CheckAsync_VersionCompareHandlesRcSuffix()
     {
         // current is rc1, latest stable is the same version without suffix:
@@ -243,8 +193,7 @@ public class UpdateCheckServiceTests : IDisposable
             fetcher,
             currentVersion: Parse("v0.4.0-rc1"),
             cachePath: _cachePath,
-            readSettings: () => new UpdateCheckSettings(),
-            writeSettings: _ => { });
+            readSettings: () => new UpdateCheckSettings());
 
         (await service.CheckAsync()).Should().NotBeNull();
     }
@@ -263,7 +212,6 @@ public class UpdateCheckServiceTests : IDisposable
             currentVersion: Parse(current),
             cachePath: _cachePath,
             readSettings: () => settings,
-            writeSettings: _ => { },
             utcNow: () => clock.Now);
     }
 

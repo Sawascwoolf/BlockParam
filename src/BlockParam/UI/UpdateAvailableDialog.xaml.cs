@@ -9,15 +9,13 @@ namespace BlockParam.UI;
 public partial class UpdateAvailableDialog : Window
 {
     private readonly UpdateInfo _info;
-    private readonly IUpdateCheckService _service;
 
-    public UpdateAvailableDialog(UpdateInfo info, IUpdateCheckService service)
+    public UpdateAvailableDialog(UpdateInfo info)
     {
         InitializeComponent();
         WindowIconHelper.SetIcon(this);
         ZoomHost.Attach(this);
         _info = info;
-        _service = service;
         Populate();
     }
 
@@ -69,11 +67,4 @@ public partial class UpdateAvailableDialog : Window
     }
 
     private void OnRemindLaterClick(object sender, RoutedEventArgs e) => Close();
-
-    private void OnSkipClick(object sender, RoutedEventArgs e)
-    {
-        try { _service.SkipVersion(_info.TagName); }
-        catch (Exception ex) { Log.Warning(ex, "UpdateAvailableDialog: SkipVersion failed"); }
-        Close();
-    }
 }

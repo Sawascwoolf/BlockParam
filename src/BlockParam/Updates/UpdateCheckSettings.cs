@@ -24,12 +24,4 @@ public sealed class UpdateCheckSettings
     /// </summary>
     [JsonProperty("includePrereleases")]
     public bool IncludePrereleases { get; set; }
-
-    /// <summary>
-    /// Tag the user clicked "Skip this version" on (e.g. <c>v0.4.0</c>).
-    /// Suppress the badge while a release with this tag is the latest;
-    /// re-show on any newer version.
-    /// </summary>
-    [JsonProperty("skippedVersion")]
-    public string? SkippedVersion { get; set; }
 }

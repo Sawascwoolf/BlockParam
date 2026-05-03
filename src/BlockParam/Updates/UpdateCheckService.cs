@@ -27,7 +27,6 @@ public sealed class UpdateCheckService : IUpdateCheckService
     private readonly IReleaseFetcher _fetcher;
     private readonly Func<DateTime> _utcNow;
     private readonly Func<UpdateCheckSettings> _readSettings;
-    private readonly Action<UpdateCheckSettings> _writeSettings;
     private readonly VersionTag _currentVersion;
     private readonly string _cachePath;
     private readonly TimeSpan _cacheTtl;
@@ -37,7 +36,6 @@ public sealed class UpdateCheckService : IUpdateCheckService
         VersionTag currentVersion,
         string cachePath,
         Func<UpdateCheckSettings> readSettings,
-        Action<UpdateCheckSettings> writeSettings,
         Func<DateTime>? utcNow = null,
         TimeSpan? cacheTtl = null)
     {
@@ -45,7 +43,6 @@ public sealed class UpdateCheckService : IUpdateCheckService
         _currentVersion = currentVersion;
         _cachePath = cachePath;
         _readSettings = readSettings;
-        _writeSettings = writeSettings;
         _utcNow = utcNow ?? (() => DateTime.UtcNow);
         _cacheTtl = cacheTtl ?? DefaultCacheTtl;
     }
@@ -89,14 +86,6 @@ public sealed class UpdateCheckService : IUpdateCheckService
         return AsActionable(release ?? cache?.Release, settings);
     }
 
-    public void SkipVersion(string tagName)
-    {
-        var settings = SafeReadSettings();
-        settings.SkippedVersion = tagName;
-        try { _writeSettings(settings); }
-        catch (Exception ex) { Log.Warning(ex, "UpdateCheck: cannot persist SkippedVersion"); }
-    }
-
     private UpdateInfo? AsActionable(UpdateInfo? release) =>
         AsActionable(release, SafeReadSettings());
 
@@ -107,12 +96,6 @@ public sealed class UpdateCheckService : IUpdateCheckService
         if (release.PreRelease && !settings.IncludePrereleases) return null;
         if (!VersionTag.TryParse(release.TagName, out var releaseVersion)) return null;
         if (releaseVersion.CompareTo(_currentVersion) <= 0) return null;
-
-        // "Skip this version" applies until something newer ships.
-        if (!string.IsNullOrEmpty(settings.SkippedVersion) &&
-            VersionTag.TryParse(settings.SkippedVersion, out var skipped) &&
-            releaseVersion.CompareTo(skipped) <= 0)
-            return null;
 
         return release;
     }

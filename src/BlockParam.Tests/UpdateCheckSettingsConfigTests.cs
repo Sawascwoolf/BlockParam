@@ -25,7 +25,7 @@ public class UpdateCheckSettingsConfigTests : IDisposable
 
     private ConfigLoader Build()
     {
-        var loader = Build();
+        var loader = new ConfigLoader(_configPath);
         loader.ManagedConfigPathOverride = _managedPath;
         return loader;
     }
@@ -44,7 +44,6 @@ public class UpdateCheckSettingsConfigTests : IDisposable
 
         settings.Enabled.Should().BeTrue();
         settings.IncludePrereleases.Should().BeFalse();
-        settings.SkippedVersion.Should().BeNull();
     }
 
     [Fact]
@@ -54,8 +53,7 @@ public class UpdateCheckSettingsConfigTests : IDisposable
             ""version"": ""1.0"",
             ""updateCheck"": {
                 ""enabled"": false,
-                ""includePrereleases"": true,
-                ""skippedVersion"": ""v0.4.0""
+                ""includePrereleases"": true
             }
         }");
 
@@ -64,7 +62,6 @@ public class UpdateCheckSettingsConfigTests : IDisposable
 
         settings.Enabled.Should().BeFalse();
         settings.IncludePrereleases.Should().BeTrue();
-        settings.SkippedVersion.Should().Be("v0.4.0");
     }
 
     [Fact]
@@ -72,7 +69,7 @@ public class UpdateCheckSettingsConfigTests : IDisposable
     {
         // User locally has updates ON.
         File.WriteAllText(_configPath, @"{
-            ""updateCheck"": { ""enabled"": true, ""skippedVersion"": ""v0.4.0"" }
+            ""updateCheck"": { ""enabled"": true }
         }");
         // IT pushes a managed config that disables the check.
         File.WriteAllText(_managedPath, @"{
@@ -84,8 +81,6 @@ public class UpdateCheckSettingsConfigTests : IDisposable
 
         // Managed flag wins.
         settings.Enabled.Should().BeFalse();
-        // User's SkippedVersion stays — managed file didn't touch that field.
-        settings.SkippedVersion.Should().Be("v0.4.0");
     }
 
     [Fact]
@@ -101,19 +96,18 @@ public class UpdateCheckSettingsConfigTests : IDisposable
         loader.SaveUpdateCheckSettings(new UpdateCheckSettings
         {
             Enabled = false,
-            SkippedVersion = "v0.4.0",
+            IncludePrereleases = true,
         });
 
         var json = File.ReadAllText(_configPath);
         json.Should().Contain("\"rulesDirectory\"");
         json.Should().Contain("\"language\"");
         json.Should().Contain("\"updateCheck\"");
-        json.Should().Contain("\"skippedVersion\": \"v0.4.0\"");
 
         // Round-trip through the loader
         loader.Invalidate();
         var roundtrip = loader.ReadUpdateCheckSettings();
         roundtrip.Enabled.Should().BeFalse();
-        roundtrip.SkippedVersion.Should().Be("v0.4.0");
+        roundtrip.IncludePrereleases.Should().BeTrue();
     }
 }

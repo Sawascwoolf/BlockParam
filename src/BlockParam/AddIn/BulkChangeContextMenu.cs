@@ -259,8 +259,7 @@ public class BulkChangeContextMenu : ContextMenuAddIn
                     fetcher: new GitHubReleaseFetcher(),
                     currentVersion: VersionTag.FromSystemVersion(current),
                     cachePath: Path.Combine(appDataDir, "update-check.json"),
-                    readSettings: () => configLoader.ReadUpdateCheckSettings(),
-                    writeSettings: s => configLoader.SaveUpdateCheckSettings(s));
+                    readSettings: () => configLoader.ReadUpdateCheckSettings());
             }
             catch (Exception ex)
             {
