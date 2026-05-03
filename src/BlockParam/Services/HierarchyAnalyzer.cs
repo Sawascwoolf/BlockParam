@@ -14,6 +14,61 @@ public class HierarchyAnalyzer
     /// </summary>
     public AnalysisResult Analyze(DataBlockInfo db, MemberNode selectedMember)
     {
+        var withinDb = AnalyzeWithinDb(db, selectedMember);
+        return new AnalysisResult(selectedMember, withinDb);
+    }
+
+    /// <summary>
+    /// Multi-DB analysis (#58). Generates the existing within-DB scope levels
+    /// PLUS one cross-DB sibling per within-DB scope, plus an "All selected
+    /// DBs" mega-scope covering every same-name match across every DB.
+    ///
+    /// Cross-DB lift rule: a scope whose <see cref="ScopeLevel.MatchingMembers"/>
+    /// has paths {p1, p2, ...} is lifted to a cross-DB sibling whose
+    /// MatchingMembers is every member in every active DB whose Path is in
+    /// {p1, p2, ...} and whose Datatype matches the selected member. DBs
+    /// that don't have any of those paths contribute zero members and are
+    /// silently skipped (#58 decision).
+    /// </summary>
+    public AnalysisResult AnalyzeMulti(
+        IReadOnlyList<DataBlockInfo> activeDbs,
+        DataBlockInfo selectedDb,
+        MemberNode selectedMember)
+    {
+        var withinDb = AnalyzeWithinDb(selectedDb, selectedMember);
+
+        // Single-DB session degrades to legacy behavior.
+        if (activeDbs.Count <= 1)
+            return new AnalysisResult(selectedMember, withinDb);
+
+        var combined = new List<ScopeLevel>(withinDb);
+        var crossDbScopes = new List<ScopeLevel>();
+
+        foreach (var w in withinDb)
+        {
+            var lifted = LiftToCrossDb(w, activeDbs, selectedMember);
+            if (lifted != null && lifted.MatchCount > w.MatchCount)
+                crossDbScopes.Add(lifted);
+        }
+        combined.AddRange(crossDbScopes);
+
+        // "All selected DBs" mega-scope: every same-name + same-datatype
+        // match across every active DB. Equivalent to lifting the broadest
+        // within-DB scope cross-DB, but emitted unconditionally so it shows
+        // up even when the selected DB has only the selected member itself.
+        var megaScope = BuildAllSelectedDbsScope(activeDbs, selectedMember);
+        if (megaScope != null
+            && (combined.Count == 0
+                || megaScope.MatchCount > combined.Max(s => s.MatchCount)))
+        {
+            combined.Add(megaScope);
+        }
+
+        return new AnalysisResult(selectedMember, combined);
+    }
+
+    private List<ScopeLevel> AnalyzeWithinDb(DataBlockInfo db, MemberNode selectedMember)
+    {
         var targetName = selectedMember.Name;
         var targetDatatype = selectedMember.Datatype;
 
@@ -34,7 +89,7 @@ public class HierarchyAnalyzer
 
         if (allMatches.Count <= 1 && arraySiblingScope == null && partialDimScopes.Count == 0)
         {
-            return new AnalysisResult(selectedMember, new List<ScopeLevel>());
+            return new List<ScopeLevel>();
         }
 
         var scopes = allMatches.Count > 1
@@ -57,7 +112,73 @@ public class HierarchyAnalyzer
             scopes.Insert(insertAt, partial);
         }
 
-        return new AnalysisResult(selectedMember, scopes);
+        return scopes;
+    }
+
+    /// <summary>
+    /// Builds the cross-DB sibling for a within-DB scope by matching the
+    /// scope's member paths against every active DB. Returns null if the
+    /// lifted scope has the same match count as the input (i.e. only the
+    /// selected DB had any of those paths) — no point showing a "cross-DB"
+    /// scope that isn't actually wider.
+    /// </summary>
+    private static ScopeLevel? LiftToCrossDb(
+        ScopeLevel withinDbScope,
+        IReadOnlyList<DataBlockInfo> activeDbs,
+        MemberNode selectedMember)
+    {
+        var paths = new HashSet<string>(
+            withinDbScope.MatchingMembers.Select(m => m.Path),
+            StringComparer.Ordinal);
+        var datatype = selectedMember.Datatype;
+
+        var lifted = new List<MemberNode>();
+        foreach (var db in activeDbs)
+        {
+            foreach (var m in db.AllMembers())
+            {
+                if (m.Datatype == datatype && paths.Contains(m.Path))
+                    lifted.Add(m);
+            }
+        }
+
+        if (lifted.Count == 0) return null;
+
+        return new ScopeLevel(
+            ancestorName: $"{withinDbScope.AncestorName} — across all selected DBs",
+            ancestorPath: withinDbScope.AncestorPath,
+            depth: -1000 + withinDbScope.Depth, // Cross-DB scopes sort after their within-DB sibling.
+            matchingMembers: lifted);
+    }
+
+    /// <summary>
+    /// "All selected DBs" mega-scope: every same-name + same-datatype match
+    /// in every active DB. The broadest possible scope in multi-DB mode.
+    /// </summary>
+    private static ScopeLevel? BuildAllSelectedDbsScope(
+        IReadOnlyList<DataBlockInfo> activeDbs,
+        MemberNode selectedMember)
+    {
+        var name = selectedMember.Name;
+        var datatype = selectedMember.Datatype;
+
+        var matches = new List<MemberNode>();
+        foreach (var db in activeDbs)
+        {
+            foreach (var m in db.AllMembers())
+            {
+                if (m.Name == name && m.Datatype == datatype)
+                    matches.Add(m);
+            }
+        }
+
+        if (matches.Count <= 1) return null;
+
+        return new ScopeLevel(
+            ancestorName: "All selected DBs",
+            ancestorPath: "",
+            depth: -2000, // Sorts last (broadest).
+            matchingMembers: matches);
     }
 
     /// <summary>
