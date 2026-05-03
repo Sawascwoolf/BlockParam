@@ -68,6 +68,14 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     // to a stashed DB later in the same session, the edits restore.
     private readonly Dictionary<string, StashedDbState> _stashedDbs =
         new(StringComparer.Ordinal);
+
+    // Model-to-VM and model-to-DB lookups for multi-DB routing (#58). Same
+    // path string can occur in multiple DBs, so reference equality on
+    // MemberNode is the unambiguous way to map a scope match back to its
+    // tree VM (where pending values live) and to its owning ActiveDb (where
+    // the xml lives). Rebuilt on every BuildRootMembersFromActiveDbs.
+    private readonly Dictionary<MemberNode, MemberNodeViewModel> _modelToVm = new();
+    private readonly Dictionary<MemberNode, ActiveDb> _modelToDb = new();
     private MemberNodeViewModel? _selectedFlatMember;
     private ScopeLevel? _selectedScope;
     private string _newValue = "";
@@ -732,6 +740,12 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     /// </summary>
     private void BuildRootMembersFromActiveDbs()
     {
+        // Always rebuild the routing dictionaries so every model node is
+        // mapped to its current VM + owning DB. Stale entries from a prior
+        // tree would route writes to disposed VMs.
+        _modelToVm.Clear();
+        _modelToDb.Clear();
+
         if (_companions.Count == 0)
         {
             // Single-DB: flat list of top-level members, identical to legacy.
@@ -739,6 +753,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             {
                 var vm = new MemberNodeViewModel(member, null, _commentLanguagePolicy);
                 SubscribeStartValueEdited(vm);
+                IndexSubtree(vm, _active);
                 RootMembers.Add(vm);
             }
             return;
@@ -748,13 +763,14 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         // real top-level members, reused by reference — Path strings stay
         // unchanged, so existing rule patterns / scope-detection on member
         // paths still match across DBs.
-        AddDbGroupRoot(_active.Info);
+        AddDbGroupRoot(_active);
         foreach (var companion in _companions)
-            AddDbGroupRoot(companion.Info);
+            AddDbGroupRoot(companion);
     }
 
-    private void AddDbGroupRoot(DataBlockInfo info)
+    private void AddDbGroupRoot(ActiveDb db)
     {
+        var info = db.Info;
         var synthetic = new MemberNode(
             name: info.Name,
             datatype: "DB",
@@ -769,8 +785,54 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         foreach (var descendant in groupVm.AllDescendants())
             SubscribeStartValueEdited(descendant);
         groupVm.IsExpanded = true;
+        // Map every real (non-synthetic) descendant to its VM + owning DB so
+        // multi-DB scope hits route writes to the right tree / xml.
+        foreach (var descendant in groupVm.AllDescendants())
+        {
+            // Skip the synthetic group node itself — its Model has Datatype="DB"
+            // and isn't a real member. Identifying it by reference equality
+            // against the synthetic instance avoids relying on Datatype string
+            // matching, which is fragile.
+            if (ReferenceEquals(descendant.Model, synthetic)) continue;
+            _modelToVm[descendant.Model] = descendant;
+            _modelToDb[descendant.Model] = db;
+        }
         RootMembers.Add(groupVm);
     }
+
+    /// <summary>
+    /// Indexes every node in <paramref name="rootVm"/>'s subtree (root
+    /// included) into <see cref="_modelToVm"/> + <see cref="_modelToDb"/>.
+    /// Used by the single-DB code path; multi-DB indexes inside
+    /// <see cref="AddDbGroupRoot"/> with the synthetic-skip rule.
+    /// </summary>
+    private void IndexSubtree(MemberNodeViewModel rootVm, ActiveDb db)
+    {
+        _modelToVm[rootVm.Model] = rootVm;
+        _modelToDb[rootVm.Model] = db;
+        foreach (var descendant in rootVm.AllDescendants())
+        {
+            _modelToVm[descendant.Model] = descendant;
+            _modelToDb[descendant.Model] = db;
+        }
+    }
+
+    /// <summary>
+    /// Resolves a <see cref="MemberNode"/> (model) to its tree VM. Preferred
+    /// over <see cref="FindNodeByPath"/> when the caller already has the
+    /// model — it's O(1), and unambiguous in multi-DB sessions where the
+    /// same Path string can exist in multiple DBs.
+    /// </summary>
+    private MemberNodeViewModel? FindVmByModel(MemberNode model) =>
+        _modelToVm.TryGetValue(model, out var vm) ? vm : null;
+
+    /// <summary>
+    /// Returns the active DB that owns <paramref name="model"/>, or null
+    /// when the node is not part of the current tree (e.g. a stale model
+    /// from before the last RefreshTree).
+    /// </summary>
+    private ActiveDb? FindActiveDbForModel(MemberNode model) =>
+        _modelToDb.TryGetValue(model, out var db) ? db : null;
 
     /// <summary>
     /// All DBs currently being edited in this dialog session (#58). Always
@@ -1797,7 +1859,22 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
 
         ReloadSuggestions();
 
-        var result = _analyzer.Analyze(_active.Info, memberVm.Model);
+        // Multi-DB scope generation (#58): when companions exist, every
+        // within-DB scope gains a cross-DB sibling matching the same paths
+        // across all active DBs, plus an "All selected DBs" mega-scope.
+        // The selected member's owning DB drives the within-DB analysis;
+        // companions contribute only to the cross-DB lifts.
+        AnalysisResult result;
+        if (HasMultipleActiveDbs)
+        {
+            var owningDb = FindActiveDbForModel(memberVm.Model)?.Info ?? _active.Info;
+            var allInfos = AllActiveDbs.Select(a => a.Info).ToList();
+            result = _analyzer.AnalyzeMulti(allInfos, owningDb, memberVm.Model);
+        }
+        else
+        {
+            result = _analyzer.Analyze(_active.Info, memberVm.Model);
+        }
 
         if (!result.HasBulkOptions)
         {
@@ -1902,7 +1979,10 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             {
                 foreach (var m in _selectedScope.MatchingMembers)
                 {
-                    var node = FindNodeByPath(m.Path);
+                    // Multi-DB safe: route by model reference, not path string.
+                    // Same path can exist in multiple DBs; FindVmByModel is
+                    // O(1) and always picks the right DB's tree VM.
+                    var node = FindVmByModel(m);
                     if (node == null || !node.IsLeaf) continue;
                     TryAddPreviewEntry(node);
                 }
@@ -2021,7 +2101,10 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     /// </summary>
     private string? ResolvePendingValue(MemberNode model)
     {
-        var vm = FindNodeByPath(model.Path);
+        // Multi-DB safe lookup: a model is owned by exactly one ActiveDb,
+        // so reference equality picks the right tree VM regardless of which
+        // DBs share the path string.
+        var vm = FindVmByModel(model);
         if (vm != null && vm.IsPendingInlineEdit)
             return vm.EditableStartValue;
         return model.StartValue;
@@ -2041,7 +2124,9 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
 
         foreach (var (target, comment) in previews)
         {
-            var vm = FindNodeByPath(target.Path);
+            // Comment previews target scope members → route by model
+            // reference for cross-DB safety (#58).
+            var vm = FindVmByModel(target);
             if (vm != null)
             {
                 vm.PreviewComment = comment;
