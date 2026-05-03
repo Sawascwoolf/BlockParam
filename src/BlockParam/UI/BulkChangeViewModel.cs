@@ -82,6 +82,11 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     // the xml lives). Rebuilt on every BuildRootMembersFromActiveDbs.
     private readonly Dictionary<MemberNode, MemberNodeViewModel> _modelToVm = new();
     private readonly Dictionary<MemberNode, ActiveDb> _modelToDb = new();
+    // Multi-DB only (#58): the synthetic group VM that wraps each ActiveDb's
+    // members. Used to route per-DB scans (ClearPendingValuesForDb,
+    // CountPendingEditsForDb, ...) by reference instead of by Info.Name +
+    // PlcName comparisons that would still collide across PLC boundaries.
+    private readonly Dictionary<ActiveDb, MemberNodeViewModel> _dbToSynthetic = new();
     private MemberNodeViewModel? _selectedFlatMember;
     private ScopeLevel? _selectedScope;
     private string _newValue = "";
@@ -768,6 +773,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         // tree would route writes to disposed VMs.
         _modelToVm.Clear();
         _modelToDb.Clear();
+        _dbToSynthetic.Clear();
 
         if (_companions.Count == 0)
         {
@@ -808,6 +814,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         foreach (var descendant in groupVm.AllDescendants())
             SubscribeStartValueEdited(descendant);
         groupVm.IsExpanded = true;
+        _dbToSynthetic[db] = groupVm;
         // Map every real (non-synthetic) descendant to its VM + owning DB so
         // multi-DB scope hits route writes to the right tree / xml.
         foreach (var descendant in groupVm.AllDescendants())
@@ -957,13 +964,18 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     /// </summary>
     private (bool isActive, bool isFocused) GetActiveStatusFor(DataBlockSummary summary)
     {
-        if (Matches(_active.Info, summary)) return (true, true);
+        // Match on (Name, PlcName) — multi-PLC projects can host two DBs
+        // with the same name on different PLCs (#58 review must-fix #4).
+        // The focused DB's PLC is _currentPlcName; companions carry their
+        // own ActiveDb.PlcName.
+        if (string.Equals(_active.Info.Name, summary.Name, StringComparison.Ordinal)
+            && string.Equals(_currentPlcName, summary.PlcName, StringComparison.Ordinal))
+            return (true, true);
         foreach (var companion in _companions)
-            if (Matches(companion.Info, summary)) return (true, false);
+            if (string.Equals(companion.Info.Name, summary.Name, StringComparison.Ordinal)
+                && string.Equals(companion.PlcName, summary.PlcName, StringComparison.Ordinal))
+                return (true, false);
         return (false, false);
-
-        static bool Matches(DataBlockInfo info, DataBlockSummary s) =>
-            string.Equals(info.Name, s.Name, StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -1010,7 +1022,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
                 }
                 else
                 {
-                    RemoveCompanionByName(item.Summary.Name);
+                    RemoveCompanion(item.Summary);
                 }
             }
         }
@@ -1077,7 +1089,10 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
                 : (IConstantResolver?)null;
             var parser = new SimaticMLParser(constantResolver, _udtResolver, _commentResolver);
             var info = parser.Parse(xml);
-            _companions.Add(new ActiveDb(info, xml, onApply: null));
+            // PlcName from _currentPlcName: the dropdown only enumerates DBs
+            // from the focused PLC, so any read-only-fallback companion is
+            // implicitly on the same PLC as the focused DB.
+            _companions.Add(new ActiveDb(info, xml, onApply: null, plcName: _currentPlcName));
             Log.Information("Companion DB enabled via dropdown (read-only fallback): {Name}",
                 info.Name);
         }
@@ -1088,21 +1103,30 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         }
     }
 
-    /// <summary>Removes a companion by DB name (#58). No-op if not found.</summary>
     /// <summary>
-    /// Removes a companion by DB name (#58). When the companion has
-    /// pending edits in the live tree, asks the user what to do via the
-    /// same 3-way Apply / Stash / Cancel prompt the #59 single-switch
-    /// uses, so unchecking a row doesn't silently drop edits.
+    /// Removes a companion identified by <see cref="DataBlockSummary"/>
+    /// (#58). When the companion has pending edits in the live tree, asks
+    /// the user what to do via the same 3-way Apply / Stash / Cancel
+    /// prompt the #59 single-switch uses, so unchecking a row doesn't
+    /// silently drop edits.
+    ///
+    /// Identifies the companion by (Name, PlcName) so multi-PLC projects
+    /// where two PLCs share a DB name don't accidentally drop the wrong
+    /// companion (#58 review must-fix #4).
     /// </summary>
     /// <returns>true if the companion was removed; false if the user
     /// cancelled (caller should re-check the dropdown row).</returns>
-    private bool RemoveCompanionByName(string name)
+    private bool RemoveCompanion(DataBlockSummary summary)
     {
         for (int i = 0; i < _companions.Count; i++)
         {
             var companion = _companions[i];
-            if (!string.Equals(companion.Info.Name, name, StringComparison.Ordinal))
+            // Match by (Name, PlcName). PlcName comparison is empty-safe:
+            // single-PLC DataBlockListItems carry "" for PlcName, which
+            // matches the VM's _currentPlcName fallback.
+            if (!string.Equals(companion.Info.Name, summary.Name, StringComparison.Ordinal))
+                continue;
+            if (!string.Equals(_currentPlcName, summary.PlcName, StringComparison.Ordinal))
                 continue;
 
             // Count pending edits within this companion's synthetic subtree.
@@ -1116,7 +1140,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
 
                 if (result == YesNoCancelResult.Cancel)
                 {
-                    Log.Information("Companion remove cancelled by user: {Name}", name);
+                    Log.Information("Companion remove cancelled by user: {Name}", summary.Name);
                     return false;
                 }
                 if (result == YesNoCancelResult.Yes)
@@ -1130,7 +1154,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
                     {
                         Log.Information(
                             "Companion remove aborted: pending Apply did not succeed for {Name}",
-                            name);
+                            summary.Name);
                         return false;
                     }
                 }
@@ -1145,7 +1169,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             }
 
             _companions.RemoveAt(i);
-            Log.Information("Companion DB disabled via dropdown: {Name}", name);
+            Log.Information("Companion DB disabled via dropdown: {Name}", summary.Name);
             return true;
         }
         return false;
@@ -1160,15 +1184,13 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     /// </summary>
     private void ClearPendingValuesForDb(ActiveDb db)
     {
-        foreach (var root in RootMembers)
+        // Multi-PLC safe (#58 review must-fix #4): _dbToSynthetic is keyed
+        // by ActiveDb reference, so two PLCs' DB_Common map to two separate
+        // synthetic VMs and never alias.
+        if (!_dbToSynthetic.TryGetValue(db, out var root)) return;
+        foreach (var node in root.AllDescendants())
         {
-            if (!string.Equals(root.Name, db.Info.Name, StringComparison.Ordinal))
-                continue;
-            foreach (var node in root.AllDescendants())
-            {
-                if (node.IsPendingInlineEdit) node.ClearPending();
-            }
-            return;
+            if (node.IsPendingInlineEdit) node.ClearPending();
         }
     }
 
@@ -1178,12 +1200,9 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     /// </summary>
     private int CountPendingEditsForDb(ActiveDb db)
     {
-        foreach (var root in RootMembers)
-        {
-            if (string.Equals(root.Name, db.Info.Name, StringComparison.Ordinal))
-                return CountPendingInlineEdits(root.Children);
-        }
-        return 0;
+        return _dbToSynthetic.TryGetValue(db, out var root)
+            ? CountPendingInlineEdits(root.Children)
+            : 0;
     }
 
     /// <summary>
@@ -1194,10 +1213,8 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     private void StashPendingEditsForDb(ActiveDb db)
     {
         var entries = new List<StashedEditEntry>();
-        foreach (var root in RootMembers)
+        if (_dbToSynthetic.TryGetValue(db, out var root))
         {
-            if (!string.Equals(root.Name, db.Info.Name, StringComparison.Ordinal))
-                continue;
             foreach (var node in root.AllDescendants())
             {
                 if (node.IsPendingInlineEdit && node.PendingValue != null)
@@ -1240,13 +1257,12 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             return false;
         }
 
-        var pendingEdits = new List<(MemberNode Member, string Value)>();
-        foreach (var root in RootMembers)
-        {
-            if (!string.Equals(root.Name, db.Info.Name, StringComparison.Ordinal)) continue;
-            pendingEdits = CollectPendingInlineEdits(root.Children);
-            break;
-        }
+        // Multi-PLC safe (#58 review must-fix #4): index by ActiveDb
+        // reference rather than DB name, so two PLCs hosting DB_Common
+        // are not aliased.
+        var pendingEdits = _dbToSynthetic.TryGetValue(db, out var root)
+            ? CollectPendingInlineEdits(root.Children)
+            : new List<(MemberNode Member, string Value)>();
         if (pendingEdits.Count == 0) return true;
 
         var status = _usageTracker.GetStatus();
@@ -3304,13 +3320,17 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         _lastApplySucceeded = false;
 
         // Pair every synthetic root with its ActiveDb so each pending edit
-        // is routed to the correct XML buffer + OnApply callback.
+        // is routed to the correct XML buffer + OnApply callback. Multi-PLC
+        // safe (#58 review must-fix #4): _dbToSynthetic is keyed by
+        // ActiveDb reference, never by name — two PLCs hosting DBs with
+        // identical names map to two distinct synthetic roots.
         var perDb = new List<(ActiveDb db, List<(MemberNode Member, string Value)> edits)>();
         int totalChanges = 0;
-        foreach (var synthetic in RootMembers)
+        // Order by AllActiveDbs so Phase-2 commits the focused DB first
+        // (matches the legacy ExecuteApply ordering).
+        foreach (var db in AllActiveDbs)
         {
-            var db = ResolveActiveDbByName(synthetic.Name);
-            if (db == null) continue;
+            if (!_dbToSynthetic.TryGetValue(db, out var synthetic)) continue;
             var edits = CollectPendingInlineEdits(synthetic.Children);
             totalChanges += edits.Count;
             perDb.Add((db, edits));
@@ -3482,19 +3502,6 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         UpdateUsageStatus();
     }
 
-    /// <summary>
-    /// Looks up an active DB by its TIA name. Used by multi-DB Apply to
-    /// route synthetic-root subtrees to the right XML buffer (#58).
-    /// </summary>
-    private ActiveDb? ResolveActiveDbByName(string name)
-    {
-        if (string.Equals(_active.Info.Name, name, StringComparison.Ordinal))
-            return _active;
-        foreach (var c in _companions)
-            if (string.Equals(c.Info.Name, name, StringComparison.Ordinal))
-                return c;
-        return null;
-    }
 
     /// <summary>
     /// F-031: Bulk-update all comments in the current scope using the configured
@@ -3802,7 +3809,22 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
 
                 // Re-populate scopes for the restored selection using the same
                 // ordering as OnMemberSelected so index/position stay stable.
-                var result = _analyzer.Analyze(_active.Info, restored.Model);
+                // Multi-DB safe (#58 review must-fix #3): without this branch,
+                // RefreshTree post-multi-DB-Apply would always rebuild scopes
+                // from the within-DB analyzer only, dropping the cross-DB
+                // siblings + mega-scope and forcing the user to re-pick after
+                // every Apply.
+                AnalysisResult result;
+                if (HasMultipleActiveDbs)
+                {
+                    var owningDb = FindActiveDbForModel(restored.Model)?.Info ?? _active.Info;
+                    var allInfos = AllActiveDbs.Select(a => a.Info).ToList();
+                    result = _analyzer.AnalyzeMulti(allInfos, owningDb, restored.Model);
+                }
+                else
+                {
+                    result = _analyzer.Analyze(_active.Info, restored.Model);
+                }
                 AvailableScopes.Clear();
                 foreach (var scope in result.Scopes.Reverse())
                     AvailableScopes.Add(scope);

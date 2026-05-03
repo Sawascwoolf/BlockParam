@@ -17,12 +17,24 @@ public class ActiveDb
     public ActiveDb(
         DataBlockInfo info,
         string xml,
-        System.Action<string>? onApply = null)
+        System.Action<string>? onApply = null,
+        string? plcName = null)
     {
         Info = info;
         Xml = xml;
         OnApply = onApply;
+        PlcName = plcName ?? "";
     }
+
+    /// <summary>
+    /// Owning PLC for this DB (#58 review must-fix #4). Multi-PLC projects
+    /// can host two DBs with identical names on different PLCs; identifying
+    /// active rows / dropdown matches by (Name, PlcName) instead of Name
+    /// alone keeps them distinct. Empty string for hosts that don't supply
+    /// a PLC name (DevLauncher, single-PLC stand-ins) — matches the VM's
+    /// own _currentPlcName fallback.
+    /// </summary>
+    public string PlcName { get; }
 
     /// <summary>Parsed structure of this DB. Reassigned by RefreshTree after a successful Apply.</summary>
     public DataBlockInfo Info { get; set; }

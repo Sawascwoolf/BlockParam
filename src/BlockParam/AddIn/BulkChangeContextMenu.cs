@@ -293,7 +293,7 @@ public class BulkChangeContextMenu : ContextMenuAddIn
             {
                 var companion = BuildCompanionActiveDb(
                     allSelected[i], adapter, tempDir, constantResolver,
-                    udtResolver, commentResolver);
+                    udtResolver, commentResolver, displayPlcName);
                 if (companion != null)
                     companions.Add(companion);
             }
@@ -421,7 +421,8 @@ public class BulkChangeContextMenu : ContextMenuAddIn
                         }
                         return BuildCompanionActiveDb(
                             initial, adapter, tempDir,
-                            constantResolver, udtResolver, commentResolver);
+                            constantResolver, udtResolver, commentResolver,
+                            displayPlcName);
                     })
                     : null);
 
@@ -537,7 +538,8 @@ public class BulkChangeContextMenu : ContextMenuAddIn
         string tempDir,
         IConstantResolver? constantResolver,
         UdtSetPointResolver udtResolver,
-        UdtCommentResolver commentResolver)
+        UdtCommentResolver commentResolver,
+        string plcName)
     {
         var handle = new DbHandle(initialSelection);
 
@@ -592,7 +594,7 @@ public class BulkChangeContextMenu : ContextMenuAddIn
             Log.Information("Companion import completed for {DbName}", info.Name);
         };
 
-        return new ActiveDb(info, xml, onApply);
+        return new ActiveDb(info, xml, onApply, plcName: plcName);
     }
 
     private static string SafeGetPlcName(PlcSoftware plc)
