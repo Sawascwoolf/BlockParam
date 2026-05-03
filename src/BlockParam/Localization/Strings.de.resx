@@ -191,6 +191,17 @@ Dies kann nicht rückgängig gemacht werden.</value></data>
   <data name="ConfigEditor_Project" xml:space="preserve"><value>Projekt</value></data>
   <data name="ConfigEditor_Local" xml:space="preserve"><value>Lokal</value></data>
   <data name="ConfigEditor_Shared" xml:space="preserve"><value>Gemeinsam</value></data>
+  <data name="ConfigEditor_NewRule_Short" xml:space="preserve"><value>+ Regel</value></data>
+  <data name="ConfigEditor_NewRule_Tooltip" xml:space="preserve"><value>Fügt eine neue Regel zur aktuell ausgewählten Datei hinzu. Ist keine Datei ausgewählt, wird eine neue Datei mit einer Startregel erzeugt.</value></data>
+  <data name="ConfigEditor_NewFile_Short" xml:space="preserve"><value>+ Datei</value></data>
+  <data name="ConfigEditor_NewFile_Tooltip" xml:space="preserve"><value>Erzeugt eine neue Regeldatei mit einer Startregel.</value></data>
+  <data name="ConfigEditor_Import" xml:space="preserve"><value>Importieren...</value></data>
+  <data name="ConfigEditor_Import_Tooltip" xml:space="preserve"><value>Regeldateien importieren (noch nicht implementiert).</value></data>
+  <data name="ConfigEditor_Export" xml:space="preserve"><value>Exportieren...</value></data>
+  <data name="ConfigEditor_Export_Tooltip" xml:space="preserve"><value>Die ausgewählte Regeldatei exportieren (noch nicht implementiert).</value></data>
+  <data name="ConfigEditor_FileActions" xml:space="preserve"><value>Dateiaktionen</value></data>
+  <data name="ConfigEditor_DeleteFile" xml:space="preserve"><value>Datei löschen</value></data>
+  <data name="ConfigEditor_ExportFile" xml:space="preserve"><value>Datei exportieren...</value></data>
   <!-- Inline-Hilfe Tooltips für ConfigEditor-Felder -->
   <data name="ConfigEditor_Help_PathPattern" xml:space="preserve"><value>Regex-Muster für den Elementpfad innerhalb des DB.
 Beispiele:

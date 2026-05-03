@@ -4,8 +4,8 @@
         xmlns:local="clr-namespace:BlockParam.UI"
         xmlns:loc="clr-namespace:BlockParam.Localization"
         Title="{loc:Loc ConfigEditor_Title}"
-                Width="750" Height="550"
-        MinWidth="600" MinHeight="400"
+        Width="900" Height="600"
+        MinWidth="700" MinHeight="450"
         WindowStartupLocation="CenterScreen"
         FontFamily="Segoe UI" FontSize="12">
 
@@ -16,7 +16,10 @@
         <local:InvertBoolConverter x:Key="InvertBool"/>
         <local:RuleSourceToBoolConverter x:Key="RuleSourceConverter"/>
 
-        <!-- Style for help icons (?) next to labels: click toggles popup -->
+        <!-- File icon (folder-document) -->
+        <Geometry x:Key="IconRuleFile">M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm-1 7V3.5L18.5 9H13z</Geometry>
+
+        <!-- Style for help icons (?) next to labels -->
         <Style x:Key="HelpIcon" TargetType="ToggleButton">
             <Setter Property="Content" Value="?"/>
             <Setter Property="Foreground" Value="#888888"/>
@@ -43,28 +46,188 @@
             </Setter>
         </Style>
 
-        <!-- Popup template for help icons -->
         <Style x:Key="HelpPopup" TargetType="Popup">
             <Setter Property="AllowsTransparency" Value="True"/>
             <Setter Property="Placement" Value="Right"/>
             <Setter Property="StaysOpen" Value="False"/>
         </Style>
 
-        <!-- Dirty row highlight for DataGrid -->
-        <Style x:Key="DirtyRowStyle" TargetType="DataGridRow">
-            <Style.Triggers>
-                <DataTrigger Binding="{Binding IsDirty}" Value="True">
-                    <Setter Property="Background" Value="#FFF8DC"/>
-                </DataTrigger>
-                <DataTrigger Binding="{Binding IsNew}" Value="True">
-                    <Setter Property="Background" Value="#FFFACD"/>
-                </DataTrigger>
-            </Style.Triggers>
+        <!-- Source segmented button: looks like a tiny pill in the file header -->
+        <Style x:Key="SourceSegment" TargetType="RadioButton">
+            <Setter Property="Margin" Value="0"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="RadioButton">
+                        <Border x:Name="Pill"
+                                Background="Transparent"
+                                BorderBrush="#B9BEC6" BorderThickness="1"
+                                Padding="6,1">
+                            <TextBlock Text="{TemplateBinding Content}"
+                                       FontSize="10" Foreground="#5b6471"
+                                       VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="Pill" Property="Background" Value="#1f6feb"/>
+                                <Setter TargetName="Pill" Property="BorderBrush" Value="#1f6feb"/>
+                                <Setter Property="Foreground" Value="White"/>
+                            </Trigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Pill" Property="Background" Value="#E8F0FE"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
         </Style>
+
+        <!-- File section template: header + collapsible body of rules -->
+        <DataTemplate x:Key="FileSectionTemplate" DataType="{x:Type local:RuleFileViewModel}">
+            <Grid Tag="{Binding}" Loaded="OnFileSectionLoaded">
+                <StackPanel>
+                    <!-- Sticky header bar -->
+                    <Border x:Name="FileHeader"
+                            Background="#EEF0F3" BorderBrush="#B9BEC6"
+                            BorderThickness="0,1,0,1"
+                            Cursor="Hand"
+                            MouseLeftButtonUp="OnFileHeaderClick"
+                            Panel.ZIndex="10">
+                        <Border.RenderTransform>
+                            <TranslateTransform/>
+                        </Border.RenderTransform>
+                        <Border.Style>
+                            <Style TargetType="Border">
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsDirty}" Value="True">
+                                        <Setter Property="Background" Value="#FFF8DC"/>
+                                    </DataTrigger>
+                                    <DataTrigger Binding="{Binding IsNew}" Value="True">
+                                        <Setter Property="Background" Value="#FFFACD"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Border.Style>
+                        <DockPanel LastChildFill="True" Margin="0,4,4,4">
+                            <!-- Chevron -->
+                            <Grid DockPanel.Dock="Left" Width="18" Height="18" Margin="2,0,2,0">
+                                <TextBlock Text="&#x25BC;" FontSize="9" Foreground="#5b6471"
+                                           HorizontalAlignment="Center" VerticalAlignment="Center"
+                                           Visibility="{Binding IsExpanded, Converter={StaticResource BoolToVis}}"/>
+                                <TextBlock Text="&#x25B6;" FontSize="9" Foreground="#5b6471"
+                                           HorizontalAlignment="Center" VerticalAlignment="Center"
+                                           Visibility="{Binding IsExpanded, Converter={StaticResource BoolToVis}, ConverterParameter=Invert}"/>
+                            </Grid>
+                            <!-- File icon -->
+                            <Viewbox DockPanel.Dock="Left" Width="13" Height="13"
+                                     Margin="0,0,6,0" VerticalAlignment="Center">
+                                <Path Data="{StaticResource IconRuleFile}" Fill="#1f6feb"/>
+                            </Viewbox>
+                            <!-- Right side: source segmented + overflow.
+                                 Mouse events are stopped here so clicking these
+                                 controls does NOT bubble up to the header (which
+                                 would toggle the file's IsExpanded). -->
+                            <Border DockPanel.Dock="Right" Background="Transparent"
+                                    MouseLeftButtonUp="OnHeaderControlsMouseUp"
+                                    MouseLeftButtonDown="OnHeaderControlsMouseDown"
+                                    Margin="8,0,0,0">
+                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                    <RadioButton Style="{StaticResource SourceSegment}"
+                                                 GroupName="{Binding FilePath}"
+                                                 Content="{loc:Loc ConfigEditor_Project}"
+                                                 IsChecked="{Binding SaveDestination, Converter={StaticResource RuleSourceConverter}, ConverterParameter=TiaProject}"/>
+                                    <RadioButton Style="{StaticResource SourceSegment}"
+                                                 GroupName="{Binding FilePath}"
+                                                 Content="{loc:Loc ConfigEditor_Local}"
+                                                 IsChecked="{Binding SaveDestination, Converter={StaticResource RuleSourceConverter}, ConverterParameter=Local}"/>
+                                    <RadioButton Style="{StaticResource SourceSegment}"
+                                                 GroupName="{Binding FilePath}"
+                                                 Content="{loc:Loc ConfigEditor_Shared}"
+                                                 IsChecked="{Binding SaveDestination, Converter={StaticResource RuleSourceConverter}, ConverterParameter=Shared}"/>
+                                    <Button Content="&#x22EF;" FontSize="14" FontWeight="Bold"
+                                            Width="22" Height="20" Margin="6,0,0,0"
+                                            Background="Transparent" BorderThickness="0"
+                                            Foreground="#5b6471" Cursor="Hand"
+                                            Click="OnFileOverflowClick"
+                                            Tag="{Binding}"
+                                            ToolTip="{loc:Loc ConfigEditor_FileActions}"/>
+                                </StackPanel>
+                            </Border>
+                            <!-- Filename + summary (the elastic middle) -->
+                            <StackPanel VerticalAlignment="Center">
+                                <TextBlock Text="{Binding FileName}"
+                                           FontSize="12" FontWeight="SemiBold"
+                                           Foreground="#1e2227"
+                                           TextTrimming="CharacterEllipsis"/>
+                                <TextBlock Text="{Binding HeaderSummary}"
+                                           FontSize="10" Foreground="#5b6471"
+                                           TextTrimming="CharacterEllipsis"/>
+                            </StackPanel>
+                        </DockPanel>
+                    </Border>
+
+                    <!-- Body: list of rules in this file -->
+                    <ItemsControl ItemsSource="{Binding Rules}"
+                                  Visibility="{Binding IsExpanded, Converter={StaticResource BoolToVis}}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="{x:Type local:RuleViewModel}">
+                                <Border x:Name="RuleRow"
+                                        Background="White"
+                                        BorderBrush="#E0E3E8" BorderThickness="0,0,0,1"
+                                        Padding="28,4,8,4"
+                                        Cursor="Hand"
+                                        MouseLeftButtonUp="OnRuleRowClick"
+                                        Tag="{Binding}">
+                                    <Border.Style>
+                                        <Style TargetType="Border">
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding IsDirty}" Value="True">
+                                                    <Setter Property="Background" Value="#FFF8DC"/>
+                                                </DataTrigger>
+                                                <DataTrigger Binding="{Binding IsNew}" Value="True">
+                                                    <Setter Property="Background" Value="#FFFACD"/>
+                                                </DataTrigger>
+                                                <DataTrigger Binding="{Binding IsSelected}" Value="True">
+                                                    <Setter Property="Background" Value="#D6E5FA"/>
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Border.Style>
+                                    <StackPanel>
+                                        <TextBlock Text="{Binding PathPattern}"
+                                                   FontFamily="Consolas" FontSize="11"
+                                                   Foreground="#1e2227"
+                                                   TextTrimming="CharacterEllipsis"
+                                                   ToolTip="{Binding PathPattern}">
+                                            <TextBlock.Style>
+                                                <Style TargetType="TextBlock">
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding PathPattern}" Value="">
+                                                            <Setter Property="Foreground" Value="#999999"/>
+                                                            <Setter Property="Text" Value="(no pattern)"/>
+                                                            <Setter Property="FontStyle" Value="Italic"/>
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </TextBlock.Style>
+                                        </TextBlock>
+                                        <TextBlock Text="{Binding SecondaryDisplay}"
+                                                   FontSize="10" Foreground="#5b6471"
+                                                   TextTrimming="CharacterEllipsis"
+                                                   Visibility="{Binding SecondaryDisplay, Converter={StaticResource StringToVis}}"/>
+                                    </StackPanel>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
+            </Grid>
+        </DataTemplate>
     </Window.Resources>
 
     <DockPanel Margin="10">
-        <!-- Bottom: Buttons + Validation -->
+        <!-- Bottom: validation + buttons -->
         <StackPanel DockPanel.Dock="Bottom" Margin="0,8,0,0">
             <TextBlock Text="{Binding ValidationMessage}" Foreground="Red" Margin="0,0,0,6"
                        Visibility="{Binding ValidationMessage, Converter={StaticResource StringToVis}}"
@@ -79,17 +242,17 @@
             </StackPanel>
         </StackPanel>
 
-        <!-- Main: two-panel horizontal layout -->
+        <!-- Main: file/rule list (left) + rule detail editor (right) -->
         <Grid>
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="200" MinWidth="140"/>
+                <ColumnDefinition Width="320" MinWidth="240"/>
                 <ColumnDefinition Width="Auto"/>
                 <ColumnDefinition Width="*"/>
             </Grid.ColumnDefinitions>
 
-            <!-- Left panel: compact rule list -->
+            <!-- Left panel: file/rule list -->
             <DockPanel Grid.Column="0">
-                <!-- Shared directory (collapsed by default, expandable) -->
+                <!-- Shared directory (collapsed expander) -->
                 <Expander DockPanel.Dock="Top" Margin="0,0,0,6"
                           Header="{loc:Loc ConfigEditor_SharedDir}" IsExpanded="False" FontSize="11">
                     <Grid Margin="0,4,0,0">
@@ -105,17 +268,34 @@
                     </Grid>
                 </Expander>
 
-                <!-- Action buttons -->
-                <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,4,0,0">
-                    <Button Content="+" Command="{Binding NewRuleCommand}"
-                            Width="26" Height="24" FontWeight="Bold" FontSize="14"
-                            ToolTip="{loc:Loc ConfigEditor_NewRule}"/>
-                    <Button Content="{loc:Loc ConfigEditor_Duplicate}" Command="{Binding DuplicateSelectedCommand}"
-                            Height="24" Margin="6,0,0,0" Padding="8,0"
-                            ToolTip="{loc:Loc ConfigEditor_Duplicate_Tooltip}"/>
-                    <Button Content="{loc:Loc ConfigEditor_Delete}" Command="{Binding DeleteSelectedCommand}"
-                            Height="24" Margin="6,0,0,0" Padding="8,0"/>
-                </StackPanel>
+                <!-- Bottom toolbar: actions -->
+                <Grid DockPanel.Dock="Bottom" Margin="0,4,0,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Orientation="Horizontal">
+                        <Button Content="{loc:Loc ConfigEditor_NewRule_Short}" Command="{Binding NewRuleCommand}"
+                                Height="24" Padding="8,0"
+                                ToolTip="{loc:Loc ConfigEditor_NewRule_Tooltip}"/>
+                        <Button Content="{loc:Loc ConfigEditor_NewFile_Short}" Command="{Binding NewFileCommand}"
+                                Height="24" Margin="4,0,0,0" Padding="8,0"
+                                ToolTip="{loc:Loc ConfigEditor_NewFile_Tooltip}"/>
+                        <Button Content="{loc:Loc ConfigEditor_Duplicate}" Command="{Binding DuplicateSelectedCommand}"
+                                Height="24" Margin="4,0,0,0" Padding="8,0"
+                                ToolTip="{loc:Loc ConfigEditor_Duplicate_Tooltip}"/>
+                        <Button Content="{loc:Loc ConfigEditor_Delete}" Command="{Binding DeleteSelectedCommand}"
+                                Height="24" Margin="4,0,0,0" Padding="8,0"/>
+                    </StackPanel>
+                    <StackPanel Grid.Column="1" Orientation="Horizontal">
+                        <Button Content="{loc:Loc ConfigEditor_Import}" Command="{Binding ImportFilesCommand}"
+                                Height="24" Padding="8,0" Margin="8,0,0,0"
+                                ToolTip="{loc:Loc ConfigEditor_Import_Tooltip}"/>
+                        <Button Content="{loc:Loc ConfigEditor_Export}" Command="{Binding ExportSelectedCommand}"
+                                Height="24" Padding="8,0" Margin="4,0,0,0"
+                                ToolTip="{loc:Loc ConfigEditor_Export_Tooltip}"/>
+                    </StackPanel>
+                </Grid>
 
                 <!-- Search filter -->
                 <TextBox DockPanel.Dock="Top" Margin="0,0,0,4" Padding="4,2"
@@ -141,75 +321,40 @@
                     </TextBox.Style>
                 </TextBox>
 
-                <!-- Rule list: show PathPattern as primary, source as secondary -->
-                <ListBox ItemsSource="{Binding FilteredRuleFiles}"
-                         SelectedItem="{Binding SelectedFile}"
-                         HorizontalContentAlignment="Stretch"
-                         BorderBrush="#CCCCCC" BorderThickness="1"
-                         ScrollViewer.HorizontalScrollBarVisibility="Disabled">
-                    <ListBox.ItemContainerStyle>
-                        <Style TargetType="ListBoxItem">
-                            <Style.Triggers>
-                                <DataTrigger Binding="{Binding IsDirty}" Value="True">
-                                    <Setter Property="Background" Value="#FFF8DC"/>
-                                </DataTrigger>
-                                <DataTrigger Binding="{Binding IsNew}" Value="True">
-                                    <Setter Property="Background" Value="#FFFACD"/>
-                                </DataTrigger>
-                            </Style.Triggers>
-                        </Style>
-                    </ListBox.ItemContainerStyle>
-                    <ListBox.ItemTemplate>
-                        <DataTemplate>
-                            <StackPanel Margin="2,3">
-                                <TextBlock Text="{Binding PathPattern}" FontFamily="Consolas" FontSize="11"
-                                           TextTrimming="CharacterEllipsis"
-                                           ToolTip="{Binding PathPattern}">
-                                    <TextBlock.Style>
-                                        <Style TargetType="TextBlock">
-                                            <Setter Property="Foreground" Value="#333333"/>
-                                            <Style.Triggers>
-                                                <DataTrigger Binding="{Binding PathPattern}" Value="">
-                                                    <Setter Property="Foreground" Value="#999999"/>
-                                                </DataTrigger>
-                                            </Style.Triggers>
-                                        </Style>
-                                    </TextBlock.Style>
-                                </TextBlock>
-                                <StackPanel Orientation="Horizontal">
-                                    <TextBlock Text="{Binding SourceDisplay}" FontSize="10" Foreground="#888888"/>
-                                    <TextBlock Text=" · " FontSize="10" Foreground="#CCCCCC"
-                                               Visibility="{Binding StatusDisplay, Converter={StaticResource StringToVis}}"/>
-                                    <TextBlock Text="{Binding StatusDisplay}" FontSize="10" Foreground="#CC8800"
-                                               Visibility="{Binding StatusDisplay, Converter={StaticResource StringToVis}}"/>
-                                </StackPanel>
-                            </StackPanel>
-                        </DataTemplate>
-                    </ListBox.ItemTemplate>
-                </ListBox>
+                <!-- File/rule list with rolling-sticky headers -->
+                <Border BorderBrush="#B9BEC6" BorderThickness="1">
+                    <ScrollViewer x:Name="FileListScroll"
+                                  VerticalScrollBarVisibility="Auto"
+                                  HorizontalScrollBarVisibility="Disabled"
+                                  ScrollChanged="OnFileListScrollChanged">
+                        <ItemsControl x:Name="FileListItemsControl"
+                                      ItemsSource="{Binding FilteredRuleFiles}"
+                                      ItemTemplate="{StaticResource FileSectionTemplate}"/>
+                    </ScrollViewer>
+                </Border>
             </DockPanel>
 
             <!-- Splitter -->
             <GridSplitter Grid.Column="1" Width="4" HorizontalAlignment="Center"
                           VerticalAlignment="Stretch" Background="Transparent"/>
 
-            <!-- Right panel: Rule detail editor -->
+            <!-- Right panel: Rule detail editor (binds to SelectedRule) -->
             <ScrollViewer Grid.Column="2" VerticalScrollBarVisibility="Auto" Margin="8,0,0,0">
                 <Border BorderBrush="#CCCCCC" BorderThickness="1" Padding="12" CornerRadius="3"
-                        Visibility="{Binding SelectedFile, Converter={StaticResource NullToVis}}">
+                        Visibility="{Binding SelectedRule, Converter={StaticResource NullToVis}}">
                     <Border.Style>
                         <Style TargetType="Border">
                             <Setter Property="Background" Value="#FAFAFA"/>
                             <Style.Triggers>
-                                <DataTrigger Binding="{Binding SelectedFile.IsDirty}" Value="True">
+                                <DataTrigger Binding="{Binding SelectedRule.IsDirty}" Value="True">
                                     <Setter Property="Background" Value="#FFFFF0"/>
                                 </DataTrigger>
                             </Style.Triggers>
                         </Style>
                     </Border.Style>
-                    <StackPanel DataContext="{Binding SelectedFile}">
+                    <StackPanel DataContext="{Binding SelectedRule}">
 
-                        <!-- Path Pattern: PROMINENT, top position -->
+                        <!-- Path Pattern: prominent, top -->
                         <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
                             <TextBlock Text="{loc:Loc ConfigEditor_PathPattern}"
                                        FontWeight="SemiBold" FontSize="13" VerticalAlignment="Center"/>
@@ -225,14 +370,6 @@
                                  Margin="0,0,0,12" Padding="6,4"
                                  FontFamily="Consolas" FontSize="14"
                                  BorderBrush="#999999" BorderThickness="1.5"/>
-
-                        <!-- File Name (read-only display) -->
-                        <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
-                            <TextBlock Text="{loc:Loc ConfigEditor_FileName}" Foreground="#888888" FontSize="11"
-                                       VerticalAlignment="Center"/>
-                            <TextBlock Text="{Binding FileName}" FontSize="11" Foreground="#666666"
-                                       Margin="6,0,0,0" VerticalAlignment="Center"/>
-                        </StackPanel>
 
                         <!-- Rule Detail Grid -->
                         <Grid>
@@ -250,7 +387,7 @@
                                 <RowDefinition Height="Auto"/>
                             </Grid.RowDefinitions>
 
-                            <!-- Row 0: Datatype (dropdown) -->
+                            <!-- Datatype -->
                             <StackPanel Orientation="Horizontal" Grid.Row="0" VerticalAlignment="Center" Margin="0,0,8,6">
                                 <TextBlock Text="{loc:Loc ConfigEditor_Datatype}" VerticalAlignment="Center"/>
                                 <ToggleButton x:Name="HelpDatatype" Style="{StaticResource HelpIcon}"/>
@@ -266,7 +403,7 @@
                                       Text="{Binding Datatype, UpdateSourceTrigger=PropertyChanged}"
                                       ItemsSource="{x:Static local:RuleFileViewModel.TiaDataTypes}"/>
 
-                            <!-- Row 1: Tag Table (dropdown) -->
+                            <!-- Tag Table -->
                             <StackPanel Orientation="Horizontal" Grid.Row="1" VerticalAlignment="Center" Margin="0,0,8,6">
                                 <TextBlock Text="{loc:Loc ConfigEditor_TagTable}" VerticalAlignment="Center"/>
                                 <ToggleButton x:Name="HelpTagTable" Style="{StaticResource HelpIcon}"/>
@@ -282,7 +419,7 @@
                                       Text="{Binding TagTableName, UpdateSourceTrigger=PropertyChanged}"
                                       ItemsSource="{Binding DataContext.TagTableNames, RelativeSource={RelativeSource AncestorType=Window}}"/>
 
-                            <!-- Row 2: Require Value -->
+                            <!-- Require Value -->
                             <StackPanel Orientation="Horizontal" Grid.Row="2" VerticalAlignment="Center" Margin="0,0,8,6">
                                 <TextBlock Text="{loc:Loc ConfigEditor_RequireValue}" VerticalAlignment="Center"/>
                                 <ToggleButton x:Name="HelpRequireValue" Style="{StaticResource HelpIcon}"/>
@@ -297,7 +434,7 @@
                                       Grid.Row="2" Grid.Column="1" Margin="0,0,0,6"
                                       VerticalAlignment="Center"/>
 
-                            <!-- Row 3: Min / Max -->
+                            <!-- Min / Max -->
                             <StackPanel Orientation="Horizontal" Grid.Row="3" VerticalAlignment="Center" Margin="0,0,8,6"
                                         IsEnabled="{Binding IsMinMaxSupported}">
                                 <TextBlock Text="{loc:Loc ConfigEditor_MinMax}" VerticalAlignment="Center"/>
@@ -357,7 +494,7 @@
                                            Visibility="{Binding MaxError, Converter={StaticResource StringToVis}}"/>
                             </StackPanel>
 
-                            <!-- Row 4: Allowed Values -->
+                            <!-- Allowed Values -->
                             <StackPanel Orientation="Horizontal" Grid.Row="4" VerticalAlignment="Center" Margin="0,0,8,6">
                                 <TextBlock Text="{loc:Loc ConfigEditor_AllowedValues}" VerticalAlignment="Center"/>
                                 <ToggleButton x:Name="HelpAllowedValues" Style="{StaticResource HelpIcon}"/>
@@ -371,7 +508,7 @@
                             <TextBox Text="{Binding AllowedValues, UpdateSourceTrigger=PropertyChanged}"
                                      Grid.Row="4" Grid.Column="1" Margin="0,0,0,6" Padding="4,2"/>
 
-                            <!-- Row 5: Comment Template -->
+                            <!-- Comment Template -->
                             <StackPanel Orientation="Horizontal" Grid.Row="5" VerticalAlignment="Center" Margin="0,0,8,6">
                                 <TextBlock Text="{loc:Loc ConfigEditor_CommentTemplate}" VerticalAlignment="Center"/>
                                 <ToggleButton x:Name="HelpCommentTemplate" Style="{StaticResource HelpIcon}"/>
@@ -386,7 +523,7 @@
                                      Grid.Row="5" Grid.Column="1" Margin="0,0,0,6" Padding="4,2"
                                      FontFamily="Consolas"/>
 
-                            <!-- Row 6: Exclude from Setpoints -->
+                            <!-- Exclude -->
                             <StackPanel Orientation="Horizontal" Grid.Row="6" VerticalAlignment="Center" Margin="0,0,8,6">
                                 <TextBlock Text="{loc:Loc ConfigEditor_Exclude}" VerticalAlignment="Center"/>
                                 <ToggleButton x:Name="HelpExclude" Style="{StaticResource HelpIcon}"/>
@@ -403,29 +540,15 @@
                                       VerticalAlignment="Center"/>
                         </Grid>
 
-                        <!-- Save Destination -->
-                        <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
-                            <TextBlock Text="{loc:Loc ConfigEditor_SaveTo}" VerticalAlignment="Center" Margin="0,0,12,0"/>
-                            <RadioButton Content="{loc:Loc ConfigEditor_Project}" Margin="0,0,12,0"
-                                         IsChecked="{Binding SaveDestination, Converter={StaticResource RuleSourceConverter}, ConverterParameter=TiaProject}"
-                                         VerticalAlignment="Center"/>
-                            <RadioButton Content="{loc:Loc ConfigEditor_Local}" Margin="0,0,12,0"
-                                         IsChecked="{Binding SaveDestination, Converter={StaticResource RuleSourceConverter}, ConverterParameter=Local}"
-                                         VerticalAlignment="Center"/>
-                            <RadioButton Content="{loc:Loc ConfigEditor_Shared}"
-                                         IsChecked="{Binding SaveDestination, Converter={StaticResource RuleSourceConverter}, ConverterParameter=Shared}"
-                                         VerticalAlignment="Center"/>
-                        </StackPanel>
-
-                        <!-- Override info + Reset button -->
+                        <!-- Override info banner (file-level, surfaced through SelectedRule.ParentFile) -->
                         <Border Margin="0,12,0,0" Padding="8,6" CornerRadius="3"
                                 Background="#FFF3E0" BorderBrush="#FFB74D" BorderThickness="1"
-                                Visibility="{Binding HasOverrides, Converter={StaticResource BoolToVis}}">
+                                Visibility="{Binding ParentFile.HasOverrides, Converter={StaticResource BoolToVis}}">
                             <StackPanel>
                                 <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
                                     <TextBlock FontSize="11" Foreground="#E65100" VerticalAlignment="Center">
                                         <Run Text="{loc:Loc ConfigEditor_OverrideInfo}"/>
-                                        <Run Text="{Binding StatusDisplay, Mode=OneWay}" FontWeight="SemiBold"/>
+                                        <Run Text="{Binding ParentFile.StatusDisplay, Mode=OneWay}" FontWeight="SemiBold"/>
                                     </TextBlock>
                                     <ToggleButton x:Name="HelpOverride" Style="{StaticResource HelpIcon}"/>
                                     <Popup IsOpen="{Binding IsChecked, ElementName=HelpOverride}" Style="{StaticResource HelpPopup}"

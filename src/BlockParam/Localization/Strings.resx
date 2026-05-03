@@ -502,6 +502,39 @@ This cannot be undone.</value>
   <data name="ConfigEditor_Shared" xml:space="preserve">
     <value>Shared</value>
   </data>
+  <data name="ConfigEditor_NewRule_Short" xml:space="preserve">
+    <value>+ Rule</value>
+  </data>
+  <data name="ConfigEditor_NewRule_Tooltip" xml:space="preserve">
+    <value>Add a new rule to the currently selected file. If no file is selected, creates a new file with one starter rule.</value>
+  </data>
+  <data name="ConfigEditor_NewFile_Short" xml:space="preserve">
+    <value>+ File</value>
+  </data>
+  <data name="ConfigEditor_NewFile_Tooltip" xml:space="preserve">
+    <value>Create a new rule file with one starter rule.</value>
+  </data>
+  <data name="ConfigEditor_Import" xml:space="preserve">
+    <value>Import...</value>
+  </data>
+  <data name="ConfigEditor_Import_Tooltip" xml:space="preserve">
+    <value>Import rule files (not yet implemented).</value>
+  </data>
+  <data name="ConfigEditor_Export" xml:space="preserve">
+    <value>Export...</value>
+  </data>
+  <data name="ConfigEditor_Export_Tooltip" xml:space="preserve">
+    <value>Export the selected rule file (not yet implemented).</value>
+  </data>
+  <data name="ConfigEditor_FileActions" xml:space="preserve">
+    <value>File actions</value>
+  </data>
+  <data name="ConfigEditor_DeleteFile" xml:space="preserve">
+    <value>Delete file</value>
+  </data>
+  <data name="ConfigEditor_ExportFile" xml:space="preserve">
+    <value>Export file...</value>
+  </data>
   <!-- Inline help tooltips for ConfigEditor fields -->
   <data name="ConfigEditor_Help_PathPattern" xml:space="preserve">
     <value>Regex pattern matching the member path inside the DB.
