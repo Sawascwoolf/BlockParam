@@ -11,7 +11,7 @@ Target: Siemens Xcelerator Marketplace / App Store distribution.
 - **Language**: C# / .NET Framework 4.8 (LangVersion=latest for modern syntax)
 - **UI Language**: English (with i18n architecture via resource files for future localization)
 - **License**: Open Source + commercial dual license (Freemium)
-- **Monetization**: 3 free bulk operations per calendar day, then paid
+- **Monetization**: 200 free value changes per calendar day, charged on successful Apply (one quota unit per individual change written, whether bulk-staged or inline). Pro tier removes the cap.
 - **Target Users**: PLC programmers & commissioning engineers for efficient parameter management
 
 ## Technology Stack

@@ -26,4 +26,11 @@ public class RelayCommand : ICommand
 
     public bool CanExecute(object? parameter) => _canExecute?.Invoke(parameter) ?? true;
     public void Execute(object? parameter) => _execute(parameter);
+
+    /// <summary>
+    /// Force the bound control to re-query <see cref="CanExecute"/> after
+    /// state the command depends on has changed (e.g. an async update
+    /// check resolves and a button should become enabled).
+    /// </summary>
+    public void RaiseCanExecuteChanged() => CommandManager.InvalidateRequerySuggested();
 }

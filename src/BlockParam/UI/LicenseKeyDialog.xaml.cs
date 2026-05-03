@@ -1,28 +1,84 @@
 using System.Diagnostics;
 using System.Windows;
 using System.Windows.Media;
+using BlockParam.Config;
 using BlockParam.Diagnostics;
 using BlockParam.Licensing;
 using BlockParam.Localization;
+using BlockParam.Updates;
 
 namespace BlockParam.UI;
 
 public partial class LicenseKeyDialog : Window
 {
     private readonly ILicenseService _licenseService;
+    private readonly IUpdateCheckService? _updateCheckService;
+    private readonly ConfigLoader? _configLoader;
+    private bool _updateSettingsLoading;
 
     public LicenseKeyDialog(ILicenseService licenseService)
+        : this(licenseService, updateCheckService: null, configLoader: null) { }
+
+    public LicenseKeyDialog(
+        ILicenseService licenseService,
+        IUpdateCheckService? updateCheckService,
+        ConfigLoader? configLoader = null)
     {
         InitializeComponent();
         WindowIconHelper.SetIcon(this);
         ZoomHost.Attach(this);
         _licenseService = licenseService;
+        _updateCheckService = updateCheckService;
+        _configLoader = configLoader;
         UpdateDisplay();
+        InitializeUpdateCheckPanel();
 
         // #20: Keep the Activate button's tooltip in sync with its disabled reason,
         // so the user isn't staring at a greyed-out button with no feedback.
         KeyInput.TextChanged += (_, _) => UpdateActivateButtonState();
         UpdateActivateButtonState();
+    }
+
+    private void InitializeUpdateCheckPanel()
+    {
+        if (_updateCheckService == null || _configLoader == null)
+        {
+            UpdateCheckPanel.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        UpdateCheckPanel.Visibility = Visibility.Visible;
+        _updateSettingsLoading = true;
+        try
+        {
+            var settings = _configLoader.ReadUpdateCheckSettings();
+            UpdateCheckEnabledBox.IsChecked = settings.Enabled;
+            UpdateIncludePrereleasesBox.IsChecked = settings.IncludePrereleases;
+            UpdateIncludePrereleasesBox.IsEnabled = settings.Enabled;
+        }
+        finally
+        {
+            _updateSettingsLoading = false;
+        }
+    }
+
+    private void OnUpdateSettingsChanged(object sender, RoutedEventArgs e)
+    {
+        if (_updateSettingsLoading || _configLoader == null) return;
+
+        try
+        {
+            var existing = _configLoader.ReadUpdateCheckSettings();
+            existing.Enabled = UpdateCheckEnabledBox.IsChecked == true;
+            existing.IncludePrereleases = UpdateIncludePrereleasesBox.IsChecked == true;
+            _configLoader.SaveUpdateCheckSettings(existing);
+
+            UpdateIncludePrereleasesBox.IsEnabled = existing.Enabled;
+        }
+        catch (Exception ex)
+        {
+            Log.Warning(ex, "LicenseKeyDialog: cannot persist update-check prefs");
+        }
     }
 
     private void UpdateActivateButtonState()

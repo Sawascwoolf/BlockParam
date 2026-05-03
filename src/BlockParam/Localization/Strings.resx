@@ -166,15 +166,22 @@ No = Keep the current (possibly partial) result</value>
     <value>Daily limit reached. Upgrade for unlimited use.</value>
   </data>
   <data name="Status_Remaining" xml:space="preserve">
-    <value>Remaining: {0}/{1} free operations</value>
+    <value>Remaining: {0}/{1} free changes today</value>
     <comment>{0} = remaining, {1} = daily limit</comment>
   </data>
-  <data name="Status_RemainingBoth" xml:space="preserve">
-    <value>Bulk operations: {0}/{1}  |  Inline edits: {2}/{3}</value>
-    <comment>{0}/{1} = bulk remaining/limit, {2}/{3} = inline remaining/limit</comment>
+  <data name="Status_WouldExceedLimit" xml:space="preserve">
+    <value>This Apply would write {0} changes, but only {1} are left today. Reduce the selection or upgrade for unlimited use.</value>
+    <comment>{0} = pending changes count, {1} = remaining quota today</comment>
   </data>
-  <data name="Status_InlineLimitReached" xml:space="preserve">
-    <value>Daily inline edit limit reached. Upgrade for unlimited use.</value>
+  <data name="Status_AppliedOverCap" xml:space="preserve">
+    <value>{0} values written in '{1}' — daily limit exceeded (parallel use). Upgrade for unlimited use.</value>
+    <comment>{0} = applied count, {1} = DB name. Shown only on the rare cross-instance race.</comment>
+  </data>
+  <data name="LimitReached_Modal_Title" xml:space="preserve">
+    <value>Free daily limit reached</value>
+  </data>
+  <data name="LimitReached_Modal_Message" xml:space="preserve">
+    <value>You've used all of today's free changes. You can keep staging edits, but Apply is disabled until tomorrow — or upgrade to Pro for unlimited use.</value>
   </data>
   <data name="Status_Ready" xml:space="preserve">
     <value>Ready</value>
@@ -396,6 +403,10 @@ This cannot be undone.</value>
   </data>
   <data name="Dialog_ApplyTooltip" xml:space="preserve">
     <value>Only start values are modified. To update actual values, use 'Copy start values to actual values' in TIA Portal.</value>
+  </data>
+  <data name="Dialog_ApplyTooltip_CostLine" xml:space="preserve">
+    <value>This Apply will use {0} of {1} free changes remaining today.</value>
+    <comment>{0} = pending change count, {1} = remaining quota. Appended to Dialog_ApplyTooltip when not Pro and (count &gt; 1 OR remaining tight).</comment>
   </data>
   <data name="Dialog_EditConfig" xml:space="preserve">
     <value>Edit Config...</value>
@@ -700,5 +711,54 @@ Compile the block now?</value>
        widget makes the existing Ctrl+scroll / Ctrl +/- feature discoverable. -->
   <data name="Zoom_Tooltip" xml:space="preserve">
     <value>Zoom (Ctrl + mouse wheel, Ctrl + / Ctrl −, Ctrl + 0 to reset)</value>
+  </data>
+  <!-- In-app update notice (#61). The badge is intentionally compact —
+       full release notes live in the details popup. -->
+  <data name="Update_BadgeText" xml:space="preserve">
+    <value>{0} → {1} available</value>
+    <comment>{0} = current version (e.g. "v0.3.0"), {1} = latest version (e.g. "v0.4.0")</comment>
+  </data>
+  <data name="Update_BadgeTooltip" xml:space="preserve">
+    <value>A newer release is available: {0}. Click for changelog and download.</value>
+    <comment>{0} = release name or tag</comment>
+  </data>
+  <data name="Update_DialogTitle" xml:space="preserve">
+    <value>Update available</value>
+  </data>
+  <data name="Update_VersionDelta" xml:space="preserve">
+    <value>You are running {0}. Latest release is {1}.</value>
+    <comment>{0} = current version, {1} = latest version</comment>
+  </data>
+  <data name="Update_PublishedAt" xml:space="preserve">
+    <value>Published on {0}</value>
+    <comment>{0} = local date, e.g. "2026-05-02"</comment>
+  </data>
+  <data name="Update_PublishedAtPrerelease" xml:space="preserve">
+    <value>Published on {0} (pre-release)</value>
+    <comment>{0} = local date, e.g. "2026-05-02"</comment>
+  </data>
+  <data name="Update_NoChangelog" xml:space="preserve">
+    <value>(No release notes were attached to this release.)</value>
+  </data>
+  <data name="Update_OpenDownload" xml:space="preserve">
+    <value>Open download page</value>
+  </data>
+  <data name="Update_RemindLater" xml:space="preserve">
+    <value>Remind me later</value>
+  </data>
+  <data name="Update_CheckEnabled" xml:space="preserve">
+    <value>Check for updates</value>
+  </data>
+  <data name="Update_CheckEnabledTooltip" xml:space="preserve">
+    <value>When enabled, BlockParam queries GitHub Releases at most once per day to detect new versions. No telemetry is sent.</value>
+  </data>
+  <data name="Update_IncludePrereleases" xml:space="preserve">
+    <value>Include pre-releases</value>
+  </data>
+  <data name="Update_IncludePrereleasesTooltip" xml:space="preserve">
+    <value>Show release-candidate / beta builds (e.g. v0.4.0-rc1) as updates.</value>
+  </data>
+  <data name="Update_ManagedHint" xml:space="preserve">
+    <value>Update-check policy is managed by IT and cannot be changed locally.</value>
   </data>
 </root>

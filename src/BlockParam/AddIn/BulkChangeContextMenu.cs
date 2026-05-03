@@ -14,6 +14,7 @@ using BlockParam.Localization;
 using BlockParam.Services;
 using BlockParam.SimaticML;
 using BlockParam.UI;
+using BlockParam.Updates;
 
 namespace BlockParam.AddIn;
 
@@ -229,7 +230,7 @@ public class BulkChangeContextMenu : ContextMenuAddIn
                 Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
                 "BlockParam");
             var usagePath = Path.Combine(appDataDir, "usage.dat");
-            var freeTracker = new LocalUsageTracker(usagePath, dailyLimit: 3);
+            var freeTracker = new LocalUsageTracker(usagePath);
 
             // License service: heartbeat-based concurrent session validation.
             // #20: probe the machine-wide managed key file first so multi-seat
@@ -245,6 +246,25 @@ public class BulkChangeContextMenu : ContextMenuAddIn
 
             // Tag table export: lazy (only when needed by autocomplete). Scoped per project (#14).
             var tagTableDir = Path.Combine(tempDir, "TagTables");
+
+            // Update check (#61). Single shared service per dialog session;
+            // cache TTL gates the GitHub call so opening multiple DBs in a
+            // session does not multiply network traffic.
+            IUpdateCheckService? updateCheckService = null;
+            try
+            {
+                var current = typeof(BulkChangeContextMenu).Assembly.GetName().Version
+                    ?? new Version(0, 0, 0);
+                updateCheckService = new UpdateCheckService(
+                    fetcher: new GitHubReleaseFetcher(),
+                    currentVersion: VersionTag.FromSystemVersion(current),
+                    cachePath: Path.Combine(appDataDir, "update-check.json"),
+                    readSettings: () => configLoader.ReadUpdateCheckSettings());
+            }
+            catch (Exception ex)
+            {
+                Log.Warning(ex, "UpdateCheck: cannot construct service — feature disabled this session");
+            }
 
             // Open dialog
             var vm = new BulkChangeViewModel(
@@ -295,7 +315,8 @@ public class BulkChangeContextMenu : ContextMenuAddIn
                 udtResolver: udtResolver,
                 commentResolver: commentResolver,
                 editingLanguage: editingLanguage,
-                referenceLanguage: referenceLanguage);
+                referenceLanguage: referenceLanguage,
+                updateCheckService: updateCheckService);
 
             licenseService.StartHeartbeat();
             var dialog = new BulkChangeDialog(vm);

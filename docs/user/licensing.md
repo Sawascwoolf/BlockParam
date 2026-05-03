@@ -5,41 +5,37 @@ the daily quota and funds further development.
 
 | Tier | Daily limit | Price |
 |---|---|---|
-| **Free** | 3 bulk operations + 50 inline edits per calendar day | € 0 |
+| **Free** | 200 value changes per calendar day | € 0 |
 | **Pro** | Unlimited | 15 € / year (net) |
 
 The daily counter resets at **local midnight**.
 
-## What counts as one bulk operation
+## What counts as one change
 
-A "bulk operation" is **one click of Apply** that writes more than one change.
-The full pending queue counts as one operation, regardless of how many target
-members it touched.
+One "change" is **one individual start-value write** to the DB. Whether the
+change came from a bulk-staged scope or from typing directly into a cell, it
+costs the same: one quota unit per value actually written. The counter is
+charged on **successful Apply** — staging edits in the dialog is free, and
+failed / cancelled Applies don't count.
 
 | Action | Counts as |
 |---|---|
-| Stage 1 change, click Apply | 1 inline edit |
-| Stage 50 changes, click Apply | 1 bulk operation |
-| Stage 5 changes, click Apply, then stage 5 more, Apply again | **2 bulk operations** |
+| Stage 1 value, click Apply | 1 change |
+| Bulk-stage 50 values, click Apply | 50 changes |
+| Stage 5, Apply, then stage 5 more, Apply again | 10 changes |
 | Discard a pending queue without applying | 0 (nothing was written) |
-| Edit a value, hit Apply, undo via TIA Ctrl+Z | 1 inline / bulk (the undo doesn't refund the quota) |
+| Update comments via the comment template | 0 (comments don't draw from the quota) |
+| Edit a value, hit Apply, undo via TIA Ctrl+Z | 1 (the undo doesn't refund the quota) |
 
-> Tip: if you're on the Free tier, **stage all your edits first**, then click
-> Apply once. Multiple Apply clicks burn multiple operations.
-
-## What counts as one inline edit
-
-Anything that gets written to the DB through the Bulk Change dialog and isn't
-already a bulk operation. Practically: changing a single value via the dialog.
-
-The 50 inline edits per day are independent of the 3 bulk operations.
+> Tip: if a single Apply would exceed your remaining quota, the button is
+> disabled — drop some edits or upgrade. The dialog won't half-apply.
 
 ## Activating Pro
 
 1. Buy a license at [blockparam.lemonsqueezy.com](https://blockparam.lemonsqueezy.com).
    You'll receive a key by email (format: `PRO-XXXX-XXXX-XXXX`).
 2. In the Bulk Change dialog, click the **License button** in the bottom bar
-   (it shows your current tier, e.g. *"Free License — 2 of 3 bulk operations used"*).
+   (it shows your current tier, e.g. *"Remaining: 173/200 free changes today"*).
 3. Paste the key into the field and click **Activate**.
 
 <p align="center">

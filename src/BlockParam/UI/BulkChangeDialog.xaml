@@ -84,6 +84,16 @@
                      buttons so the persistent percentage label and shortcut
                      tooltip stay in the user's peripheral vision. -->
                 <local:ZoomIndicator Margin="0,0,12,0" VerticalAlignment="Center"/>
+                <!-- Update-available badge (#61). Hidden until the async
+                     check resolves with a newer release; clicking opens the
+                     details popup with changelog + "Open download page". -->
+                <Button Content="{Binding UpdateBadgeText}" FontSize="10"
+                        Command="{Binding ShowUpdateDetailsCommand}"
+                        Visibility="{Binding HasUpdateAvailable, Converter={StaticResource BoolToVis}}"
+                        Background="#FFF4DA" BorderBrush="#E0A030" BorderThickness="1"
+                        Foreground="#7A5200" Cursor="Hand" Padding="6,2"
+                        VerticalAlignment="Center" Margin="0,0,12,0" FontWeight="SemiBold"
+                        ToolTip="{Binding UpdateBadgeTooltip}"/>
                 <!-- License / usage summary — clickable to open the license dialog.
                      Single control replaces the old tier badge + separate Manage link. -->
                 <Button Content="{Binding UsageStatusText}" FontSize="10"
@@ -104,11 +114,13 @@
                 <Button x:Name="ApplyButton"
                         Content="{loc:Loc Dialog_Apply}" Command="{Binding ApplyCommand}"
                         MinWidth="70" Height="26" Margin="0,0,4,0" Padding="8,0"
-                        ToolTip="{loc:Loc Dialog_ApplyTooltip}"/>
+                        ToolTip="{Binding ApplyTooltip}"
+                        ToolTipService.ShowOnDisabled="True"/>
                 <Button Content="{loc:Loc Dialog_ApplyAndClose}"
                         Command="{Binding ApplyAndCloseCommand}"
                         MinWidth="100" Height="26" Margin="0,0,4,0" Padding="8,0"
-                        ToolTip="{loc:Loc Dialog_ApplyTooltip}"/>
+                        ToolTip="{Binding ApplyTooltip}"
+                        ToolTipService.ShowOnDisabled="True"/>
                 <Button Content="{loc:Loc Dialog_Close}" Click="OnClose"
                         MinWidth="60" Height="26" Padding="8,0"/>
             </StackPanel>
@@ -559,17 +571,43 @@
                         </Grid>
                     </StackPanel>
 
-                    <!-- Expanded content: three stacked sections -->
-                    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
+                    <!-- Expanded content: four stacked sections (#64).
+                         Single outer ScrollViewer scrolls the inspector as one unit.
+                         Each section's header Border is named (StickyHeader{1..4}) and
+                         carries a TranslateTransform so the code-behind can pin it to
+                         the viewport top (when scrolled past) or the viewport bottom
+                         (when not yet reached). All four headers stay visible at every
+                         scroll position. See OnInspectorScrollChanged in the .xaml.cs. -->
+                    <ScrollViewer x:Name="InspectorScroll"
+                                  VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
                                   Visibility="{Binding IsInspectorExpanded, Converter={StaticResource BoolToVis}}">
-                        <StackPanel>
+                        <StackPanel x:Name="InspectorContent">
                             <!-- =========================================================
                                  Section 1 — BULK EDIT (input)
                                  ========================================================= -->
-                            <Grid>
+                            <!-- Wrapper ZIndex=10 (#64): the inner sticky header's own
+                                 ZIndex only orders against its siblings inside this Grid,
+                                 not against later sections' bodies in the OUTER StackPanel.
+                                 Without this, Section 1's header — when translated down to
+                                 stack at the viewport top — is drawn behind Section 2's
+                                 body content. Match the other section headers' ZIndex=10. -->
+                            <Grid Panel.ZIndex="10">
                                 <StackPanel>
-                                    <Border Background="#EEF0F3" BorderBrush="#B9BEC6"
-                                            BorderThickness="0,0,0,1">
+                                    <!-- Inner Panel.ZIndex=10 (#64): the wrapper Grid's
+                                         ZIndex orders Section 1 above other sections' bodies,
+                                         but inside this StackPanel the header is the FIRST
+                                         child and its body the SECOND, so by document order
+                                         the body wins. When the sticky transform pushes the
+                                         header down INTO Section 1's body, this inner ZIndex
+                                         keeps the header drawn on top of its body sibling. -->
+                                    <Border x:Name="StickyHeader1" Panel.ZIndex="10"
+                                            Background="#EEF0F3" BorderBrush="#B9BEC6"
+                                            BorderThickness="0,0,0,1"
+                                            Cursor="Hand"
+                                            MouseLeftButtonUp="OnInspectorHeaderClick">
+                                        <Border.RenderTransform>
+                                            <TranslateTransform x:Name="StickyTransform1"/>
+                                        </Border.RenderTransform>
                                         <DockPanel Margin="0,0,0,0">
                                             <Button DockPanel.Dock="Left"
                                                     Command="{Binding ToggleBulkEditCommand}"
@@ -783,8 +821,14 @@
                             <!-- =========================================================
                                  Section 2 — BULK PREVIEW (live)
                                  ========================================================= -->
-                            <Border Background="#EEF0F3" BorderBrush="#B9BEC6"
-                                    BorderThickness="0,1,0,1">
+                            <Border x:Name="StickyHeader2" Panel.ZIndex="10"
+                                    Background="#EEF0F3" BorderBrush="#B9BEC6"
+                                    BorderThickness="0,1,0,1"
+                                    Cursor="Hand"
+                                    MouseLeftButtonUp="OnInspectorHeaderClick">
+                                <Border.RenderTransform>
+                                    <TranslateTransform x:Name="StickyTransform2"/>
+                                </Border.RenderTransform>
                                 <DockPanel>
                                     <Button DockPanel.Dock="Left"
                                             Command="{Binding ToggleBulkPreviewCommand}"
@@ -917,8 +961,14 @@
                             <!-- =========================================================
                                  Section 3 — PENDING EDITS
                                  ========================================================= -->
-                            <Border Background="#EEF0F3" BorderBrush="#B9BEC6"
-                                    BorderThickness="0,1,0,1">
+                            <Border x:Name="StickyHeader3" Panel.ZIndex="10"
+                                    Background="#EEF0F3" BorderBrush="#B9BEC6"
+                                    BorderThickness="0,1,0,1"
+                                    Cursor="Hand"
+                                    MouseLeftButtonUp="OnInspectorHeaderClick">
+                                <Border.RenderTransform>
+                                    <TranslateTransform x:Name="StickyTransform3"/>
+                                </Border.RenderTransform>
                                 <DockPanel>
                                     <Button DockPanel.Dock="Left"
                                             Command="{Binding TogglePendingCommand}"
@@ -1119,8 +1169,14 @@
                                  a configured rule. Click a row to jump to the member in the
                                  tree. Does NOT block Apply.
                                  ========================================================= -->
-                            <Border Background="#EEF0F3" BorderBrush="#B9BEC6"
-                                    BorderThickness="0,1,0,1">
+                            <Border x:Name="StickyHeader4" Panel.ZIndex="10"
+                                    Background="#EEF0F3" BorderBrush="#B9BEC6"
+                                    BorderThickness="0,1,0,1"
+                                    Cursor="Hand"
+                                    MouseLeftButtonUp="OnInspectorHeaderClick">
+                                <Border.RenderTransform>
+                                    <TranslateTransform x:Name="StickyTransform4"/>
+                                </Border.RenderTransform>
                                 <DockPanel ToolTip="{loc:Loc Issues_Tooltip}">
                                     <Button DockPanel.Dock="Left"
                                             Command="{Binding ToggleIssuesCommand}"

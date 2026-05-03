@@ -1,6 +1,7 @@
 using Newtonsoft.Json;
 using BlockParam.Models;
 using BlockParam.Services;
+using BlockParam.Updates;
 
 namespace BlockParam.Config;
 
@@ -31,6 +32,13 @@ public class BulkChangeConfig
     /// </summary>
     [JsonProperty("language")]
     public string? Language { get; set; }
+
+    /// <summary>
+    /// In-app update check settings (#61). Optional — when null, defaults
+    /// apply (enabled, no pre-releases, nothing skipped).
+    /// </summary>
+    [JsonProperty("updateCheck")]
+    public UpdateCheckSettings? UpdateCheck { get; set; }
 
     /// <summary>Copy-on-write metadata: tracks where this file was copied from.</summary>
     [JsonProperty("_copiedFrom")]
