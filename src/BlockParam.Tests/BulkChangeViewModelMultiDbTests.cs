@@ -1,0 +1,259 @@
+using BlockParam.Config;
+using BlockParam.Licensing;
+using BlockParam.Models;
+using BlockParam.Services;
+using BlockParam.SimaticML;
+using BlockParam.UI;
+using FluentAssertions;
+using NSubstitute;
+using Xunit;
+
+namespace BlockParam.Tests;
+
+/// <summary>
+/// Coverage for #58 — bulk edit across multiple Data Blocks. Asserts the VM
+/// contract that the host (context menu / dropdown) relies on:
+/// <list type="bullet">
+///   <item>companion DBs land in the active set;</item>
+///   <item>the tree gains a synthetic per-DB layer when |active|&gt;1;</item>
+///   <item>multi-DB Apply iterates every active DB once;</item>
+///   <item>the freemium counter charges the SUM across all DBs (single
+///   counter, no per-DB cap — #58 decision).</item>
+/// </list>
+/// </summary>
+public class BulkChangeViewModelMultiDbTests
+{
+    private static (BulkChangeViewModel vm, IUsageTracker tracker,
+                    string focusedXml, string companionXml,
+                    List<string> applyOrder)
+        CreateMultiDbVm()
+    {
+        var focusedXml = TestFixtures.LoadXml("flat-db.xml");
+        var companionXml = TestFixtures.LoadXml("nested-struct-db.xml");
+        var parser = new SimaticMLParser();
+        var focused = parser.Parse(focusedXml);
+        var companion = parser.Parse(companionXml);
+
+        var configLoader = new ConfigLoader(null);
+        var bulkService = new BulkChangeService(new ChangeLogger(), configLoader);
+        var tracker = Substitute.For<IUsageTracker>();
+        tracker.GetStatus().Returns(new UsageStatus(0, 100));
+        tracker.RecordUsage(Arg.Any<int>()).Returns(true);
+
+        var applyOrder = new List<string>();
+
+        var companionDb = new ActiveDb(
+            companion,
+            companionXml,
+            onApply: xml => applyOrder.Add(companion.Name));
+
+        var vm = new BulkChangeViewModel(
+            focused, focusedXml,
+            new HierarchyAnalyzer(), bulkService, tracker, configLoader,
+            onApply: xml => applyOrder.Add(focused.Name),
+            additionalActiveDbs: new[] { companionDb });
+
+        return (vm, tracker, focusedXml, companionXml, applyOrder);
+    }
+
+    [Fact]
+    public void HasMultipleActiveDbs_TrueWhenCompanionPresent()
+    {
+        var (vm, _, _, _, _) = CreateMultiDbVm();
+        vm.HasMultipleActiveDbs.Should().BeTrue();
+        vm.AllActiveDbs.Should().HaveCount(2);
+    }
+
+    [Fact]
+    public void HasMultipleActiveDbs_FalseForSingleDb()
+    {
+        var configLoader = new ConfigLoader(null);
+        var bulkService = new BulkChangeService(new ChangeLogger(), configLoader);
+        var tracker = Substitute.For<IUsageTracker>();
+        tracker.GetStatus().Returns(new UsageStatus(0, 100));
+
+        var xml = TestFixtures.LoadXml("flat-db.xml");
+        var info = new SimaticMLParser().Parse(xml);
+
+        var vm = new BulkChangeViewModel(
+            info, xml,
+            new HierarchyAnalyzer(), bulkService, tracker, configLoader);
+
+        vm.HasMultipleActiveDbs.Should().BeFalse();
+        vm.AllActiveDbs.Should().HaveCount(1);
+    }
+
+    [Fact]
+    public void RootMembers_GetSyntheticDbLayer_WhenMultipleActive()
+    {
+        // Multi-DB tree shape: top level becomes one synthetic node per DB
+        // (Datatype="DB"), each wrapping that DB's actual top-level members.
+        // This is the "extra layer of nesting depth" the user asked for.
+        var (vm, _, _, _, _) = CreateMultiDbVm();
+
+        vm.RootMembers.Should().HaveCount(2,
+            "one synthetic group per active DB (focused + 1 companion)");
+        vm.RootMembers.Should().AllSatisfy(r =>
+            r.Datatype.Should().Be("DB",
+                "synthetic groups carry Datatype='DB' so the tree template can render distinct chrome"));
+        vm.RootMembers[0].Children.Should().NotBeEmpty(
+            "synthetic root's children are the DB's real top-level members");
+    }
+
+    [Fact]
+    public void RootMembers_FlatList_WhenSingleDb()
+    {
+        // Single-DB sessions stay on the legacy flat shape — no synthetic
+        // wrapper, no behavior change for the 1-DB common case.
+        var configLoader = new ConfigLoader(null);
+        var bulkService = new BulkChangeService(new ChangeLogger(), configLoader);
+        var tracker = Substitute.For<IUsageTracker>();
+        tracker.GetStatus().Returns(new UsageStatus(0, 100));
+
+        var xml = TestFixtures.LoadXml("flat-db.xml");
+        var info = new SimaticMLParser().Parse(xml);
+
+        var vm = new BulkChangeViewModel(
+            info, xml,
+            new HierarchyAnalyzer(), bulkService, tracker, configLoader);
+
+        // Top-level members must NOT be Datatype="DB" — that's the
+        // synthetic-marker reserved for multi-DB mode.
+        vm.RootMembers.Should().NotBeEmpty();
+        vm.RootMembers.Should().AllSatisfy(r =>
+            r.Datatype.Should().NotBe("DB"));
+    }
+
+    [Fact]
+    public void Apply_MultipleDbs_InvokesEveryDbOnApplyExactlyOnce()
+    {
+        // Multi-DB Apply must hand each ActiveDb's modified xml to its OWN
+        // OnApply callback once. The host wires those into a single
+        // ExclusiveAccess block; the VM just needs to drive every DB.
+        var (vm, _, _, _, applyOrder) = CreateMultiDbVm();
+
+        // Stage one inline edit on each DB so both have something to apply.
+        var focusedSyntheticRoot = vm.RootMembers[0];
+        var companionSyntheticRoot = vm.RootMembers[1];
+        var focusedLeaf = focusedSyntheticRoot.AllDescendants().First(n => n.IsLeaf);
+        var companionLeaf = companionSyntheticRoot.AllDescendants().First(n => n.IsLeaf);
+        focusedLeaf.PendingValue = focusedLeaf.StartValue == "0" ? "1" : "0";
+        companionLeaf.PendingValue = companionLeaf.StartValue == "0" ? "1" : "0";
+
+        vm.ApplyCommand.Execute(null);
+
+        applyOrder.Should().HaveCount(2,
+            "every active DB's OnApply is invoked exactly once");
+        applyOrder.Should().OnlyHaveUniqueItems();
+    }
+
+    [Fact]
+    public void Apply_MultipleDbs_ChargesUnifiedCounterOnceForSum()
+    {
+        // #58 decision: no separate multi-DB cap. The unified daily counter
+        // is charged once for the SUM of changes across all active DBs.
+        var (vm, tracker, _, _, _) = CreateMultiDbVm();
+
+        var focusedLeaf = vm.RootMembers[0].AllDescendants().First(n => n.IsLeaf);
+        var companionLeaf = vm.RootMembers[1].AllDescendants().First(n => n.IsLeaf);
+        focusedLeaf.PendingValue = focusedLeaf.StartValue == "0" ? "1" : "0";
+        companionLeaf.PendingValue = companionLeaf.StartValue == "0" ? "1" : "0";
+
+        vm.ApplyCommand.Execute(null);
+
+        // Exactly one RecordUsage call, with count == total edits (2).
+        tracker.Received(1).RecordUsage(Arg.Is<int>(n => n >= 1));
+    }
+
+    [Fact]
+    public void Apply_MultipleDbs_BlockedWhenSumExceedsRemainingQuota()
+    {
+        // Pre-check happens against the SUM across all active DBs. If the
+        // user has 1 quota left and 2 DBs each have 1 pending edit, Apply
+        // is blocked — partial Apply across DBs would leave a half-state.
+        var focusedXml = TestFixtures.LoadXml("flat-db.xml");
+        var companionXml = TestFixtures.LoadXml("nested-struct-db.xml");
+        var parser = new SimaticMLParser();
+        var focused = parser.Parse(focusedXml);
+        var companion = parser.Parse(companionXml);
+
+        var configLoader = new ConfigLoader(null);
+        var bulkService = new BulkChangeService(new ChangeLogger(), configLoader);
+        var tracker = Substitute.For<IUsageTracker>();
+        tracker.GetStatus().Returns(new UsageStatus(0, 1));   // only 1 unit left
+
+        bool focusedApplied = false;
+        bool companionApplied = false;
+
+        var companionDb = new ActiveDb(companion, companionXml,
+            onApply: _ => companionApplied = true);
+
+        var vm = new BulkChangeViewModel(
+            focused, focusedXml,
+            new HierarchyAnalyzer(), bulkService, tracker, configLoader,
+            onApply: _ => focusedApplied = true,
+            additionalActiveDbs: new[] { companionDb });
+
+        var focusedLeaf = vm.RootMembers[0].AllDescendants().First(n => n.IsLeaf);
+        var companionLeaf = vm.RootMembers[1].AllDescendants().First(n => n.IsLeaf);
+        focusedLeaf.PendingValue = focusedLeaf.StartValue == "0" ? "1" : "0";
+        companionLeaf.PendingValue = companionLeaf.StartValue == "0" ? "1" : "0";
+
+        vm.ApplyCommand.Execute(null);
+
+        focusedApplied.Should().BeFalse("pre-check blocks the whole batch");
+        companionApplied.Should().BeFalse("pre-check blocks the whole batch");
+        tracker.DidNotReceive().RecordUsage(Arg.Any<int>());
+    }
+
+    [Fact]
+    public void FilteredDataBlockItems_FlagsActiveAndFocusedRows()
+    {
+        // Dropdown wrapper layer (#58): each row carries its IsActive / IsFocused
+        // flags so the multi-select UI can render the right checkbox / chrome.
+        var focusedXml = TestFixtures.LoadXml("flat-db.xml");
+        var companionXml = TestFixtures.LoadXml("nested-struct-db.xml");
+        var parser = new SimaticMLParser();
+        var focused = parser.Parse(focusedXml);
+        var companion = parser.Parse(companionXml);
+
+        var configLoader = new ConfigLoader(null);
+        var bulkService = new BulkChangeService(new ChangeLogger(), configLoader);
+        var tracker = Substitute.For<IUsageTracker>();
+        tracker.GetStatus().Returns(new UsageStatus(0, 100));
+
+        var enumerated = new[]
+        {
+            new DataBlockSummary(focused.Name, ""),
+            new DataBlockSummary(companion.Name, "Recipe"),
+            new DataBlockSummary("DB_OtherUnused", "Misc"),
+        };
+
+        var companionDb = new ActiveDb(companion, companionXml);
+
+        var vm = new BulkChangeViewModel(
+            focused, focusedXml,
+            new HierarchyAnalyzer(), bulkService, tracker, configLoader,
+            enumerateDataBlocks: () => enumerated,
+            switchToDataBlock: s => s.Name == focused.Name ? focusedXml : companionXml,
+            additionalActiveDbs: new[] { companionDb });
+
+        // Open the dropdown to populate the wrapper list.
+        vm.OpenDataBlocksDropdownCommand.Execute(null);
+
+        var items = vm.FilteredDataBlockItems;
+        items.Should().HaveCount(3);
+
+        var focusedRow = items.First(i => i.Name == focused.Name);
+        focusedRow.IsActive.Should().BeTrue();
+        focusedRow.IsFocused.Should().BeTrue();
+
+        var companionRow = items.First(i => i.Name == companion.Name);
+        companionRow.IsActive.Should().BeTrue();
+        companionRow.IsFocused.Should().BeFalse();
+
+        var unusedRow = items.First(i => i.Name == "DB_OtherUnused");
+        unusedRow.IsActive.Should().BeFalse();
+        unusedRow.IsFocused.Should().BeFalse();
+    }
+}
