@@ -739,7 +739,7 @@
                                                 Height="28" Margin="12,10,12,6"
                                                 Background="#1f6feb" Foreground="White"
                                                 BorderThickness="0" FontWeight="SemiBold"
-                                                ToolTip="{loc:Loc Dialog_SetTooltip}"
+                                                ToolTip="{Binding SetButtonTooltip}"
                                                 Visibility="{Binding CanEdit, Converter={StaticResource BoolToVis}}"/>
 
                                         <!-- Overlap warning: bulk will overwrite existing pending edits -->

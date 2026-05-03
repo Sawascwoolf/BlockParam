@@ -348,6 +348,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
                 OnPropertyChanged(nameof(HasScope));
                 OnPropertyChanged(nameof(CanEdit));
                 OnPropertyChanged(nameof(SetButtonText));
+                OnPropertyChanged(nameof(SetButtonTooltip));
             }
         }
     }
@@ -373,6 +374,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
                         UpdateFilteredSuggestions();
                         UpdateHighlighting();
                         OnPropertyChanged(nameof(SetButtonText));
+                        OnPropertyChanged(nameof(SetButtonTooltip));
                     }));
                 }, null, 150, Timeout.Infinite);
             }
@@ -519,6 +521,40 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             return _selectedScope != null
                 ? $"Set {CountWouldChangeMembers()} in '{_selectedScope.AncestorName}'"
                 : "Set";
+        }
+    }
+
+    /// <summary>
+    /// Two-line tooltip for the Set button: action description + count breakdown.
+    /// Surfaces the total scope size so users still see "40 valves selected" even
+    /// when the button label drops to "Set 35" because 5 already match (#65).
+    /// </summary>
+    public string SetButtonTooltip
+    {
+        get
+        {
+            var action = Res.Get("Dialog_SetTooltip");
+            if (!CanEdit) return action;
+
+            int total = TotalCandidateMembers();
+            int willChange = CountWouldChangeMembers();
+            int alreadyMatch = total - willChange;
+
+            string breakdown;
+            if (string.IsNullOrEmpty(_newValue))
+            {
+                breakdown = IsManualMode
+                    ? Res.Format("Dialog_SetTooltip_ManualIdle", total)
+                    : Res.Format("Dialog_SetTooltip_ScopeIdle", total, _selectedScope?.AncestorName ?? "");
+            }
+            else
+            {
+                breakdown = IsManualMode
+                    ? Res.Format("Dialog_SetTooltip_ManualBreakdown", willChange, total, alreadyMatch)
+                    : Res.Format("Dialog_SetTooltip_ScopeBreakdown",
+                        willChange, total, _selectedScope?.AncestorName ?? "", alreadyMatch);
+            }
+            return action + "\n" + breakdown;
         }
     }
 
@@ -1787,6 +1823,24 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
+    /// Total members in the active scope or manual selection — the denominator
+    /// for the tooltip's "X of Y will be staged" breakdown. Counts only paths
+    /// that resolve to a leaf so it matches what SetPendingOnNodes can act on.
+    /// </summary>
+    private int TotalCandidateMembers()
+    {
+        if (IsManualMode)
+        {
+            return _manualSelectedPaths.Count(p =>
+            {
+                var node = FindNodeByPath(p);
+                return node != null && node.IsLeaf;
+            });
+        }
+        return _selectedScope?.MatchCount ?? 0;
+    }
+
+    /// <summary>
     /// Stages bulk scope or manual-selection values as pending on each affected node.
     /// Does NOT modify XML — values turn yellow until Apply is clicked.
     /// </summary>
@@ -2482,6 +2536,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(HasScope));
         OnPropertyChanged(nameof(CanEdit));
         OnPropertyChanged(nameof(SetButtonText));
+        OnPropertyChanged(nameof(SetButtonTooltip));
         OnPropertyChanged(nameof(SelectedMemberDisplay));
 
         // Entering manual mode: the scope-based highlighting from the single
@@ -2575,6 +2630,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(HasScope));
         OnPropertyChanged(nameof(CanEdit));
         OnPropertyChanged(nameof(SetButtonText));
+        OnPropertyChanged(nameof(SetButtonTooltip));
         OnPropertyChanged(nameof(SelectedMemberDisplay));
 
         ValidateValue();
