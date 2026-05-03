@@ -2493,37 +2493,70 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
 
     private void ApplyAllFilters()
     {
-        HashSet<string>? searchPaths = null;
+        // Multi-DB safe (#58): build per-DB search/exclude sets and route
+        // them to each synthetic root via _dbToSynthetic. Path strings are
+        // unique within a DB but identical across DBs that share the
+        // structure, so a single shared HashSet<string> would mis-mark same-
+        // path leaves in companion DBs as search hits.
+        var perDbSearchPaths = new Dictionary<ActiveDb, HashSet<string>>();
+        int totalSearchHits = 0;
         if (!string.IsNullOrWhiteSpace(_searchQuery))
         {
-            var searchResult = _searchService.Search(_active.Info, _searchQuery);
-            searchPaths = new HashSet<string>(searchResult.Matches.Select(m => m.Path));
-            SearchHitCount = searchResult.HitCount;
+            foreach (var db in AllActiveDbs)
+            {
+                var result = _searchService.Search(db.Info, _searchQuery);
+                perDbSearchPaths[db] =
+                    new HashSet<string>(result.Matches.Select(m => m.Path));
+                totalSearchHits += result.HitCount;
+            }
+        }
+        SearchHitCount = totalSearchHits;
+
+        var config = _configLoader.GetConfig();
+
+        // Per-DB exclude sets so HiddenByRuleCount + ApplyFilter use the
+        // owning DB's path set, not just the focused DB's.
+        var perDbExcludeSet = new Dictionary<ActiveDb, HashSet<string>>();
+        int totalHidden = 0;
+        foreach (var db in AllActiveDbs)
+        {
+            var excl = BuildExcludeSetFor(db.Info, config);
+            if (excl != null)
+            {
+                perDbExcludeSet[db] = excl;
+                totalHidden += db.Info.AllMembers().Count(m => m.IsLeaf && excl.Contains(m.Path));
+            }
+        }
+        HiddenByRuleCount = totalHidden;
+
+        if (HasMultipleActiveDbs)
+        {
+            // Route per synthetic root so each DB's filter sets only affect
+            // its own subtree.
+            foreach (var (db, syntheticRoot) in _dbToSynthetic)
+            {
+                perDbSearchPaths.TryGetValue(db, out var sp);
+                perDbExcludeSet.TryGetValue(db, out var ex);
+                syntheticRoot.ApplyFilter(
+                    ruleFilterActive: true,
+                    searchMatchPaths: sp,
+                    excludedByRules: ex,
+                    showSetpointsOnly: _showSetpointsOnly);
+                if (sp != null) SmartExpandSearchMatches(syntheticRoot, sp);
+            }
         }
         else
         {
-            SearchHitCount = 0;
-        }
-
-        var config = _configLoader.GetConfig();
-        var excludeSet = BuildExcludeSet(config);
-
-        HiddenByRuleCount = excludeSet == null
-            ? 0
-            : _active.Info.AllMembers().Count(m => m.IsLeaf && excludeSet.Contains(m.Path));
-
-        foreach (var root in RootMembers)
-            root.ApplyFilter(ruleFilterActive: true, searchPaths, excludeSet, _showSetpointsOnly);
-
-        // Smart-expand parents of search matches
-        if (searchPaths != null)
-        {
+            perDbSearchPaths.TryGetValue(_active, out var searchPaths);
+            perDbExcludeSet.TryGetValue(_active, out var excludeSet);
             foreach (var root in RootMembers)
-                SmartExpandSearchMatches(root, searchPaths);
+                root.ApplyFilter(ruleFilterActive: true, searchPaths, excludeSet, _showSetpointsOnly);
+            if (searchPaths != null)
+            {
+                foreach (var root in RootMembers)
+                    SmartExpandSearchMatches(root, searchPaths);
+            }
         }
-
-        // Pending inline edits no longer smart-expand (#10) — they're surfaced
-        // in the sidebar, so forcing the tree open was redundant and disruptive.
     }
 
     private void SmartExpandSearchMatches(MemberNodeViewModel node, HashSet<string> searchPaths)
@@ -2542,10 +2575,23 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     /// </summary>
     private void ReExpandNonAffected()
     {
-        if (!string.IsNullOrWhiteSpace(_searchQuery))
+        if (string.IsNullOrWhiteSpace(_searchQuery)) return;
+
+        if (HasMultipleActiveDbs)
         {
-            var searchResult = _searchService.Search(_active.Info, _searchQuery);
-            var searchPaths = new HashSet<string>(searchResult.Matches.Select(m => m.Path));
+            // Per-DB search so a path that's a hit in one DB doesn't smart-
+            // expand the same path in companion DBs that don't have a hit.
+            foreach (var (db, syntheticRoot) in _dbToSynthetic)
+            {
+                var result = _searchService.Search(db.Info, _searchQuery);
+                var searchPaths = new HashSet<string>(result.Matches.Select(m => m.Path));
+                SmartExpandSearchMatches(syntheticRoot, searchPaths);
+            }
+        }
+        else
+        {
+            var result = _searchService.Search(_active.Info, _searchQuery);
+            var searchPaths = new HashSet<string>(result.Matches.Select(m => m.Path));
             foreach (var root in RootMembers)
                 SmartExpandSearchMatches(root, searchPaths);
         }
@@ -3674,14 +3720,23 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     /// <summary>
     /// Builds a set of member paths excluded by rules with ExcludeFromSetpoints=true.
     /// </summary>
-    private HashSet<string>? BuildExcludeSet(BulkChangeConfig? config)
+    private HashSet<string>? BuildExcludeSet(BulkChangeConfig? config) =>
+        BuildExcludeSetFor(_active.Info, config);
+
+    /// <summary>
+    /// Builds the exclude-from-setpoints path set for a specific DB (#58).
+    /// Multi-DB ApplyAllFilters calls this once per active DB to keep each
+    /// DB's path set distinct — a single shared set would mis-mark same-
+    /// path leaves in companion DBs as excluded.
+    /// </summary>
+    private HashSet<string>? BuildExcludeSetFor(DataBlockInfo info, BulkChangeConfig? config)
     {
         if (config == null) return null;
         var excludeRules = config.Rules.Where(r => r.ExcludeFromSetpoints && !string.IsNullOrEmpty(r.PathPattern)).ToList();
         if (excludeRules.Count == 0) return null;
 
         var excluded = new HashSet<string>();
-        foreach (var member in _active.Info.AllMembers())
+        foreach (var member in info.AllMembers())
         {
             foreach (var rule in excludeRules)
             {
