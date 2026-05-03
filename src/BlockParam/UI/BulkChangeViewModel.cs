@@ -1147,6 +1147,27 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
+    /// Clears pending inline edits inside a specific DB's synthetic subtree
+    /// (#58). Used by multi-DB Apply's partial-commit branch: when DB#1
+    /// committed but DB#2 cancelled, DB#1's tree must drop its pending
+    /// flags (the values are now in TIA) while DB#2's pending values stay
+    /// for retry.
+    /// </summary>
+    private void ClearPendingValuesForDb(ActiveDb db)
+    {
+        foreach (var root in RootMembers)
+        {
+            if (!string.Equals(root.Name, db.Info.Name, StringComparison.Ordinal))
+                continue;
+            foreach (var node in root.AllDescendants())
+            {
+                if (node.IsPendingInlineEdit) node.ClearPending();
+            }
+            return;
+        }
+    }
+
+    /// <summary>
     /// Counts pending inline edits inside a companion's synthetic subtree.
     /// Used by the remove-with-stash-prompt flow (#58).
     /// </summary>
@@ -3287,16 +3308,66 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             // The host wires these into a single ExclusiveAccess block per
             // #58 (decision: one undo step across the whole multi-DB
             // Apply). User-cancel inside any callback aborts the rest.
-            foreach (var (db, _) in perDb)
+            //
+            // Partial-commit accounting: if DB#1 succeeds and DB#2 cancels,
+            // DB#1's xml is already in TIA — we cannot roll it back from
+            // here. The honest path is to charge quota for the writes that
+            // DID succeed, surface a partial-commit status, and clear
+            // pending values on committed DBs (so they don't show up as
+            // pending forever). The cancelled DB's pending values stay in
+            // its tree so the user can retry it after compiling / fixing.
+            int committedChanges = 0;
+            int committedDbs = 0;
+            string? cancelledOnDb = null;
+            foreach (var (db, edits) in perDb)
             {
-                try { db.OnApply?.Invoke(db.Xml); }
+                try
+                {
+                    db.OnApply?.Invoke(db.Xml);
+                    committedChanges += edits.Count;
+                    committedDbs++;
+                }
                 catch (OperationCanceledException)
                 {
-                    _lastApplySucceeded = false;
-                    UpdateUsageStatus();
-                    return;
+                    cancelledOnDb = db.Info.Name;
+                    break;
                 }
             }
+
+            if (cancelledOnDb != null)
+            {
+                // Charge the partial committed sum so the user can't
+                // accidentally double-spend on the next click. Counter
+                // race handling mirrors the all-success path.
+                if (committedChanges > 0 && !_usageTracker.RecordUsage(committedChanges))
+                {
+                    var remaining = _usageTracker.GetStatus().RemainingToday;
+                    if (remaining > 0) _usageTracker.RecordUsage(remaining);
+                }
+
+                // Surface what actually happened. Without this, UI just
+                // shows the empty status text and the user sees pending
+                // edits stuck on the cancelled DB with no explanation.
+                StatusText = Res.Format("Status_Changed",
+                    committedChanges,
+                    $"{committedDbs}/{perDb.Count} DB(s); '{cancelledOnDb}' cancelled");
+                Log.Warning(
+                    "ExecuteApplyMultiDb partial commit: {Committed}/{Total} DBs applied, cancelled on {Cancelled}",
+                    committedDbs, perDb.Count, cancelledOnDb);
+
+                // Clear pending state on the DBs that DID commit so they
+                // don't keep showing as pending after the partial-Apply.
+                for (int i = 0; i < committedDbs; i++)
+                {
+                    var (db, _) = perDb[i];
+                    ClearPendingValuesForDb(db);
+                }
+                _lastApplySucceeded = false;
+                HasPendingChanges = false;
+                UpdateUsageStatus();
+                return;
+            }
+
             HasPendingChanges = false;
 
             // Phase 3: charge the unified daily counter once for the sum
