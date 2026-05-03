@@ -2,6 +2,7 @@ using System.IO;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Serialization;
 using BlockParam.Diagnostics;
+using BlockParam.Updates;
 
 namespace BlockParam.Config;
 
@@ -16,6 +17,13 @@ public class ConfigLoader
     private string? _tiaProjectPath;
     private BulkChangeConfig? _cachedConfig;
     private bool _loaded;
+
+    /// <summary>
+    /// Override the managed-config probe path (default
+    /// <c>%PROGRAMDATA%\BlockParam\config.json</c>). Tests set this so a
+    /// real machine-wide file on the dev/CI box can't taint the result.
+    /// </summary>
+    internal string? ManagedConfigPathOverride { get; set; }
 
     public ConfigLoader(string? configPath = null)
     {
@@ -140,6 +148,111 @@ public class ConfigLoader
     {
         var raw = TryReadConfig("language")?.Language;
         return string.IsNullOrWhiteSpace(raw) ? null : raw!.Trim();
+    }
+
+    /// <summary>
+    /// Reads the in-app update-check settings (#61) merging in this order
+    /// (later wins): user config → managed override at
+    /// <c>%PROGRAMDATA%\BlockParam\config.json</c>. The managed file mirrors
+    /// the licensing pattern from #20 — IT can deploy a single
+    /// <c>{"updateCheck":{"enabled":false}}</c> file to disable checks
+    /// fleet-wide on air-gapped engineering networks.
+    /// </summary>
+    public UpdateCheckSettings ReadUpdateCheckSettings()
+    {
+        var settings = TryReadConfig("update-check")?.UpdateCheck ?? new UpdateCheckSettings();
+
+        var managed = ReadManagedUpdateCheckSettings();
+        if (managed != null)
+        {
+            // Only fields the admin actually set should win.
+            if (managed.EnabledExplicit) settings.Enabled = managed.Settings.Enabled;
+            if (managed.IncludePrereleasesExplicit)
+                settings.IncludePrereleases = managed.Settings.IncludePrereleases;
+        }
+        return settings;
+    }
+
+    /// <summary>
+    /// Persists user-edited update-check settings to the user config file.
+    /// Preserves all other config keys (rules directory, language, ...).
+    /// </summary>
+    public void SaveUpdateCheckSettings(UpdateCheckSettings settings)
+    {
+        var targetPath = _configPath
+            ?? Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                "BlockParam", "config.json");
+
+        BulkChangeConfig config;
+        if (File.Exists(targetPath))
+        {
+            try { config = Deserialize(File.ReadAllText(targetPath)) ?? new BulkChangeConfig(); }
+            catch { config = new BulkChangeConfig(); }
+        }
+        else
+        {
+            config = new BulkChangeConfig();
+        }
+
+        config.UpdateCheck = settings;
+        if (string.IsNullOrEmpty(config.Version)) config.Version = "1.0";
+
+        var dir = Path.GetDirectoryName(targetPath);
+        if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
+            Directory.CreateDirectory(dir);
+
+        var json = JsonConvert.SerializeObject(config, Formatting.Indented, new JsonSerializerSettings
+        {
+            ContractResolver = new CamelCasePropertyNamesContractResolver(),
+            NullValueHandling = NullValueHandling.Ignore
+        });
+        File.WriteAllText(targetPath, json);
+        Invalidate();
+    }
+
+    private ManagedUpdateOverride? ReadManagedUpdateCheckSettings()
+    {
+        try
+        {
+            string? managedPath;
+            if (ManagedConfigPathOverride != null)
+            {
+                managedPath = ManagedConfigPathOverride;
+            }
+            else
+            {
+                var programData = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
+                if (string.IsNullOrEmpty(programData)) return null;
+                managedPath = Path.Combine(programData, "BlockParam", "config.json");
+            }
+            if (!File.Exists(managedPath)) return null;
+
+            var json = File.ReadAllText(managedPath);
+            var token = JsonConvert.DeserializeObject<Newtonsoft.Json.Linq.JObject>(json);
+            var node = token?["updateCheck"] as Newtonsoft.Json.Linq.JObject;
+            if (node == null) return null;
+
+            var settings = node.ToObject<UpdateCheckSettings>() ?? new UpdateCheckSettings();
+            return new ManagedUpdateOverride
+            {
+                Settings = settings,
+                EnabledExplicit = node.Property("enabled") != null,
+                IncludePrereleasesExplicit = node.Property("includePrereleases") != null,
+            };
+        }
+        catch (Exception ex)
+        {
+            Log.Warning(ex, "UpdateCheck: cannot read managed override");
+            return null;
+        }
+    }
+
+    private sealed class ManagedUpdateOverride
+    {
+        public UpdateCheckSettings Settings { get; set; } = new();
+        public bool EnabledExplicit { get; set; }
+        public bool IncludePrereleasesExplicit { get; set; }
     }
 
     private BulkChangeConfig? TryReadConfig(string context)

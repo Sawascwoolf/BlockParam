@@ -14,6 +14,7 @@ using BlockParam.Licensing;
 using BlockParam.Services;
 using BlockParam.SimaticML;
 using BlockParam.UI;
+using BlockParam.Updates;
 
 namespace BlockParam.DevLauncher;
 
@@ -189,6 +190,17 @@ class Program
             sharedLicenseFilePath: OnlineLicenseService.DefaultSharedLicenseFilePath);
         var usageTracker = new LicensedUsageTracker(licenseService, freeTracker);
 
+        // Update check (#61): mirror BulkChangeContextMenu wiring so the badge
+        // and dialog are exercisable without TIA. Uses the BlockParam assembly
+        // version (not DevLauncher's) so the badge text reads e.g. "v1.0.2 → vX.Y.Z".
+        var blockParamVersion = typeof(BulkChangeViewModel).Assembly.GetName().Version
+            ?? new Version(0, 0, 0);
+        var updateCheckService = new UpdateCheckService(
+            fetcher: new GitHubReleaseFetcher(),
+            currentVersion: VersionTag.FromSystemVersion(blockParamVersion),
+            cachePath: Path.Combine(appDataDir, "update-check.json"),
+            readSettings: () => configLoader.ReadUpdateCheckSettings());
+
         // 5. Show dialog
         var app = new Application();
         app.DispatcherUnhandledException += (_, e) =>
@@ -211,7 +223,8 @@ class Program
             licenseService: licenseService,
             udtDir: udtDir,
             udtResolver: udtResolver,
-            commentResolver: commentResolver);
+            commentResolver: commentResolver,
+            updateCheckService: updateCheckService);
 
         licenseService.StartHeartbeat();
         var dialog = new BulkChangeDialog(vm);

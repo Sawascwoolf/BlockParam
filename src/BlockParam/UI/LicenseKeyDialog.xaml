@@ -3,13 +3,14 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:loc="clr-namespace:BlockParam.Localization"
         Title="{loc:Loc License_DialogTitle}"
-                Width="460" Height="300"
+                Width="460" Height="400"
         ResizeMode="NoResize"
         WindowStartupLocation="CenterOwner"
         FontFamily="Segoe UI" FontSize="12">
 
     <Grid Margin="16">
         <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
@@ -75,11 +76,30 @@
                     Click="OnBuyLicenseClick"/>
         </StackPanel>
 
-        <!-- Spacer -->
-        <Grid Grid.Row="6"/>
+        <!-- Update-check preferences (#61). Hidden when update checks
+             aren't wired (e.g. unit tests) so the dialog stays compact. -->
+        <StackPanel Grid.Row="6" x:Name="UpdateCheckPanel" Orientation="Vertical"
+                    Margin="0,8,0,0" Visibility="Collapsed">
+            <Separator Margin="0,0,0,8"/>
+            <CheckBox x:Name="UpdateCheckEnabledBox"
+                      Content="{loc:Loc Update_CheckEnabled}"
+                      ToolTip="{loc:Loc Update_CheckEnabledTooltip}"
+                      Checked="OnUpdateSettingsChanged" Unchecked="OnUpdateSettingsChanged"/>
+            <CheckBox x:Name="UpdateIncludePrereleasesBox"
+                      Content="{loc:Loc Update_IncludePrereleases}"
+                      ToolTip="{loc:Loc Update_IncludePrereleasesTooltip}"
+                      Margin="20,4,0,0"
+                      Checked="OnUpdateSettingsChanged" Unchecked="OnUpdateSettingsChanged"/>
+            <TextBlock x:Name="UpdateManagedHint" Foreground="#0D47A1" FontSize="11"
+                       TextWrapping="Wrap" Margin="0,4,0,0" Visibility="Collapsed"
+                       Text="{loc:Loc Update_ManagedHint}"/>
+        </StackPanel>
+
+        <!-- Spacer pushes the bottom buttons to the bottom of the dialog. -->
+        <Grid Grid.Row="7"/>
 
         <!-- Bottom buttons -->
-        <StackPanel Grid.Row="7" Orientation="Horizontal" HorizontalAlignment="Right">
+        <StackPanel Grid.Row="8" Orientation="Horizontal" HorizontalAlignment="Right">
             <Button x:Name="RemoveButton" Content="{loc:Loc License_RemoveKey}"
                     Width="120" Height="28" Margin="0,0,8,0"
                     Click="OnRemoveClick" Visibility="Collapsed"/>
