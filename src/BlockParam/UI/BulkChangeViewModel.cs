@@ -3560,25 +3560,52 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         {
             EnsureTagTableCache();
             var templateGen = new TemplateCommentGenerator(config, _tagTableCache);
-            var scopeMembers = _selectedScope.MatchingMembers.ToList();
 
-            var modifiedXml = _active.Xml;
-            int affectedCount = 0;
-            // Generate comments per language so {member.comment} resolves to the correct translation
-            foreach (var lang in _projectLanguages)
+            // Multi-DB safe (#58): group scope members by their owning DB
+            // and write each DB's xml separately. A cross-DB scope's
+            // MatchingMembers spans multiple DBs naturally; this routes
+            // each match to its own ActiveDb.Xml. Single-DB sessions
+            // collapse to a one-DB group, behaviour unchanged.
+            var byDb = new Dictionary<ActiveDb, List<MemberNode>>();
+            foreach (var member in _selectedScope.MatchingMembers)
             {
-                var targets = templateGen.GenerateForScope(_active.Info, scopeMembers, lang, ResolvePendingValue);
-                if (affectedCount == 0) affectedCount = targets.Count;
-                foreach (var (target, comment) in targets)
+                var owningDb = FindActiveDbForModel(member);
+                if (owningDb == null) continue;
+                if (!byDb.TryGetValue(owningDb, out var list))
                 {
-                    modifiedXml = _writer.ModifyComment(modifiedXml, target, comment, lang);
+                    list = new List<MemberNode>();
+                    byDb[owningDb] = list;
                 }
+                list.Add(member);
             }
 
-            _active.Xml = modifiedXml;
-            StatusText = Res.Format("Comments_Updated", affectedCount, _active.Info.Name);
+            int totalAffected = 0;
+            foreach (var (db, members) in byDb)
+            {
+                var modifiedXml = db.Xml;
+                int dbAffected = 0;
+                foreach (var lang in _projectLanguages)
+                {
+                    var targets = templateGen.GenerateForScope(db.Info, members, lang, ResolvePendingValue);
+                    if (dbAffected == 0) dbAffected = targets.Count;
+                    foreach (var (target, comment) in targets)
+                    {
+                        modifiedXml = _writer.ModifyComment(modifiedXml, target, comment, lang);
+                    }
+                }
+                db.Xml = modifiedXml;
+                totalAffected += dbAffected;
+            }
+
+            var label = byDb.Count == 1
+                ? byDb.Keys.First().Info.Name
+                : $"{byDb.Count} DBs";
+            StatusText = Res.Format("Comments_Updated", totalAffected, label);
             HasPendingChanges = true;
-            RefreshTree(modifiedXml);
+            // RefreshTree re-parses every active DB's xml in
+            // BuildRootMembersFromActiveDbs, so the focused DB's xml is the
+            // only argument the helper needs.
+            RefreshTree(_active.Xml);
         }
         catch (Exception ex)
         {
