@@ -401,7 +401,29 @@ public class BulkChangeContextMenu : ContextMenuAddIn
                         return newXml;
                     })
                     : null,
-                additionalActiveDbs: companions);
+                additionalActiveDbs: companions,
+                // Multi-DB add via dropdown (#58): the VM calls back here
+                // to build a fully-wired ActiveDb (with per-DB OnApply)
+                // for any DB the user checks in the popup. Resolves the
+                // summary back to a live DataBlock first, then routes
+                // through the same BuildCompanionActiveDb helper used for
+                // context-menu-pre-selected companions.
+                buildActiveDbForSummary: plcSoftware != null
+                    ? new Func<DataBlockSummary, ActiveDb?>(summary =>
+                    {
+                        var initial = ResolveDataBlock(plcSoftware, summary);
+                        if (initial == null)
+                        {
+                            Log.Warning(
+                                "buildActiveDbForSummary: '{Name}' not found in project",
+                                summary.Name);
+                            return null;
+                        }
+                        return BuildCompanionActiveDb(
+                            initial, adapter, tempDir,
+                            constantResolver, udtResolver, commentResolver);
+                    })
+                    : null);
 
             licenseService.StartHeartbeat();
             var dialog = new BulkChangeDialog(vm);

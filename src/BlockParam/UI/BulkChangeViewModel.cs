@@ -57,6 +57,12 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     // for the dialog session; the ↻ button re-enumerates on demand.
     private readonly Func<IReadOnlyList<DataBlockSummary>>? _enumerateDataBlocks;
     private readonly Func<DataBlockSummary, string>? _switchToDataBlock;
+    // Multi-DB add (#58): host-supplied factory that builds a fully-wired
+    // ActiveDb for an arbitrary DB picked in the dropdown — including a
+    // per-DB OnApply that re-imports the modified xml back into TIA. Null
+    // when the host couldn't supply it (DevLauncher, tests); the VM falls
+    // back to a read-only companion in that case (see AddCompanionFromSummary).
+    private readonly Func<DataBlockSummary, ActiveDb?>? _buildActiveDbForSummary;
     private IReadOnlyList<DataBlockSummary>? _availableDataBlocks;
     private IReadOnlyList<DataBlockSummary> _filteredDataBlocks = Array.Empty<DataBlockSummary>();
     private string _dataBlockSearchText = "";
@@ -143,7 +149,8 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         Func<IReadOnlyList<DataBlockSummary>>? enumerateDataBlocks = null,
         Func<DataBlockSummary, string>? switchToDataBlock = null,
         string? currentPlcName = null,
-        IReadOnlyList<ActiveDb>? additionalActiveDbs = null)
+        IReadOnlyList<ActiveDb>? additionalActiveDbs = null,
+        Func<DataBlockSummary, ActiveDb?>? buildActiveDbForSummary = null)
     {
         _dispatcher = Dispatcher.CurrentDispatcher;
         _projectLanguages = projectLanguages is { Count: > 0 } ? projectLanguages : new[] { "en-GB" };
@@ -169,6 +176,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         _updateCheckService = updateCheckService;
         _enumerateDataBlocks = enumerateDataBlocks;
         _switchToDataBlock = switchToDataBlock;
+        _buildActiveDbForSummary = buildActiveDbForSummary;
         _currentPlcName = currentPlcName ?? "";
         _autocompleteProvider = tagTableCache != null
             ? new AutocompleteProvider(configLoader, tagTableCache)
@@ -1023,26 +1031,50 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     /// </summary>
     private void AddCompanionFromSummary(DataBlockSummary summary)
     {
-        if (_switchToDataBlock == null)
-        {
-            Log.Information("DB enable ignored: no switchToDataBlock callback wired");
-            return;
-        }
         try
         {
+            // Preferred path (#58): host supplies a fully-wired ActiveDb,
+            // including a per-DB OnApply that re-imports the modified xml
+            // back into TIA. This is symmetric with the context-menu's
+            // BuildCompanionActiveDb so dropdown-added companions are
+            // first-class for Apply, not read-only.
+            if (_buildActiveDbForSummary != null)
+            {
+                var built = _buildActiveDbForSummary(summary);
+                if (built == null)
+                {
+                    Log.Information("Companion build returned null for {Name}", summary.Name);
+                    return;
+                }
+                _companions.Add(built);
+                Log.Information("Companion DB enabled via dropdown (writable): {Name}",
+                    built.Info.Name);
+                return;
+            }
+
+            // Fallback (DevLauncher / tests): no host factory wired. Use
+            // the older _switchToDataBlock(summary) → xml callback to
+            // build a READ-ONLY companion. Apply on this companion will
+            // be a no-op (OnApply is null); the multi-DB Apply path skips
+            // null callbacks rather than throwing, and the
+            // remove-with-stash-prompt's 'Apply, then remove' branch
+            // refuses to charge a quota unit for a write that never
+            // reaches TIA.
+            if (_switchToDataBlock == null)
+            {
+                Log.Information(
+                    "DB enable ignored: neither buildActiveDbForSummary nor switchToDataBlock wired");
+                return;
+            }
             var xml = _switchToDataBlock(summary);
             var constantResolver = _tagTableCache != null
                 ? new TagTableConstantResolver(_tagTableCache)
                 : (IConstantResolver?)null;
             var parser = new SimaticMLParser(constantResolver, _udtResolver, _commentResolver);
             var info = parser.Parse(xml);
-            // The dropdown-driven add path has no per-DB OnApply yet — host
-            // wires those only for context-menu multi-selection (#58). This
-            // companion participates in Apply read-only until the host
-            // surfaces a per-DB import callback for dropdown adds in a
-            // follow-up.
             _companions.Add(new ActiveDb(info, xml, onApply: null));
-            Log.Information("Companion DB enabled via dropdown: {Name}", info.Name);
+            Log.Information("Companion DB enabled via dropdown (read-only fallback): {Name}",
+                info.Name);
         }
         catch (Exception ex)
         {
