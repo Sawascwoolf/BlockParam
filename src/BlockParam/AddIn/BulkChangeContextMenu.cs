@@ -229,7 +229,7 @@ public class BulkChangeContextMenu : ContextMenuAddIn
                 Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
                 "BlockParam");
             var usagePath = Path.Combine(appDataDir, "usage.dat");
-            var freeTracker = new LocalUsageTracker(usagePath, dailyLimit: 3);
+            var freeTracker = new LocalUsageTracker(usagePath);
 
             // License service: heartbeat-based concurrent session validation.
             // #20: probe the machine-wide managed key file first so multi-seat

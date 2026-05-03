@@ -127,7 +127,7 @@ release notes: [Releases page](https://github.com/Sawascwoolf/BlockParam/release
 
 | Tier | Daily limit | Features | Price |
 |---|---|---|---|
-| **Free** | 3 bulk operations, 50 inline edits | All features included | &euro; 0 |
+| **Free** | 200 value changes per day | All features included | &euro; 0 |
 | **Pro** | Unlimited | All features + priority email support | 15 &euro; / year (net) |
 
 All features work in both tiers &mdash; the Pro tier lifts the daily quota and funds further
@@ -161,8 +161,8 @@ Reference:
 
 ## Licensing
 
-Source code is published under the [MIT License](LICENSE). The Pro tier (unlimited bulk operations
-and inline edits) requires a valid license key &mdash; see [Pricing](#pricing).
+Source code is published under the [MIT License](LICENSE). The Pro tier (unlimited daily changes)
+requires a valid license key &mdash; see [Pricing](#pricing).
 
 ## Trademarks
 

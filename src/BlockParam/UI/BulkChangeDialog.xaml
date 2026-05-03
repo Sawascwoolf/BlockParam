@@ -104,11 +104,13 @@
                 <Button x:Name="ApplyButton"
                         Content="{loc:Loc Dialog_Apply}" Command="{Binding ApplyCommand}"
                         MinWidth="70" Height="26" Margin="0,0,4,0" Padding="8,0"
-                        ToolTip="{loc:Loc Dialog_ApplyTooltip}"/>
+                        ToolTip="{Binding ApplyTooltip}"
+                        ToolTipService.ShowOnDisabled="True"/>
                 <Button Content="{loc:Loc Dialog_ApplyAndClose}"
                         Command="{Binding ApplyAndCloseCommand}"
                         MinWidth="100" Height="26" Margin="0,0,4,0" Padding="8,0"
-                        ToolTip="{loc:Loc Dialog_ApplyTooltip}"/>
+                        ToolTip="{Binding ApplyTooltip}"
+                        ToolTipService.ShowOnDisabled="True"/>
                 <Button Content="{loc:Loc Dialog_Close}" Click="OnClose"
                         MinWidth="60" Height="26" Padding="8,0"/>
             </StackPanel>

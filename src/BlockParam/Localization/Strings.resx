@@ -166,15 +166,22 @@ No = Keep the current (possibly partial) result</value>
     <value>Daily limit reached. Upgrade for unlimited use.</value>
   </data>
   <data name="Status_Remaining" xml:space="preserve">
-    <value>Remaining: {0}/{1} free operations</value>
+    <value>Remaining: {0}/{1} free changes today</value>
     <comment>{0} = remaining, {1} = daily limit</comment>
   </data>
-  <data name="Status_RemainingBoth" xml:space="preserve">
-    <value>Bulk operations: {0}/{1}  |  Inline edits: {2}/{3}</value>
-    <comment>{0}/{1} = bulk remaining/limit, {2}/{3} = inline remaining/limit</comment>
+  <data name="Status_WouldExceedLimit" xml:space="preserve">
+    <value>This Apply would write {0} changes, but only {1} are left today. Reduce the selection or upgrade for unlimited use.</value>
+    <comment>{0} = pending changes count, {1} = remaining quota today</comment>
   </data>
-  <data name="Status_InlineLimitReached" xml:space="preserve">
-    <value>Daily inline edit limit reached. Upgrade for unlimited use.</value>
+  <data name="Status_AppliedOverCap" xml:space="preserve">
+    <value>{0} values written in '{1}' — daily limit exceeded (parallel use). Upgrade for unlimited use.</value>
+    <comment>{0} = applied count, {1} = DB name. Shown only on the rare cross-instance race.</comment>
+  </data>
+  <data name="LimitReached_Modal_Title" xml:space="preserve">
+    <value>Free daily limit reached</value>
+  </data>
+  <data name="LimitReached_Modal_Message" xml:space="preserve">
+    <value>You've used all of today's free changes. You can keep staging edits, but Apply is disabled until tomorrow — or upgrade to Pro for unlimited use.</value>
   </data>
   <data name="Status_Ready" xml:space="preserve">
     <value>Ready</value>
@@ -380,6 +387,10 @@ This cannot be undone.</value>
   </data>
   <data name="Dialog_ApplyTooltip" xml:space="preserve">
     <value>Only start values are modified. To update actual values, use 'Copy start values to actual values' in TIA Portal.</value>
+  </data>
+  <data name="Dialog_ApplyTooltip_CostLine" xml:space="preserve">
+    <value>This Apply will use {0} of {1} free changes remaining today.</value>
+    <comment>{0} = pending change count, {1} = remaining quota. Appended to Dialog_ApplyTooltip when not Pro and (count &gt; 1 OR remaining tight).</comment>
   </data>
   <data name="Dialog_EditConfig" xml:space="preserve">
     <value>Edit Config...</value>

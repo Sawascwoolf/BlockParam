@@ -180,8 +180,7 @@ class Program
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
             "BlockParam");
         var freeTracker = new LocalUsageTracker(
-            Path.Combine(Path.GetTempPath(), "BlockParam_dev_usage.dat"),
-            dailyLimit: 3);
+            Path.Combine(Path.GetTempPath(), "BlockParam_dev_usage.dat"));
 
         var serverUrl = configLoader.ReadLicenseServerUrl() ?? OnlineLicenseService.DefaultServerUrl;
         var licenseService = new OnlineLicenseService(
