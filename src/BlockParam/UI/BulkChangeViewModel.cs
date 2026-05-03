@@ -650,12 +650,17 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     public bool IsLimitReached => _usageTracker.GetStatus().IsLimitReached;
 
     /// <summary>
+    /// Picked so a few back-to-back bulk applies on a normal day stay quiet, but
+    /// the user gets a nudge once they're close enough that the next batch could
+    /// push them over. Tied to the 200/day free-tier cap; revisit if that changes.
+    /// </summary>
+    private const int TightHeadroomThreshold = 50;
+
+    /// <summary>
     /// Tooltip for the Apply button(s). Pro tier and the unsurprising free-tier
     /// case (single change, plenty of headroom) get the plain advisory; otherwise
     /// the cost line is appended so users see "this Apply uses N of M" before
-    /// they click. Tight-headroom threshold is 50 — picked so a few back-to-back
-    /// bulk applies on a normal day stay quiet, but the user gets a nudge once
-    /// they're close enough that the next batch could push them over.
+    /// they click.
     /// </summary>
     public string ApplyTooltip
     {
@@ -668,9 +673,9 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             if (cost == 0) return baseText;
 
             var remaining = _usageTracker.GetStatus().RemainingToday;
-            if (cost <= 1 && remaining >= 50) return baseText;
+            if (cost <= 1 && remaining >= TightHeadroomThreshold) return baseText;
 
-            return baseText + "\n\n" +
+            return baseText + Environment.NewLine + Environment.NewLine +
                 Res.Format("Dialog_ApplyTooltip_CostLine", cost, remaining);
         }
     }

@@ -1,3 +1,6 @@
+using System.ComponentModel;
+using System.Globalization;
+using System.Threading;
 using BlockParam.Config;
 using BlockParam.Licensing;
 using BlockParam.Services;
@@ -274,33 +277,86 @@ public class BulkChangeViewModelTests : IDisposable
     }
 
     /// <summary>
+    /// Pins UI culture to en-US for the body of <paramref name="action"/> so
+    /// assertions on localized resource phrases are deterministic regardless of
+    /// the dev/CI machine's OS language. Tests that don't read string values
+    /// from <c>Res</c> don't need this.
+    /// </summary>
+    private static void WithEnglishUICulture(Action action)
+    {
+        var prevUI = Thread.CurrentThread.CurrentUICulture;
+        var prev = Thread.CurrentThread.CurrentCulture;
+        Thread.CurrentThread.CurrentUICulture = new CultureInfo("en-US");
+        Thread.CurrentThread.CurrentCulture = new CultureInfo("en-US");
+        try { action(); }
+        finally
+        {
+            Thread.CurrentThread.CurrentUICulture = prevUI;
+            Thread.CurrentThread.CurrentCulture = prev;
+        }
+    }
+
+    /// <summary>
     /// #62 UX: Two or more pending changes warrant the cost line even with full
     /// headroom — bulk Apply on free tier should always preview the cost.
     /// </summary>
     [Fact]
     public void ApplyTooltip_MultipleEdits_AppendsCostLine()
     {
-        var vm = CreateViewModelWithUsage(new UsageStatus(0, 200));
-        vm.RootMembers.Single(m => m.Name == "Enable").EditableStartValue = "false";
-        vm.RootMembers.Single(m => m.Name == "Speed").EditableStartValue = "42";
+        WithEnglishUICulture(() =>
+        {
+            var vm = CreateViewModelWithUsage(new UsageStatus(0, 200));
+            vm.RootMembers.Single(m => m.Name == "Enable").EditableStartValue = "false";
+            vm.RootMembers.Single(m => m.Name == "Speed").EditableStartValue = "42";
 
-        vm.PendingInlineEditCount.Should().Be(2);
-        vm.ApplyTooltip.Should().Contain("2").And.Contain("200");
+            vm.PendingInlineEditCount.Should().Be(2);
+            vm.ApplyTooltip.Should()
+                .Contain("free changes remaining today",
+                    "the cost line — not just any '2 of 200' substring — must be present")
+                .And.Contain("2 of 200");
+        });
     }
 
     /// <summary>
     /// #62 UX: Even a single edit gets the cost line once headroom drops below
-    /// the tight-threshold (50) — that's exactly when surfacing remaining quota
+    /// the tight-threshold — that's exactly when surfacing remaining quota
     /// is most useful.
     /// </summary>
     [Fact]
     public void ApplyTooltip_TightHeadroom_AppendsCostLine()
     {
-        var vm = CreateViewModelWithUsage(new UsageStatus(170, 200)); // 30 remaining
-        vm.RootMembers.Single(m => m.Name == "Enable").EditableStartValue = "false";
+        WithEnglishUICulture(() =>
+        {
+            var vm = CreateViewModelWithUsage(new UsageStatus(170, 200)); // 30 remaining
+            vm.RootMembers.Single(m => m.Name == "Enable").EditableStartValue = "false";
 
-        vm.PendingInlineEditCount.Should().Be(1);
-        vm.ApplyTooltip.Should().Contain("1").And.Contain("30",
-            "tight remaining quota deserves the cost line even for a single change");
+            vm.PendingInlineEditCount.Should().Be(1);
+            vm.ApplyTooltip.Should()
+                .Contain("free changes remaining today",
+                    "tight remaining quota deserves the cost line even for a single change")
+                .And.Contain("1 of 30");
+        });
+    }
+
+    /// <summary>
+    /// #62 UX: <see cref="BulkChangeViewModel.ApplyTooltip"/> is bound directly in
+    /// XAML — staging an inline edit must raise PropertyChanged for it, otherwise
+    /// the binding never re-evaluates and the cost line goes stale. Without this
+    /// test, a future refactor that drops the notification line from
+    /// <c>RefreshPendingAndPreview</c> would silently break the feature.
+    /// </summary>
+    [Fact]
+    public void ApplyTooltip_RaisesPropertyChanged_WhenPendingEditStaged()
+    {
+        var vm = CreateViewModelWithUsage(new UsageStatus(0, 200));
+        var changedProps = new List<string?>();
+        ((INotifyPropertyChanged)vm).PropertyChanged += (_, e) => changedProps.Add(e.PropertyName);
+
+        // Stage two edits — both transitions (0 → 1 and 1 → 2) should re-fire ApplyTooltip.
+        vm.RootMembers.Single(m => m.Name == "Enable").EditableStartValue = "false";
+        vm.RootMembers.Single(m => m.Name == "Speed").EditableStartValue = "42";
+
+        changedProps.Should().Contain(nameof(BulkChangeViewModel.ApplyTooltip),
+            "the binding can't re-evaluate without this notification");
     }
 }
