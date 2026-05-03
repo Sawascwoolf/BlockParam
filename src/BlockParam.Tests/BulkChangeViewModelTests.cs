@@ -204,4 +204,103 @@ public class BulkChangeViewModelTests : IDisposable
         vm.ApplyCommand.CanExecute(null).Should().BeTrue(
             "two pending edits fit under remaining=10");
     }
+
+    /// <summary>
+    /// Builds a VM with a configurable usage status and optional license service —
+    /// the ApplyTooltip tests vary remaining quota and Pro state, so the standard
+    /// helper isn't flexible enough.
+    /// </summary>
+    private static BulkChangeViewModel CreateViewModelWithUsage(
+        UsageStatus status, ILicenseService? licenseService = null)
+    {
+        var xml = TestFixtures.LoadXml("flat-db.xml");
+        var parser = new SimaticMLParser();
+        var db = parser.Parse(xml);
+        var analyzer = new HierarchyAnalyzer();
+        var configLoader = new ConfigLoader(null);
+        var bulkService = new BulkChangeService(new ChangeLogger(), configLoader);
+        var usageTracker = Substitute.For<IUsageTracker>();
+        usageTracker.GetStatus().Returns(status);
+        usageTracker.RecordUsage(Arg.Any<int>()).Returns(true);
+
+        return new BulkChangeViewModel(db, xml, analyzer, bulkService, usageTracker,
+            configLoader, licenseService: licenseService);
+    }
+
+    /// <summary>
+    /// #62 UX: Pro users never see the cost line in the Apply tooltip — quota
+    /// doesn't apply to them, surfacing it would just be noise.
+    /// </summary>
+    [Fact]
+    public void ApplyTooltip_Pro_OmitsCostLine()
+    {
+        var license = Substitute.For<ILicenseService>();
+        license.IsProActive.Returns(true);
+        var vm = CreateViewModelWithUsage(new UsageStatus(150, 200), license);
+
+        vm.RootMembers.Single(m => m.Name == "Enable").EditableStartValue = "false";
+        vm.RootMembers.Single(m => m.Name == "Speed").EditableStartValue = "42";
+
+        vm.ApplyTooltip.Should().NotContain(
+            "remaining today",
+            "Pro tier has no daily cap — surfacing remaining quota would be misleading");
+    }
+
+    /// <summary>
+    /// #62 UX: With nothing pending, the Apply button is disabled and the tooltip
+    /// has no cost to surface — fall back to the plain advisory.
+    /// </summary>
+    [Fact]
+    public void ApplyTooltip_NoPending_OmitsCostLine()
+    {
+        var vm = CreateViewModelWithUsage(new UsageStatus(0, 200));
+        vm.PendingInlineEditCount.Should().Be(0);
+        vm.ApplyTooltip.Should().NotContain("remaining today");
+    }
+
+    /// <summary>
+    /// #62 UX: A single inline edit with plenty of headroom is the unsurprising
+    /// case — the cost line would just be noise. Stays as the plain advisory.
+    /// </summary>
+    [Fact]
+    public void ApplyTooltip_SingleEditWithHeadroom_OmitsCostLine()
+    {
+        var vm = CreateViewModelWithUsage(new UsageStatus(0, 200)); // 200 remaining
+        vm.RootMembers.Single(m => m.Name == "Enable").EditableStartValue = "false";
+
+        vm.PendingInlineEditCount.Should().Be(1);
+        vm.ApplyTooltip.Should().NotContain("remaining today",
+            "1 change with 200 left is the unsurprising case — keep the tooltip quiet");
+    }
+
+    /// <summary>
+    /// #62 UX: Two or more pending changes warrant the cost line even with full
+    /// headroom — bulk Apply on free tier should always preview the cost.
+    /// </summary>
+    [Fact]
+    public void ApplyTooltip_MultipleEdits_AppendsCostLine()
+    {
+        var vm = CreateViewModelWithUsage(new UsageStatus(0, 200));
+        vm.RootMembers.Single(m => m.Name == "Enable").EditableStartValue = "false";
+        vm.RootMembers.Single(m => m.Name == "Speed").EditableStartValue = "42";
+
+        vm.PendingInlineEditCount.Should().Be(2);
+        vm.ApplyTooltip.Should().Contain("2").And.Contain("200");
+    }
+
+    /// <summary>
+    /// #62 UX: Even a single edit gets the cost line once headroom drops below
+    /// the tight-threshold (50) — that's exactly when surfacing remaining quota
+    /// is most useful.
+    /// </summary>
+    [Fact]
+    public void ApplyTooltip_TightHeadroom_AppendsCostLine()
+    {
+        var vm = CreateViewModelWithUsage(new UsageStatus(170, 200)); // 30 remaining
+        vm.RootMembers.Single(m => m.Name == "Enable").EditableStartValue = "false";
+
+        vm.PendingInlineEditCount.Should().Be(1);
+        vm.ApplyTooltip.Should().Contain("1").And.Contain("30",
+            "tight remaining quota deserves the cost line even for a single change");
+    }
 }

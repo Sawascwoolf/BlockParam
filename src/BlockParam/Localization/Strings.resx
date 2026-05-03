@@ -388,6 +388,10 @@ This cannot be undone.</value>
   <data name="Dialog_ApplyTooltip" xml:space="preserve">
     <value>Only start values are modified. To update actual values, use 'Copy start values to actual values' in TIA Portal.</value>
   </data>
+  <data name="Dialog_ApplyTooltip_CostLine" xml:space="preserve">
+    <value>This Apply will use {0} of {1} free changes remaining today.</value>
+    <comment>{0} = pending change count, {1} = remaining quota. Appended to Dialog_ApplyTooltip when not Pro and (count &gt; 1 OR remaining tight).</comment>
+  </data>
   <data name="Dialog_EditConfig" xml:space="preserve">
     <value>Edit Config...</value>
   </data>

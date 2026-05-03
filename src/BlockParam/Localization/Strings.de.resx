@@ -154,6 +154,7 @@ Dies kann nicht rückgängig gemacht werden.</value></data>
   <data name="Dialog_SetManualCount" xml:space="preserve"><value>{0} ausgewählte setzen</value></data>
   <data name="Validation_MixedDatatypes" xml:space="preserve"><value>Auswahl enthält verschiedene Datentypen — auf einen Datentyp einschränken, um einen gemeinsamen Wert zu setzen.</value></data>
   <data name="Dialog_ApplyTooltip" xml:space="preserve"><value>Es werden nur Startwerte geändert. Aktualwerte müssen separat über 'Startwerte in Aktualwerte kopieren' in TIA Portal aktualisiert werden.</value></data>
+  <data name="Dialog_ApplyTooltip_CostLine" xml:space="preserve"><value>Dieses Übernehmen verbraucht {0} von {1} verbleibenden kostenlosen Änderungen heute.</value></data>
   <data name="Dialog_EditConfig" xml:space="preserve"><value>Konfiguration...</value></data>
   <data name="Column_Comment" xml:space="preserve"><value>Kommentar</value></data>
   <!-- ConfigEditorDialog -->

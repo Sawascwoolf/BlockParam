@@ -649,6 +649,32 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             : Res.Get("License_EnterKey");
     public bool IsLimitReached => _usageTracker.GetStatus().IsLimitReached;
 
+    /// <summary>
+    /// Tooltip for the Apply button(s). Pro tier and the unsurprising free-tier
+    /// case (single change, plenty of headroom) get the plain advisory; otherwise
+    /// the cost line is appended so users see "this Apply uses N of M" before
+    /// they click. Tight-headroom threshold is 50 — picked so a few back-to-back
+    /// bulk applies on a normal day stay quiet, but the user gets a nudge once
+    /// they're close enough that the next batch could push them over.
+    /// </summary>
+    public string ApplyTooltip
+    {
+        get
+        {
+            var baseText = Res.Get("Dialog_ApplyTooltip");
+            if (_licenseService?.IsProActive == true) return baseText;
+
+            var cost = PendingInlineEditCount;
+            if (cost == 0) return baseText;
+
+            var remaining = _usageTracker.GetStatus().RemainingToday;
+            if (cost <= 1 && remaining >= 50) return baseText;
+
+            return baseText + "\n\n" +
+                Res.Format("Dialog_ApplyTooltip_CostLine", cost, remaining);
+        }
+    }
+
     /// <summary>Number of individual inline edits waiting to be applied.</summary>
     public int PendingInlineEditCount => CountPendingInlineEdits(RootMembers);
 
@@ -1127,6 +1153,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     {
         OnPropertyChanged(nameof(PendingInlineEditCount));
         OnPropertyChanged(nameof(PendingStatusText));
+        OnPropertyChanged(nameof(ApplyTooltip));
         ComputeBulkPreview();
         RebuildPendingEdits();
     }
@@ -2425,6 +2452,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(ShowLicenseKeyButton));
         OnPropertyChanged(nameof(LicenseKeyButtonText));
         OnPropertyChanged(nameof(IsLimitReached));
+        OnPropertyChanged(nameof(ApplyTooltip));
     }
 
     /// <summary>
