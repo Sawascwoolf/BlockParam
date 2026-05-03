@@ -29,6 +29,9 @@ public class RuleFileViewModel : ViewModelBase
         "Timer", "Counter"
     };
 
+    private static readonly Regex AutoNamePattern =
+        new(@"^new-rule(-\d+)?\.json$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
     private string _fileName = "";
     private string _filePath = "";
     private RuleSource _source;
@@ -40,8 +43,20 @@ public class RuleFileViewModel : ViewModelBase
     private bool _isNew;
     private bool _isExpanded = true;
 
+    /// <summary>
+    /// Tracks which rules we've subscribed to. Doubles as the source of truth
+    /// for <see cref="NotifyCollectionChangedAction.Reset"/>, where neither
+    /// OldItems nor NewItems is populated — without this, Reset would leak
+    /// PropertyChanged subscriptions on the cleared rules.
+    /// </summary>
+    private readonly HashSet<RuleViewModel> _subscribedRules = new();
+
     public RuleFileViewModel()
     {
+        // Stable per-instance identifier — used as RadioButton GroupName so
+        // each file's source pills stay grouped only with each other, even
+        // across save/reload cycles where FilePath transitions briefly.
+        GroupId = Guid.NewGuid().ToString("N");
         Rules = new ObservableCollection<RuleViewModel>();
         Rules.CollectionChanged += OnRulesCollectionChanged;
     }
@@ -51,15 +66,54 @@ public class RuleFileViewModel : ViewModelBase
     /// </summary>
     public ObservableCollection<RuleViewModel> Rules { get; }
 
+    /// <summary>Stable per-instance ID for grouping the file's source RadioButtons.</summary>
+    public string GroupId { get; }
+
+    private void Subscribe(RuleViewModel r)
+    {
+        if (_subscribedRules.Add(r))
+        {
+            r.ParentFile = this;
+            r.PropertyChanged += OnRulePropertyChanged;
+        }
+    }
+
+    private void Unsubscribe(RuleViewModel r)
+    {
+        if (_subscribedRules.Remove(r))
+        {
+            r.PropertyChanged -= OnRulePropertyChanged;
+            if (ReferenceEquals(r.ParentFile, this))
+                r.ParentFile = null;
+        }
+    }
+
+    /// <summary>
+    /// Re-parents rules and (un)subscribes to their PropertyChanged so the
+    /// file's aggregate <see cref="IsDirty"/> updates without each rule
+    /// setter having to call back. Handles Add / Remove / Replace / Reset.
+    /// </summary>
     private void OnRulesCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
     {
-        if (e.NewItems != null)
-            foreach (RuleViewModel r in e.NewItems)
-                r.ParentFile = this;
-        if (e.OldItems != null)
-            foreach (RuleViewModel r in e.OldItems)
-                if (ReferenceEquals(r.ParentFile, this))
-                    r.ParentFile = null;
+        if (e.Action == NotifyCollectionChangedAction.Reset)
+        {
+            // Reset (e.g. Rules.Clear()) populates neither OldItems nor NewItems.
+            // Diff against our subscription set: drop anything no longer present,
+            // pick up anything new.
+            foreach (var r in _subscribedRules.ToList())
+                if (!Rules.Contains(r)) Unsubscribe(r);
+            foreach (var r in Rules) Subscribe(r);
+        }
+        else
+        {
+            // OldItems first: a Replace event populates both OldItems and
+            // NewItems with the (potentially same) instances. Subscribing
+            // last guarantees ParentFile ends up correct on Replace.
+            if (e.OldItems != null)
+                foreach (RuleViewModel r in e.OldItems) Unsubscribe(r);
+            if (e.NewItems != null)
+                foreach (RuleViewModel r in e.NewItems) Subscribe(r);
+        }
 
         OnPropertyChanged(nameof(RuleCount));
         OnPropertyChanged(nameof(HasMultipleRules));
@@ -67,10 +121,13 @@ public class RuleFileViewModel : ViewModelBase
         OnPropertyChanged(nameof(HeaderSummary));
     }
 
-    /// <summary>Called by child <see cref="RuleViewModel"/> when its dirty state may have changed.</summary>
-    internal void NotifyChildChanged()
+    private void OnRulePropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
-        OnPropertyChanged(nameof(IsDirty));
+        if (e.PropertyName == nameof(RuleViewModel.IsDirty)
+            || string.IsNullOrEmpty(e.PropertyName))
+        {
+            OnPropertyChanged(nameof(IsDirty));
+        }
     }
 
     public int RuleCount => Rules.Count;
@@ -85,9 +142,19 @@ public class RuleFileViewModel : ViewModelBase
             {
                 OnPropertyChanged(nameof(IsDirty));
                 OnPropertyChanged(nameof(HeaderSummary));
+                OnPropertyChanged(nameof(IsAutoNamed));
             }
         }
     }
+
+    /// <summary>
+    /// True when the filename still matches the placeholder auto-name pattern
+    /// produced by <c>GenerateUniqueNewFileName</c>. Used by SaveAll to decide
+    /// whether to derive the final filename from the first rule's pathPattern.
+    /// Once the user types anything else, this becomes false and the user's
+    /// name is preserved verbatim.
+    /// </summary>
+    public bool IsAutoNamed => AutoNamePattern.IsMatch(_fileName);
 
     public string FilePath
     {

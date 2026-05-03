@@ -54,7 +54,6 @@ public class RuleViewModel : ViewModelBase
             {
                 OnPropertyChanged(nameof(IsDirty));
                 OnPropertyChanged(nameof(SecondaryDisplay));
-                ParentFile?.NotifyChildChanged();
             }
         }
     }
@@ -68,13 +67,13 @@ public class RuleViewModel : ViewModelBase
             {
                 OnPropertyChanged(nameof(IsDirty));
                 OnPropertyChanged(nameof(IsMinMaxSupported));
+                OnPropertyChanged(nameof(SecondaryDisplay));
                 if (!IsMinMaxSupported)
                 {
                     Min = "";
                     Max = "";
                 }
                 ValidateMinMax();
-                ParentFile?.NotifyChildChanged();
             }
         }
     }
@@ -92,7 +91,6 @@ public class RuleViewModel : ViewModelBase
             {
                 OnPropertyChanged(nameof(IsDirty));
                 OnPropertyChanged(nameof(SecondaryDisplay));
-                ParentFile?.NotifyChildChanged();
             }
         }
     }
@@ -103,10 +101,7 @@ public class RuleViewModel : ViewModelBase
         set
         {
             if (SetProperty(ref _requireTagTableValue, value))
-            {
                 OnPropertyChanged(nameof(IsDirty));
-                ParentFile?.NotifyChildChanged();
-            }
         }
     }
 
@@ -119,7 +114,6 @@ public class RuleViewModel : ViewModelBase
             {
                 OnPropertyChanged(nameof(IsDirty));
                 ValidateMinMax();
-                ParentFile?.NotifyChildChanged();
             }
         }
     }
@@ -133,7 +127,6 @@ public class RuleViewModel : ViewModelBase
             {
                 OnPropertyChanged(nameof(IsDirty));
                 ValidateMinMax();
-                ParentFile?.NotifyChildChanged();
             }
         }
     }
@@ -159,7 +152,6 @@ public class RuleViewModel : ViewModelBase
             {
                 OnPropertyChanged(nameof(IsDirty));
                 OnPropertyChanged(nameof(SecondaryDisplay));
-                ParentFile?.NotifyChildChanged();
             }
         }
     }
@@ -173,7 +165,6 @@ public class RuleViewModel : ViewModelBase
             {
                 OnPropertyChanged(nameof(IsDirty));
                 OnPropertyChanged(nameof(SecondaryDisplay));
-                ParentFile?.NotifyChildChanged();
             }
         }
     }
@@ -184,10 +175,7 @@ public class RuleViewModel : ViewModelBase
         set
         {
             if (SetProperty(ref _excludeFromSetpoints, value))
-            {
                 OnPropertyChanged(nameof(IsDirty));
-                ParentFile?.NotifyChildChanged();
-            }
         }
     }
 

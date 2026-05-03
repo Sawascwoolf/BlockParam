@@ -18,6 +18,7 @@ namespace BlockParam.UI;
 public class ConfigEditorViewModel : ViewModelBase
 {
     private readonly ConfigLoader _configLoader;
+    private readonly Dispatcher _dispatcher;
     private string _sharedRulesDirectory = "";
     private string _validationMessage = "";
     private string _filterText = "";
@@ -29,6 +30,11 @@ public class ConfigEditorViewModel : ViewModelBase
         IEnumerable<string>? tagTableNames = null)
     {
         _configLoader = configLoader;
+        // Capture the UI-thread dispatcher at construction. Save flows defer
+        // a reload via this dispatcher; using Dispatcher.CurrentDispatcher
+        // inside the deferred callback would be wrong if Save was ever
+        // invoked from a non-UI thread.
+        _dispatcher = Dispatcher.CurrentDispatcher;
 
         RuleFiles = new ObservableCollection<RuleFileViewModel>();
         TagTableNames = new ObservableCollection<string>();
@@ -136,9 +142,6 @@ public class ConfigEditorViewModel : ViewModelBase
     /// <summary>UI-only stub: export a specific file (used by the file-header overflow).</summary>
     public ICommand ExportFileCommand { get; }
 
-    /// <summary>True when the import/export flow is implemented. Always false until logic lands.</summary>
-    public bool IsImportExportImplemented => false;
-
     private bool FilterFile(object obj)
     {
         if (string.IsNullOrWhiteSpace(_filterText)) return true;
@@ -147,22 +150,25 @@ public class ConfigEditorViewModel : ViewModelBase
         if (file.FileName.IndexOf(_filterText, StringComparison.OrdinalIgnoreCase) >= 0)
             return true;
 
-        return file.Rules.Any(r =>
-            r.PathPattern.IndexOf(_filterText, StringComparison.OrdinalIgnoreCase) >= 0
-            || r.TagTableName.IndexOf(_filterText, StringComparison.OrdinalIgnoreCase) >= 0
-            || r.CommentTemplate.IndexOf(_filterText, StringComparison.OrdinalIgnoreCase) >= 0);
+        return file.Rules.Any(RuleMatchesFilter);
     }
+
+    private bool RuleMatchesFilter(RuleViewModel r) =>
+        r.PathPattern.IndexOf(_filterText, StringComparison.OrdinalIgnoreCase) >= 0
+        || r.TagTableName.IndexOf(_filterText, StringComparison.OrdinalIgnoreCase) >= 0
+        || r.CommentTemplate.IndexOf(_filterText, StringComparison.OrdinalIgnoreCase) >= 0
+        || r.Datatype.IndexOf(_filterText, StringComparison.OrdinalIgnoreCase) >= 0
+        || r.AllowedValues.IndexOf(_filterText, StringComparison.OrdinalIgnoreCase) >= 0
+        || r.Min.IndexOf(_filterText, StringComparison.OrdinalIgnoreCase) >= 0
+        || r.Max.IndexOf(_filterText, StringComparison.OrdinalIgnoreCase) >= 0;
 
     private void AutoExpandMatches()
     {
         if (string.IsNullOrWhiteSpace(_filterText)) return;
         foreach (var file in RuleFiles)
         {
-            var anyMatch = file.Rules.Any(r =>
-                r.PathPattern.IndexOf(_filterText, StringComparison.OrdinalIgnoreCase) >= 0
-                || r.TagTableName.IndexOf(_filterText, StringComparison.OrdinalIgnoreCase) >= 0
-                || r.CommentTemplate.IndexOf(_filterText, StringComparison.OrdinalIgnoreCase) >= 0);
-            if (anyMatch) file.IsExpanded = true;
+            if (file.Rules.Any(RuleMatchesFilter))
+                file.IsExpanded = true;
         }
     }
 
@@ -477,7 +483,7 @@ public class ConfigEditorViewModel : ViewModelBase
 
         var nameToSelect = baseFile.FileName;
         _configLoader.Invalidate();
-        Dispatcher.CurrentDispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() =>
+        _dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() =>
         {
             SelectedRule = null;
             SelectedFile = null;
@@ -532,7 +538,7 @@ public class ConfigEditorViewModel : ViewModelBase
     {
         var selectedFileName = SelectedFile?.FileName;
         var selectedRulePattern = SelectedRule?.PathPattern;
-        Dispatcher.CurrentDispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() =>
+        _dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() =>
         {
             try
             {
@@ -559,14 +565,17 @@ public class ConfigEditorViewModel : ViewModelBase
 
     private bool SaveAll()
     {
-        // Auto-derive filename for new files whose first rule's pattern was edited
+        // Auto-derive filename for new files whose name still matches the
+        // placeholder pattern (^new-rule(-\d+)?\.json$). Once the user types
+        // anything else, IsAutoNamed flips to false and we keep their name —
+        // so a file the user explicitly named "my-rules.json" never gets
+        // silently renamed to a pattern-derived name on save.
         foreach (var file in RuleFiles)
         {
-            if (file.IsNew)
+            if (file.IsNew && file.IsAutoNamed)
             {
                 var derived = file.DeriveFileNameFromFirstRule();
-                if (!string.Equals(file.FileName, derived, StringComparison.OrdinalIgnoreCase)
-                    && (file.FileName == "" || file.FileName.StartsWith("new-rule", StringComparison.OrdinalIgnoreCase)))
+                if (!string.Equals(file.FileName, derived, StringComparison.OrdinalIgnoreCase))
                 {
                     file.FileName = derived;
                     var dir = Path.GetDirectoryName(file.FilePath);

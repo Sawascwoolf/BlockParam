@@ -81,6 +81,17 @@ public partial class ConfigEditorDialog : Window
             System.Windows.Threading.DispatcherPriority.Loaded);
     }
 
+    /// <summary>
+    /// Removes the section from the tracking list when its container leaves
+    /// the visual tree (filter refresh, save reload, dialog close). Without
+    /// this, _fileSections grows unboundedly across edit cycles.
+    /// </summary>
+    private void OnFileSectionUnloaded(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Grid root) return;
+        _fileSections.RemoveAll(fs => ReferenceEquals(fs.Root, root));
+    }
+
     private void OnFileHeaderClick(object sender, MouseButtonEventArgs e)
     {
         if (e.Handled) return;
@@ -187,16 +198,17 @@ public partial class ConfigEditorDialog : Window
     {
         if (FileListScroll == null || _fileSections.Count == 0) return;
 
-        // Reset all transforms first.
+        // Reset transforms and Z-index on all sections. We re-apply only on
+        // the active sticky below.
         foreach (var fs in _fileSections)
         {
             if (fs.Header.RenderTransform is TranslateTransform existing)
                 existing.Y = 0;
+            SetContainerZIndex(fs.Root, 0);
         }
 
         var viewportTop = 0.0; // relative to the ScrollViewer's content area
         FileSectionVisuals? activeSticky = null;
-        FileSectionVisuals? nextSection = null;
 
         foreach (var fs in _fileSections)
         {
@@ -213,31 +225,46 @@ public partial class ConfigEditorDialog : Window
             {
                 activeSticky = fs;
             }
-            else if (rootTopInScroll > viewportTop && nextSection == null)
-            {
-                nextSection = fs;
-            }
         }
 
         if (activeSticky != null)
         {
             var rootTop = TopWithinScrollViewer(activeSticky.Root);
-            // Pin: translate header down to viewport top.
+            var rootBottom = rootTop + activeSticky.Root.ActualHeight;
+            var headerH = activeSticky.Header.ActualHeight;
+
+            // Pin: translate the header down to the viewport top.
             var translate = -rootTop;
 
-            // Push it back out as the next section approaches, so the swap is smooth.
-            if (nextSection != null)
-            {
-                var nextTop = TopWithinScrollViewer(nextSection.Root);
-                var headerH = activeSticky.Header.ActualHeight;
-                var distance = nextTop - viewportTop;
-                if (distance < headerH)
-                    translate -= (headerH - distance);
-            }
+            // Trailing-edge ride-out: as the section's body bottom approaches
+            // the viewport top, push the header upward so it exits smoothly
+            // instead of un-pinning abruptly on the next scroll tick. This
+            // single metric also handles the incoming-next-section case for
+            // adjacent sections (no gap), since rootBottom == nextTop there.
+            var distToBottom = rootBottom - viewportTop;
+            if (distToBottom < headerH)
+                translate -= (headerH - distToBottom);
 
             if (activeSticky.Header.RenderTransform is TranslateTransform t)
                 t.Y = translate;
+
+            // The pinned header lives inside the active section's container.
+            // Without bumping the container's Z-index above its siblings,
+            // later items in the ItemsControl (drawn in document order) would
+            // paint OVER the translated header, clipping it. Setting Panel.ZIndex
+            // on the ContentPresenter lifts the whole section to the front.
+            SetContainerZIndex(activeSticky.Root, 100);
         }
+    }
+
+    /// <summary>
+    /// Sets <see cref="Panel.ZIndex"/> on the ItemsControl's container for
+    /// <paramref name="root"/> (a ContentPresenter wrapping the data template).
+    /// </summary>
+    private static void SetContainerZIndex(FrameworkElement root, int z)
+    {
+        if (VisualTreeHelper.GetParent(root) is FrameworkElement container)
+            Panel.SetZIndex(container, z);
     }
 
     /// <summary>

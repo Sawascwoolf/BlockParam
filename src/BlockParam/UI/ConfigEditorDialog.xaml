@@ -85,7 +85,7 @@
 
         <!-- File section template: header + collapsible body of rules -->
         <DataTemplate x:Key="FileSectionTemplate" DataType="{x:Type local:RuleFileViewModel}">
-            <Grid Tag="{Binding}" Loaded="OnFileSectionLoaded">
+            <Grid Tag="{Binding}" Loaded="OnFileSectionLoaded" Unloaded="OnFileSectionUnloaded">
                 <StackPanel>
                     <!-- Sticky header bar -->
                     <Border x:Name="FileHeader"
@@ -134,15 +134,15 @@
                                     Margin="8,0,0,0">
                                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                                     <RadioButton Style="{StaticResource SourceSegment}"
-                                                 GroupName="{Binding FilePath}"
+                                                 GroupName="{Binding GroupId}"
                                                  Content="{loc:Loc ConfigEditor_Project}"
                                                  IsChecked="{Binding SaveDestination, Converter={StaticResource RuleSourceConverter}, ConverterParameter=TiaProject}"/>
                                     <RadioButton Style="{StaticResource SourceSegment}"
-                                                 GroupName="{Binding FilePath}"
+                                                 GroupName="{Binding GroupId}"
                                                  Content="{loc:Loc ConfigEditor_Local}"
                                                  IsChecked="{Binding SaveDestination, Converter={StaticResource RuleSourceConverter}, ConverterParameter=Local}"/>
                                     <RadioButton Style="{StaticResource SourceSegment}"
-                                                 GroupName="{Binding FilePath}"
+                                                 GroupName="{Binding GroupId}"
                                                  Content="{loc:Loc ConfigEditor_Shared}"
                                                  IsChecked="{Binding SaveDestination, Converter={StaticResource RuleSourceConverter}, ConverterParameter=Shared}"/>
                                     <Button Content="&#x22EF;" FontSize="14" FontWeight="Bold"
