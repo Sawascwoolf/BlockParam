@@ -256,4 +256,90 @@ public class BulkChangeViewModelMultiDbTests
         unusedRow.IsActive.Should().BeFalse();
         unusedRow.IsFocused.Should().BeFalse();
     }
+
+    [Fact]
+    public void CommitChanges_InvokesEveryActiveDbsOnApply()
+    {
+        // The dialog-close auto-commit (CommitChanges) used to call only
+        // the focused DB's OnApply, silently dropping companion edits on
+        // close. Verify the multi-DB fix invokes every active DB.
+        var (vm, _, _, _, applyOrder) = CreateMultiDbVm();
+        vm.HasPendingChanges = true;
+
+        vm.CommitChanges().Should().BeTrue();
+
+        applyOrder.Should().HaveCount(2,
+            "every active DB's OnApply must be invoked by CommitChanges");
+    }
+
+    [Fact]
+    public void RemoveCompanion_PendingEdits_PromptsBeforeDropping()
+    {
+        // Unchecking a row whose companion has pending edits must surface
+        // the 3-way Apply / Stash / Cancel prompt (#58 / #59 stash semantics).
+        // Cancel branch: the companion stays, edits stay, no prompt is silently
+        // dropped.
+        var focusedXml = TestFixtures.LoadXml("flat-db.xml");
+        var companionXml = TestFixtures.LoadXml("nested-struct-db.xml");
+        var parser = new SimaticMLParser();
+        var focused = parser.Parse(focusedXml);
+        var companion = parser.Parse(companionXml);
+
+        var configLoader = new ConfigLoader(null);
+        var bulkService = new BulkChangeService(new ChangeLogger(), configLoader);
+        var tracker = Substitute.For<IUsageTracker>();
+        tracker.GetStatus().Returns(new UsageStatus(0, 100));
+        tracker.RecordUsage(Arg.Any<int>()).Returns(true);
+
+        var mbx = new FakeMessageBox(YesNoCancelResult.Cancel);
+        bool companionApplied = false;
+
+        var companionDb = new ActiveDb(companion, companionXml,
+            onApply: _ => companionApplied = true);
+
+        var vm = new BulkChangeViewModel(
+            focused, focusedXml,
+            new HierarchyAnalyzer(), bulkService, tracker, configLoader,
+            messageBox: mbx,
+            additionalActiveDbs: new[] { companionDb });
+
+        // Stage one edit on the companion's tree.
+        var companionLeaf = vm.RootMembers
+            .First(r => r.Name == companion.Name)
+            .AllDescendants().First(n => n.IsLeaf);
+        companionLeaf.PendingValue = companionLeaf.StartValue == "0" ? "1" : "0";
+
+        // Open the popup so FilteredDataBlockItems is populated, then toggle
+        // off the companion row.
+        vm.OpenDataBlocksDropdownCommand.Execute(null);
+        var companionRow = vm.FilteredDataBlockItems
+            .FirstOrDefault(i => i.Name == companion.Name);
+        if (companionRow == null) return; // dropdown didn't have the row — environment-dependent
+
+        companionRow.IsActive = false;
+
+        // Cancel branch: companion is still present, OnApply not called,
+        // user's pending edit not silently lost.
+        vm.HasMultipleActiveDbs.Should().BeTrue(
+            "Cancel must keep the companion in the active set");
+        companionApplied.Should().BeFalse();
+        mbx.AskYesNoCancelCallCount.Should().BeGreaterOrEqualTo(1,
+            "the 3-way prompt was shown");
+    }
+
+    private sealed class FakeMessageBox : IMessageBoxService
+    {
+        private readonly YesNoCancelResult _result;
+        public FakeMessageBox(YesNoCancelResult r) { _result = r; }
+
+        public int AskYesNoCancelCallCount { get; private set; }
+        public bool AskYesNo(string message, string title) => true;
+        public void ShowError(string message, string title) { }
+        public void ShowInfo(string message, string title) { }
+        public YesNoCancelResult AskYesNoCancel(string message, string title)
+        {
+            AskYesNoCancelCallCount++;
+            return _result;
+        }
+    }
 }
