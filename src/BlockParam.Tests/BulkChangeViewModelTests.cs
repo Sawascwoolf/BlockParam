@@ -148,4 +148,66 @@ public class BulkChangeViewModelTests : IDisposable
         vm.ApplyCommand.CanExecute(null).Should().BeTrue(
             "a pre-existing violation on Speed must not block applying a valid pending edit on Enable");
     }
+
+    /// <summary>
+    /// #65: SetButtonText must reflect the count of members that will actually
+    /// be staged (effective value differs from NewValue), not the raw scope
+    /// size. Previously the button advertised "Set 6 in 'X'" even when 5 of
+    /// those 6 already held the target value — only 1 ended up pending after
+    /// click, confusing the user and skewing per-change quota math.
+    /// </summary>
+    [Fact]
+    public void SetButtonText_counts_only_members_that_will_actually_change()
+    {
+        var vm = CreateViewModelWithRule("udt-instances-db.xml", @"{ ""rules"": [] }");
+
+        FlatTreeManager.ExpandAll(vm.RootMembers);
+        vm.RefreshFlatList();
+
+        // Fixture has 4 ModuleId leaves, all already at "42".
+        var moduleId = vm.FlatMembers.First(m => m.Name == "ModuleId" && m.IsLeaf);
+        vm.SelectedFlatMember = moduleId;
+
+        var dbScope = vm.AvailableScopes.First(s => s.MatchCount == 4);
+        vm.SelectedScope = dbScope;
+
+        vm.NewValue = "42"; // matches every selected member — 0 would change
+        vm.SetButtonText.Should().Be("Set 0 in 'UdtInstancesDB'",
+            "all 4 already hold '42' so the button must advertise 0, not 4");
+        vm.SetPendingCommand.CanExecute(null).Should().BeFalse(
+            "enable state and label come from the same predicate");
+
+        vm.NewValue = "99"; // different — all 4 would change
+        vm.SetButtonText.Should().Be("Set 4 in 'UdtInstancesDB'");
+        vm.SetPendingCommand.CanExecute(null).Should().BeTrue();
+    }
+
+    /// <summary>
+    /// #65: Manual-select label (Ctrl+Click multi-select) is also bound by the
+    /// same "would actually change" predicate. Selecting 4 members where 3
+    /// already match the typed value must show "Set 1 selected", not 4.
+    /// </summary>
+    [Fact]
+    public void SetButtonText_manual_mode_excludes_already_matching_members()
+    {
+        var vm = CreateViewModelWithRule("udt-instances-db.xml", @"{ ""rules"": [] }");
+
+        FlatTreeManager.ExpandAll(vm.RootMembers);
+        vm.RefreshFlatList();
+
+        // Pick 3 ModuleId leaves (all "42") + 1 MessageId leaf (e.g. "101").
+        var moduleIds = vm.FlatMembers.Where(m => m.Name == "ModuleId" && m.IsLeaf).Take(3).ToList();
+        var messageId = vm.FlatMembers.First(m => m.Name == "MessageId" && m.IsLeaf);
+        var picks = moduleIds.Concat(new[] { messageId }).ToList();
+
+        vm.UpdateManualSelection(picks, Array.Empty<MemberNodeViewModel>(), false);
+        vm.IsManualMode.Should().BeTrue();
+
+        // Type "42": three ModuleIds already match, the MessageId ("101") doesn't.
+        // Only 1 member would actually change.
+        vm.NewValue = "42";
+        vm.SetButtonText.Should().Be(BlockParam.Localization.Res.Format("Dialog_SetManualCount", 1),
+            "3 of 4 selected members already hold '42' so only 1 would actually change");
+        vm.SetPendingCommand.CanExecute(null).Should().BeTrue();
+    }
 }

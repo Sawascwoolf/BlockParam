@@ -372,6 +372,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
                         ValidateValue();
                         UpdateFilteredSuggestions();
                         UpdateHighlighting();
+                        OnPropertyChanged(nameof(SetButtonText));
                     }));
                 }, null, 150, Timeout.Infinite);
             }
@@ -514,9 +515,9 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         get
         {
             if (IsManualMode)
-                return Res.Format("Dialog_SetManualCount", _manualSelectedPaths.Count);
+                return Res.Format("Dialog_SetManualCount", CountWouldChangeMembers());
             return _selectedScope != null
-                ? $"Set {_selectedScope.MatchCount} in '{_selectedScope.AncestorName}'"
+                ? $"Set {CountWouldChangeMembers()} in '{_selectedScope.AncestorName}'"
                 : "Set";
         }
     }
@@ -1739,39 +1740,50 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
 
         if (IsManualMode)
         {
-            // Blocked when selection mixes datatypes.
             if (!IsSelectionTypeHomogeneous) return false;
-
-            // At least one selected member must actually change.
-            return _manualSelectedPaths.Any(p =>
-            {
-                var node = FindNodeByPath(p);
-                if (node == null || !node.IsLeaf) return false;
-                var effective = node.IsPendingInlineEdit
-                    ? (node.EditableStartValue ?? node.StartValue ?? "")
-                    : (node.StartValue ?? "");
-                return !string.Equals(effective, _newValue, StringComparison.OrdinalIgnoreCase);
-            });
+            return CountWouldChangeMembers() > 0;
         }
 
         if (!HasSelection || !HasScope) return false;
 
-        // Disabled when all affected members already have the target value
-        if (_selectedScope != null)
+        return CountWouldChangeMembers() > 0;
+    }
+
+    /// <summary>
+    /// Count of members that will actually be staged when Set Pending runs —
+    /// i.e. those whose effective start value differs from <c>NewValue</c>.
+    /// Shared by <see cref="CanExecuteSetPending"/> and <see cref="SetButtonText"/>
+    /// so the button's enable state and advertised count cannot drift apart (#65).
+    /// </summary>
+    private int CountWouldChangeMembers()
+    {
+        if (IsManualMode)
         {
-            var wouldChange = _selectedScope.MatchingMembers.Any(m =>
+            return _manualSelectedPaths.Count(p =>
             {
-                var node = FindNodeByPath(m.Path);
-                if (node == null) return true;
-                var effective = node.IsPendingInlineEdit
-                    ? (node.EditableStartValue ?? node.StartValue ?? "")
-                    : (node.StartValue ?? "");
-                return !string.Equals(effective, _newValue, StringComparison.OrdinalIgnoreCase);
+                var node = FindNodeByPath(p);
+                if (node == null || !node.IsLeaf) return false;
+                return WouldChange(node);
             });
-            if (!wouldChange) return false;
         }
 
-        return true;
+        if (_selectedScope == null) return 0;
+
+        return _selectedScope.MatchingMembers.Count(m =>
+        {
+            var node = FindNodeByPath(m.Path);
+            // Unresolved paths can't be staged by SetPendingOnNodes, so don't
+            // count them — that's exactly the inflation the old label had.
+            return node != null && WouldChange(node);
+        });
+    }
+
+    private bool WouldChange(MemberNodeViewModel node)
+    {
+        var effective = node.IsPendingInlineEdit
+            ? (node.EditableStartValue ?? node.StartValue ?? "")
+            : (node.StartValue ?? "");
+        return !string.Equals(effective, _newValue ?? "", StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>
