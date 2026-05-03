@@ -361,7 +361,12 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     public bool HasPendingChanges
     {
         get => _hasPendingChanges;
-        private set => SetProperty(ref _hasPendingChanges, value);
+        // internal set so BulkChangeViewModelMultiDbTests can drive
+        // CommitChanges in isolation — Apply normally toggles this flag
+        // mid-flow and consumes it before returning, so without test-only
+        // access there's no way to verify CommitChanges' multi-DB iteration
+        // without running the whole Apply pipeline.
+        internal set => SetProperty(ref _hasPendingChanges, value);
     }
 
     /// <summary>
@@ -2153,11 +2158,23 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
 
         if (_selectedScope != null)
         {
-            var affectedPaths = new HashSet<string>(
-                _selectedScope.MatchingMembers.Select(m => m.Path));
+            // Multi-DB safe (#58 review must-fix #2): resolve scope members
+            // to their owning DB's tree VMs by reference, not by path string.
+            // The previous HashSet<string>+full-tree-walk would mark same-named
+            // paths in companion DBs as Affected even when the user picked a
+            // within-DB scope on a single DB.
+            var affectedVms = ResolveScopeVms(_selectedScope.MatchingMembers);
 
+            foreach (var vm in affectedVms)
+                MarkAffected(vm, _newValue);
+
+            // AffectedBadge bubbles up through ancestors; refresh every
+            // node's badge property so parent UDTs re-render their counts.
+            // Doing this once per tree (not per affected vm) is O(N), same
+            // as the legacy walk's PropertyChanged raises but without the
+            // cross-DB false-mark side effect.
             foreach (var root in RootMembers)
-                HighlightAffected(root, affectedPaths, _newValue);
+                RaiseAffectedBadgeRecursive(root);
         }
 
         // Generate comment previews if template is configured
@@ -2418,28 +2435,44 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         return null;
     }
 
-    private void HighlightAffected(MemberNodeViewModel node, HashSet<string> affectedPaths, string newValue)
+    /// <summary>
+    /// Resolves a scope's <see cref="MemberNode"/> match list to the
+    /// owning DB's tree VMs via <see cref="FindVmByModel"/>. Multi-DB
+    /// safe — same path string in a different DB is an entirely
+    /// different model instance and won't end up in the result set.
+    /// </summary>
+    private HashSet<MemberNodeViewModel> ResolveScopeVms(IEnumerable<MemberNode> models)
     {
-        if (affectedPaths.Contains(node.Path))
+        var result = new HashSet<MemberNodeViewModel>();
+        foreach (var m in models)
         {
-            var effectiveValue = node.IsPendingInlineEdit
-                ? (node.EditableStartValue ?? node.StartValue ?? "")
-                : (node.StartValue ?? "");
-            var alreadyHasValue = !string.IsNullOrEmpty(newValue)
-                && string.Equals(effectiveValue, newValue, StringComparison.OrdinalIgnoreCase);
-
-            if (alreadyHasValue)
-                node.IsAlreadyMatching = true;
-            else
-                node.IsAffected = true;
-
-            node.EnsureVisible();
+            var vm = FindVmByModel(m);
+            if (vm != null) result.Add(vm);
         }
+        return result;
+    }
 
-        foreach (var child in node.Children)
-            HighlightAffected(child, affectedPaths, newValue);
+    private static void MarkAffected(MemberNodeViewModel vm, string newValue)
+    {
+        var effectiveValue = vm.IsPendingInlineEdit
+            ? (vm.EditableStartValue ?? vm.StartValue ?? "")
+            : (vm.StartValue ?? "");
+        var alreadyHasValue = !string.IsNullOrEmpty(newValue)
+            && string.Equals(effectiveValue, newValue, StringComparison.OrdinalIgnoreCase);
 
+        if (alreadyHasValue)
+            vm.IsAlreadyMatching = true;
+        else
+            vm.IsAffected = true;
+
+        vm.EnsureVisible();
+    }
+
+    private static void RaiseAffectedBadgeRecursive(MemberNodeViewModel node)
+    {
         node.RaisePropertyChanged(nameof(node.AffectedBadge));
+        foreach (var child in node.Children)
+            RaiseAffectedBadgeRecursive(child);
     }
 
     private void ApplyAllFilters()
@@ -2949,12 +2982,16 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
 
         MaybeWarnLimitReachedOnce();
 
-        var affectedPaths = new HashSet<string>(
-            _selectedScope.MatchingMembers.Select(m => m.Path));
+        // Multi-DB safe (#58 review must-fix #2): resolve scope members to
+        // their owning DB's tree VMs by reference. Path-string staging used
+        // to bleed pending values into companion DBs that happened to have
+        // the same path; this routes each scope member to exactly its own
+        // tree node.
+        var affectedVms = ResolveScopeVms(_selectedScope.MatchingMembers);
         int count = 0;
 
-        foreach (var root in RootMembers)
-            count += SetPendingOnNodes(root, affectedPaths, _newValue);
+        foreach (var vm in affectedVms)
+            count += SetPendingOnSingleVm(vm, _newValue);
 
         // Clear bulk highlighting (values are now pending/yellow)
         foreach (var root in RootMembers)
@@ -3008,6 +3045,38 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         RefreshPendingAndPreview();
         StatusText = $"{count} values staged — click Apply to commit";
         RefreshFlatList();
+    }
+
+    /// <summary>
+    /// Stages a pending value on a single resolved leaf VM (#58 review
+    /// must-fix #2). Same semantics as the legacy recursive
+    /// <see cref="SetPendingOnNodes"/> walk's leaf branch — overrides
+    /// existing pending, or clears stale pending when the bulk target
+    /// equals StartValue. Non-leaf VMs are skipped: the bulk operation
+    /// only makes sense on primitive leaves, and the analyzer's
+    /// MatchingMembers can include non-leaf array-of-UDT entries that
+    /// are best ignored here. (The legacy walk's recursion-into-children
+    /// was a no-op anyway: children's paths weren't in the affected set.)
+    /// </summary>
+    private static int SetPendingOnSingleVm(MemberNodeViewModel vm, string newValue)
+    {
+        if (!vm.IsLeaf) return 0;
+        var startsEqualsNew = string.Equals(vm.StartValue, newValue, StringComparison.OrdinalIgnoreCase);
+        if (!startsEqualsNew)
+        {
+            if (!string.Equals(vm.PendingValue, newValue, StringComparison.OrdinalIgnoreCase))
+            {
+                vm.PendingValue = newValue;
+                return 1;
+            }
+            return 0;
+        }
+        if (vm.IsPendingInlineEdit)
+        {
+            vm.ClearPending();
+            return 1;
+        }
+        return 0;
     }
 
     private static int SetPendingOnNodes(MemberNodeViewModel node,
