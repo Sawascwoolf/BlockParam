@@ -118,17 +118,24 @@ public class BulkChangeContextMenu : ContextMenuAddIn
     {
         try
         {
+            // Multi-DB selection (#58). The user can right-click multiple DBs in
+            // the project tree; we open one dialog that operates on all of them.
+            // Index 0 is the focused DB (drives the dialog title / scope view);
+            // additional selections become companions and participate in bulk
+            // preview / Apply equally.
+            var allSelected = provider.GetSelection<DataBlock>().ToList();
+            if (allSelected.Count == 0) return;
             // Mutable: ImportBlock disposes the old DataBlock instance; we must refresh
             // this reference after every import so subsequent Apply clicks don't hit a
             // disposed GlobalDB.
-            var selection = provider.GetSelection<DataBlock>().FirstOrDefault();
-            if (selection == null) return;
+            var selection = allSelected[0];
 
             EnsureTempCacheCleaned();
             ApplyConfiguredLanguage();
 
-            Log.Information("Bulk Change v{Version} clicked on DB: {DbName}",
-                typeof(BulkChangeContextMenu).Assembly.GetName().Version, selection.Name);
+            Log.Information("Bulk Change v{Version} clicked on DB: {DbName}{Extra}",
+                typeof(BulkChangeContextMenu).Assembly.GetName().Version, selection.Name,
+                allSelected.Count > 1 ? $" (+{allSelected.Count - 1} companion DB(s))" : "");
 
             // Two language axes (#50). UI language: Thread.CurrentUICulture,
             // either the OS default or the user's config.json override
@@ -278,6 +285,22 @@ public class BulkChangeContextMenu : ContextMenuAddIn
                 ? SafeGetPlcName(plcSoftware)
                 : "";
 
+            // Companion DBs (#58). Index 0 of allSelected is the focused DB
+            // (already exported / parsed above); 1+ each get the same export +
+            // parse + per-DB Apply closure as the focused one.
+            var companions = new List<ActiveDb>();
+            for (int i = 1; i < allSelected.Count; i++)
+            {
+                var companion = BuildCompanionActiveDb(
+                    allSelected[i], adapter, tempDir, constantResolver,
+                    udtResolver, commentResolver);
+                if (companion != null)
+                    companions.Add(companion);
+            }
+            if (companions.Count > 0)
+                Log.Information("Multi-DB session: {N} companion DB(s) active alongside {Primary}",
+                    companions.Count, dbInfo.Name);
+
             // Open dialog
             var vm = new BulkChangeViewModel(
                 dbInfo, xml, analyzer, bulkService, usageTracker, configLoader,
@@ -377,7 +400,8 @@ public class BulkChangeContextMenu : ContextMenuAddIn
                         Log.Information("DB switch: now editing {DbName}", newDbInfo.Name);
                         return newXml;
                     })
-                    : null);
+                    : null,
+                additionalActiveDbs: companions);
 
             licenseService.StartHeartbeat();
             var dialog = new BulkChangeDialog(vm);
@@ -462,6 +486,91 @@ public class BulkChangeContextMenu : ContextMenuAddIn
         }
         Log.Information("DB enumeration: {Count} block(s) under PLC {Plc}", list.Count, plcName);
         return list;
+    }
+
+    /// <summary>
+    /// Mutable holder for the live <see cref="DataBlock"/> instance backing a
+    /// companion DB (#58). TIA's <c>ImportBlock</c> disposes the old instance
+    /// on every Apply, so the per-DB OnApply closure must refresh its
+    /// reference between calls — wrapping it in a tiny class lets multiple
+    /// closures (export, import, re-resolve) share the same updatable handle.
+    /// </summary>
+    private sealed class DbHandle
+    {
+        public DataBlock Current;
+        public DbHandle(DataBlock initial) { Current = initial; }
+    }
+
+    /// <summary>
+    /// Builds an <see cref="ActiveDb"/> for a non-focused DB selected in the
+    /// project tree (#58). Mirrors the focused-DB setup: export + parse + an
+    /// OnApply closure that re-imports the modified XML and refreshes the
+    /// stale post-import handle. Returns null if export fails (e.g. user
+    /// declines the compile prompt for an inconsistent DB) — the dialog
+    /// opens without that companion.
+    /// </summary>
+    private ActiveDb? BuildCompanionActiveDb(
+        DataBlock initialSelection,
+        TiaPortalAdapter adapter,
+        string tempDir,
+        IConstantResolver? constantResolver,
+        UdtSetPointResolver udtResolver,
+        UdtCommentResolver commentResolver)
+    {
+        var handle = new DbHandle(initialSelection);
+
+        string xmlPath = null!;
+        if (!TryExportWithCompilePrompt(handle.Current, adapter,
+                () => xmlPath = adapter.ExportBlock(handle.Current, tempDir)))
+        {
+            Log.Information("Companion DB skipped (user declined compile): {DbName}",
+                initialSelection.Name);
+            return null;
+        }
+        var xml = File.ReadAllText(xmlPath);
+
+        var parser = new SimaticMLParser(constantResolver, udtResolver, commentResolver);
+        var info = parser.Parse(xml);
+
+        Log.Information("Companion DB parsed: {Name} ({Members} top-level members)",
+            info.Name, info.Members.Count);
+
+        Action<string> onApply = modifiedXml =>
+        {
+            Log.Information("Apply: writing modified XML for companion DB {DbName}", info.Name);
+
+            if (!TryExportWithCompilePrompt(handle.Current, adapter,
+                    () => adapter.BackupBlock(handle.Current, tempDir)))
+            {
+                Log.Information("Apply cancelled: user declined compile for companion {DbName}",
+                    info.Name);
+                throw new OperationCanceledException(
+                    "User declined to compile the inconsistent companion block.");
+            }
+
+            var modifiedPath = Path.Combine(tempDir,
+                $"{SafeFileName.Sanitize(info.Name)}_modified.xml");
+            File.WriteAllText(modifiedPath, modifiedXml);
+            var blockGroup = (PlcBlockGroup)adapter.GetBlockGroup(handle.Current);
+            adapter.ImportBlock(blockGroup, modifiedPath);
+
+            // Re-resolve to the post-import live instance so the next Apply
+            // does not hit a disposed reference (#19).
+            var fresh = blockGroup.Blocks.Find(info.Name) as DataBlock;
+            if (fresh != null)
+            {
+                handle.Current = fresh;
+            }
+            else
+            {
+                Log.Warning(
+                    "Could not re-resolve companion DataBlock '{DbName}' after import — next Apply may fail",
+                    info.Name);
+            }
+            Log.Information("Companion import completed for {DbName}", info.Name);
+        };
+
+        return new ActiveDb(info, xml, onApply);
     }
 
     private static string SafeGetPlcName(PlcSoftware plc)
