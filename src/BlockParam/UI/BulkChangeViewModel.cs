@@ -367,13 +367,23 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         if (!_hasPendingChanges) return true;
         try
         {
-            _active.OnApply?.Invoke(_active.Xml);
+            // Multi-DB-safe (#58): invoke OnApply on every active DB, not
+            // just the focused one. Single-DB sessions iterate exactly the
+            // focused DB so behavior is unchanged. A null OnApply
+            // (dropdown-added companion before per-DB host wiring) is a
+            // skip — Apply for that DB is read-only.
+            foreach (var db in AllActiveDbs)
+            {
+                db.OnApply?.Invoke(db.Xml);
+            }
             HasPendingChanges = false;
             // Pair line for the matching Log.Error path below — without
             // this, a TIA-side import failure has the error logged but
             // the success path is silent, so support cannot tell which
             // happened from the log file alone.
-            Log.Information("CommitChanges: import succeeded for {Db}", _active.Info.Name);
+            Log.Information(
+                "CommitChanges: import succeeded for {DbCount} DB(s) (focus={Focused})",
+                AllActiveDbs.Count, _active.Info.Name);
             return true;
         }
         catch (OperationCanceledException)
@@ -1042,16 +1052,177 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>Removes a companion by DB name (#58). No-op if not found.</summary>
-    private void RemoveCompanionByName(string name)
+    /// <summary>
+    /// Removes a companion by DB name (#58). When the companion has
+    /// pending edits in the live tree, asks the user what to do via the
+    /// same 3-way Apply / Stash / Cancel prompt the #59 single-switch
+    /// uses, so unchecking a row doesn't silently drop edits.
+    /// </summary>
+    /// <returns>true if the companion was removed; false if the user
+    /// cancelled (caller should re-check the dropdown row).</returns>
+    private bool RemoveCompanionByName(string name)
     {
         for (int i = 0; i < _companions.Count; i++)
         {
-            if (string.Equals(_companions[i].Info.Name, name, StringComparison.Ordinal))
+            var companion = _companions[i];
+            if (!string.Equals(companion.Info.Name, name, StringComparison.Ordinal))
+                continue;
+
+            // Count pending edits within this companion's synthetic subtree.
+            var pendingCount = CountPendingEditsForDb(companion);
+            if (pendingCount > 0)
             {
-                _companions.RemoveAt(i);
-                Log.Information("Companion DB disabled via dropdown: {Name}", name);
-                return;
+                var result = _messageBox.AskYesNoCancel(
+                    Res.Format("Dialog_SwitchDb_KeepConfirm_Text",
+                        pendingCount, companion.Info.Name),
+                    Res.Get("Dialog_SwitchDb_KeepConfirm_Title"));
+
+                if (result == YesNoCancelResult.Cancel)
+                {
+                    Log.Information("Companion remove cancelled by user: {Name}", name);
+                    return false;
+                }
+                if (result == YesNoCancelResult.Yes)
+                {
+                    // Apply this companion's edits before removing it.
+                    // Re-uses the multi-DB Apply path so the unified counter
+                    // gets charged correctly. Aborts on Apply failure (cap
+                    // hit, validation error) — leaves the companion present.
+                    var applyOk = TryApplyCompanionInPlace(companion);
+                    if (!applyOk)
+                    {
+                        Log.Information(
+                            "Companion remove aborted: pending Apply did not succeed for {Name}",
+                            name);
+                        return false;
+                    }
+                }
+                else
+                {
+                    // No: stash the pending edits keyed by DB identity so
+                    // re-checking the row in the same dialog session
+                    // restores them. Mirrors the #59 stash semantics for
+                    // the dropdown-driven multi-DB path.
+                    StashPendingEditsForDb(companion);
+                }
             }
+
+            _companions.RemoveAt(i);
+            Log.Information("Companion DB disabled via dropdown: {Name}", name);
+            return true;
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Counts pending inline edits inside a companion's synthetic subtree.
+    /// Used by the remove-with-stash-prompt flow (#58).
+    /// </summary>
+    private int CountPendingEditsForDb(ActiveDb db)
+    {
+        foreach (var root in RootMembers)
+        {
+            if (string.Equals(root.Name, db.Info.Name, StringComparison.Ordinal))
+                return CountPendingInlineEdits(root.Children);
+        }
+        return 0;
+    }
+
+    /// <summary>
+    /// Stashes a companion's pending edits in <see cref="_stashedDbs"/> so
+    /// re-adding the DB in the same session restores them. The stash is
+    /// in-memory only — closing the dialog drops it.
+    /// </summary>
+    private void StashPendingEditsForDb(ActiveDb db)
+    {
+        var entries = new List<StashedEditEntry>();
+        foreach (var root in RootMembers)
+        {
+            if (!string.Equals(root.Name, db.Info.Name, StringComparison.Ordinal))
+                continue;
+            foreach (var node in root.AllDescendants())
+            {
+                if (node.IsPendingInlineEdit && node.PendingValue != null)
+                {
+                    entries.Add(new StashedEditEntry(
+                        node.Path,
+                        node.StartValue ?? "",
+                        node.PendingValue));
+                }
+            }
+        }
+        if (entries.Count == 0) return;
+
+        var summary = new DataBlockSummary(
+            db.Info.Name,
+            "",
+            blockType: db.Info.BlockType,
+            isInstanceDb: string.Equals(db.Info.BlockType, "InstanceDB", StringComparison.Ordinal),
+            plcName: _currentPlcName);
+        var key = $"{summary.PlcName}|{summary.FolderPath}|{summary.Name}";
+        _stashedDbs[key] = new StashedDbState(summary, entries);
+        SyncStashedDbsCollection();
+    }
+
+    /// <summary>
+    /// Best-effort "apply this companion's edits before we remove it"
+    /// (#58 remove-prompt → Yes branch). Iterates the companion's pending
+    /// edits, writes them into its xml, calls its OnApply once, then
+    /// charges the counter. Returns false if the daily cap or a null
+    /// OnApply blocks the write — caller leaves the companion in place.
+    /// </summary>
+    private bool TryApplyCompanionInPlace(ActiveDb db)
+    {
+        if (db.OnApply == null)
+        {
+            // Read-only companion (dropdown-added with no host callback).
+            // The user picked "Apply, then remove" but there's nothing to
+            // apply against, so refuse rather than silently drop.
+            StatusText = Res.Format("Status_DbSwitch_ApplyBlocked");
+            return false;
+        }
+
+        var pendingEdits = new List<(MemberNode Member, string Value)>();
+        foreach (var root in RootMembers)
+        {
+            if (!string.Equals(root.Name, db.Info.Name, StringComparison.Ordinal)) continue;
+            pendingEdits = CollectPendingInlineEdits(root.Children);
+            break;
+        }
+        if (pendingEdits.Count == 0) return true;
+
+        var status = _usageTracker.GetStatus();
+        if (pendingEdits.Count > status.RemainingToday)
+        {
+            StatusText = Res.Format("Status_WouldExceedLimit",
+                pendingEdits.Count, status.RemainingToday);
+            return false;
+        }
+
+        try
+        {
+            int totalChanged = 0;
+            foreach (var (member, value) in pendingEdits)
+            {
+                var writeResult = _writer.ModifyStartValues(db.Xml, new[] { member }, value);
+                if (writeResult.IsSuccess)
+                {
+                    db.Xml = writeResult.ModifiedXml;
+                    totalChanged++;
+                }
+            }
+            db.OnApply.Invoke(db.Xml);
+            if (totalChanged > 0) _usageTracker.RecordUsage(totalChanged);
+            return true;
+        }
+        catch (OperationCanceledException)
+        {
+            return false;
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "TryApplyCompanionInPlace failed for {Name}", db.Info.Name);
+            return false;
         }
     }
 
