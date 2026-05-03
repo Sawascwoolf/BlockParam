@@ -832,8 +832,78 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         private set
         {
             if (SetProperty(ref _filteredDataBlocks, value))
+            {
                 OnPropertyChanged(nameof(ShowEmptyDataBlocksMessage));
+                RebuildFilteredDataBlockItems();
+            }
         }
+    }
+
+    private IReadOnlyList<DataBlockListItem> _filteredDataBlockItems = Array.Empty<DataBlockListItem>();
+
+    /// <summary>
+    /// Multi-select dropdown rows (#58). Same membership and order as
+    /// <see cref="FilteredDataBlocks"/>; each row wraps the summary with a
+    /// transient IsActive flag that two-way binds to its checkbox.
+    /// </summary>
+    public IReadOnlyList<DataBlockListItem> FilteredDataBlockItems
+    {
+        get => _filteredDataBlockItems;
+        private set => SetProperty(ref _filteredDataBlockItems, value);
+    }
+
+    private void RebuildFilteredDataBlockItems()
+    {
+        var items = new List<DataBlockListItem>(_filteredDataBlocks.Count);
+        foreach (var summary in _filteredDataBlocks)
+        {
+            var (isActive, isFocused) = GetActiveStatusFor(summary);
+            var item = new DataBlockListItem(summary, isActive, isFocused);
+            item.ToggleRequested += OnDataBlockListItemToggled;
+            items.Add(item);
+        }
+        FilteredDataBlockItems = items;
+    }
+
+    /// <summary>
+    /// True/false pair for a row: (isActive: in the dialog's active set,
+    /// isFocused: index 0 of the active set). Companions are isActive but
+    /// not isFocused.
+    /// </summary>
+    private (bool isActive, bool isFocused) GetActiveStatusFor(DataBlockSummary summary)
+    {
+        if (Matches(_active.Info, summary)) return (true, true);
+        foreach (var companion in _companions)
+            if (Matches(companion.Info, summary)) return (true, false);
+        return (false, false);
+
+        static bool Matches(DataBlockInfo info, DataBlockSummary s) =>
+            string.Equals(info.Name, s.Name, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Pushes the current active-set state back into every existing row so
+    /// checkboxes stay accurate after the user toggles one (which mutates
+    /// the active set but doesn't rebuild the list).
+    /// </summary>
+    private void RefreshFilteredDataBlockItemsActiveState()
+    {
+        foreach (var item in _filteredDataBlockItems)
+        {
+            var (isActive, isFocused) = GetActiveStatusFor(item.Summary);
+            item.SyncFrom(isActive, isFocused);
+        }
+    }
+
+    private void OnDataBlockListItemToggled(DataBlockListItem item)
+    {
+        // Subsequent commit (multi-DB Apply) wires the actual add/remove +
+        // stash flow. For now this is a no-op stub so toggles don't throw.
+        // The checkbox visual still flips because IsActive setter ran first.
+        Log.Information("DB toggle requested: {Name} → IsActive={State} (handler not yet wired)",
+            item.Name, item.IsActive);
+        // Until the handler is wired, snap the row back to authoritative state.
+        RefreshFilteredDataBlockItemsActiveState();
     }
 
     /// <summary>True when enumeration is settled but the filter matches nothing.</summary>

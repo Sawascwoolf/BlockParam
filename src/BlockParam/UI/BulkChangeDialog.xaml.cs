@@ -1144,17 +1144,20 @@ public partial class BulkChangeDialog : Window
                 }
                 break;
             case Key.Enter:
+                // Multi-select dropdown (#58): Enter on a highlighted row
+                // toggles its checkbox so a keyboard-only user can add /
+                // remove DBs from the active set without grabbing the mouse.
                 if (DbSwitcherList.Items.Count > 0
-                    && DbSwitcherList.Items[0] is Models.DataBlockSummary first)
+                    && DbSwitcherList.Items[0] is DataBlockListItem firstItem)
                 {
-                    vm.SwitchToDataBlock(first);
+                    firstItem.IsActive = !firstItem.IsActive;
                     e.Handled = true;
                 }
                 break;
         }
     }
 
-    /// <summary>List keys: Esc closes; Enter switches to the highlighted DB.</summary>
+    /// <summary>List keys: Esc closes; Enter toggles the highlighted DB's checkbox.</summary>
     private void OnDbSwitcherListKeyDown(object sender, KeyEventArgs e)
     {
         if (DataContext is not BulkChangeViewModel vm) return;
@@ -1164,18 +1167,18 @@ public partial class BulkChangeDialog : Window
             vm.IsDataBlocksDropdownOpen = false;
             e.Handled = true;
         }
-        else if (e.Key == Key.Enter && DbSwitcherList.SelectedItem is Models.DataBlockSummary picked)
+        else if (e.Key == Key.Enter && DbSwitcherList.SelectedItem is DataBlockListItem picked)
         {
-            vm.SwitchToDataBlock(picked);
+            picked.IsActive = !picked.IsActive;
             e.Handled = true;
         }
     }
 
     /// <summary>
-    /// Mouse selection on the list switches to the picked DB. Resets the
-    /// SelectedItem afterwards so the same row can be re-clicked later.
-    /// Skips programmatic selection changes (the Down-arrow navigation in
-    /// the search box) so navigation keys don't trigger an accidental switch.
+    /// Legacy single-select handler retained until the dropdown is fully
+    /// converted to multi-select interactions. The XAML no longer wires
+    /// SelectionChanged to this method, so it's a dead branch — kept only
+    /// for reference / safe cleanup in a follow-up.
     /// </summary>
     private void OnDbSwitcherSelectionChanged(object sender, SelectionChangedEventArgs e)
     {

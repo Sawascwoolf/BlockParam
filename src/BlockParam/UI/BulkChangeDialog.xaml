@@ -225,11 +225,15 @@
                                            Foreground="#888" Margin="0,4"
                                            HorizontalAlignment="Center"
                                            Visibility="{Binding ShowEmptyDataBlocksMessage, Converter={StaticResource BoolToVis}}"/>
+                                <!-- Multi-select DB picker (#58). Each row carries a CheckBox bound
+                                     to DataBlockListItem.IsActive; toggling adds/removes the DB from
+                                     the dialog's active set. Item identity → keep this row's checkbox
+                                     state in sync with the VM via DataBlockListItem.SyncFrom. -->
                                 <ListBox x:Name="DbSwitcherList"
-                                         ItemsSource="{Binding FilteredDataBlocks}"
+                                         ItemsSource="{Binding FilteredDataBlockItems}"
                                          BorderThickness="0" MaxHeight="320"
                                          VirtualizingStackPanel.IsVirtualizing="True"
-                                         SelectionChanged="OnDbSwitcherSelectionChanged"
+                                         SelectionMode="Single"
                                          KeyDown="OnDbSwitcherListKeyDown">
                                     <ListBox.ItemContainerStyle>
                                         <Style TargetType="ListBoxItem">
@@ -239,6 +243,10 @@
                                     <ListBox.ItemTemplate>
                                         <DataTemplate>
                                             <DockPanel LastChildFill="True">
+                                                <CheckBox DockPanel.Dock="Left"
+                                                          IsChecked="{Binding IsActive, Mode=TwoWay}"
+                                                          VerticalAlignment="Center"
+                                                          Margin="0,0,8,0"/>
                                                 <Border DockPanel.Dock="Right" Background="#EEE"
                                                         Padding="4,0" CornerRadius="2" Margin="6,0,0,0"
                                                         Visibility="{Binding IsInstanceDb, Converter={StaticResource BoolToVis}}">
