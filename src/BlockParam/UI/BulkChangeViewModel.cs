@@ -46,10 +46,12 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     private AutocompleteProvider? _autocompleteProvider;
     private TagTableCache? _tagTableCache;
 
-    // The single active DB. Per-DB state (parsed info, current export XML,
-    // host import callback) is bundled into ActiveDb so multi-DB workflows
-    // (#58) can promote this to a list without scattering parallel arrays.
+    // The focused DB (selection / scope / status text are computed against
+    // this one). Per-DB state lives in ActiveDb. For multi-DB workflows
+    // (#58) the focus stays on _active and additional DBs hang off
+    // _companions; bulk preview / Apply iterate _active + _companions.
     private ActiveDb _active;
+    private readonly List<ActiveDb> _companions = new();
     private string _title = "";
     // DB-switcher state (#59). Lazy-loaded on first dropdown open and cached
     // for the dialog session; the ↻ button re-enumerates on demand.
@@ -132,12 +134,15 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         IUpdateCheckService? updateCheckService = null,
         Func<IReadOnlyList<DataBlockSummary>>? enumerateDataBlocks = null,
         Func<DataBlockSummary, string>? switchToDataBlock = null,
-        string? currentPlcName = null)
+        string? currentPlcName = null,
+        IReadOnlyList<ActiveDb>? additionalActiveDbs = null)
     {
         _dispatcher = Dispatcher.CurrentDispatcher;
         _projectLanguages = projectLanguages is { Count: > 0 } ? projectLanguages : new[] { "en-GB" };
         _commentLanguagePolicy = new CommentLanguagePolicy(editingLanguage, referenceLanguage, _projectLanguages);
         _active = new ActiveDb(dataBlockInfo, currentXml, onApply);
+        if (additionalActiveDbs != null)
+            _companions.AddRange(additionalActiveDbs);
         _analyzer = analyzer;
         _bulkChangeService = bulkChangeService;
         _usageTracker = usageTracker;
@@ -715,6 +720,24 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
 
     /// <summary>Header label — the DB name part of the title combo.</summary>
     public string CurrentDataBlockName => _active.Info.Name;
+
+    /// <summary>
+    /// All DBs currently being edited in this dialog session (#58). Always
+    /// non-empty — index 0 is the focused DB; indices 1+ are companions
+    /// added via multi-select. Bulk preview / Apply iterate the whole list.
+    /// </summary>
+    public IReadOnlyList<ActiveDb> AllActiveDbs
+    {
+        get
+        {
+            var list = new List<ActiveDb>(1 + _companions.Count) { _active };
+            list.AddRange(_companions);
+            return list;
+        }
+    }
+
+    /// <summary>True when more than one DB is active in this session (#58).</summary>
+    public bool HasMultipleActiveDbs => _companions.Count > 0;
 
     /// <summary>
     /// Owning PLC name for the active DB, surfaced as a dim prefix in the
