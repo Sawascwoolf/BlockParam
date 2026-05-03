@@ -31,7 +31,6 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     private readonly BulkChangeService _bulkChangeService;
     private readonly IUsageTracker _usageTracker;
     private readonly ConfigLoader _configLoader;
-    private readonly Action<string>? _onApply;
     private readonly Func<string>? _onBackup;   // callback to create backup, returns backup path
     private readonly Action<string>? _onRestore; // callback to restore from backup path
     private readonly FlatTreeManager _flatTreeManager = new();
@@ -47,7 +46,10 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     private AutocompleteProvider? _autocompleteProvider;
     private TagTableCache? _tagTableCache;
 
-    private DataBlockInfo _dataBlockInfo;
+    // The single active DB. Per-DB state (parsed info, current export XML,
+    // host import callback) is bundled into ActiveDb so multi-DB workflows
+    // (#58) can promote this to a list without scattering parallel arrays.
+    private ActiveDb _active;
     private string _title = "";
     // DB-switcher state (#59). Lazy-loaded on first dropdown open and cached
     // for the dialog session; the ↻ button re-enumerates on demand.
@@ -98,7 +100,6 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     private bool _isBulkPreviewExpanded = true;
     private bool _isPendingExpanded = true;
     private bool _isIssuesExpanded = true;
-    private string _currentXml;
     private readonly IReadOnlyList<string> _projectLanguages;
     private readonly CommentLanguagePolicy _commentLanguagePolicy;
     private readonly Dispatcher _dispatcher;
@@ -136,13 +137,11 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         _dispatcher = Dispatcher.CurrentDispatcher;
         _projectLanguages = projectLanguages is { Count: > 0 } ? projectLanguages : new[] { "en-GB" };
         _commentLanguagePolicy = new CommentLanguagePolicy(editingLanguage, referenceLanguage, _projectLanguages);
-        _dataBlockInfo = dataBlockInfo;
-        _currentXml = currentXml;
+        _active = new ActiveDb(dataBlockInfo, currentXml, onApply);
         _analyzer = analyzer;
         _bulkChangeService = bulkChangeService;
         _usageTracker = usageTracker;
         _configLoader = configLoader;
-        _onApply = onApply;
         _onBackup = onBackup;
         _onRestore = onRestore;
         _messageBox = messageBox ?? new WpfMessageBoxService();
@@ -355,13 +354,13 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         if (!_hasPendingChanges) return true;
         try
         {
-            _onApply?.Invoke(_currentXml);
+            _active.OnApply?.Invoke(_active.Xml);
             HasPendingChanges = false;
             // Pair line for the matching Log.Error path below — without
             // this, a TIA-side import failure has the error logged but
             // the success path is silent, so support cannot tell which
             // happened from the log file alone.
-            Log.Information("CommitChanges: import succeeded for {Db}", _dataBlockInfo.Name);
+            Log.Information("CommitChanges: import succeeded for {Db}", _active.Info.Name);
             return true;
         }
         catch (OperationCanceledException)
@@ -373,7 +372,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         }
         catch (Exception ex)
         {
-            Log.Error(ex, "CommitChanges: TIA import failed for {Db}", _dataBlockInfo.Name);
+            Log.Error(ex, "CommitChanges: TIA import failed for {Db}", _active.Info.Name);
             HasPendingChanges = false;
             _messageBox.ShowError(
                 $"TIA Portal import failed:\n\n{ex.InnerException?.Message ?? ex.Message}",
@@ -527,20 +526,20 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     /// When a refresh callback exists, clicking triggers a fresh export automatically.
     /// </summary>
     public bool CanShowSetpointsOnly
-        => _dataBlockInfo.UnresolvedUdts.Count == 0 || _onRefreshUdtTypes != null;
+        => _active.Info.UnresolvedUdts.Count == 0 || _onRefreshUdtTypes != null;
 
     /// <summary>Tooltip shown on the checkbox.</summary>
     public string ShowSetpointsOnlyTooltip
     {
         get
         {
-            if (_dataBlockInfo.UnresolvedUdts.Count == 0)
+            if (_active.Info.UnresolvedUdts.Count == 0)
                 return "Only show members marked as SetPoint (Einstellwert) in the UDT type definition.";
 
             if (_onRefreshUdtTypes != null)
                 return "Only show members marked as SetPoint. UDT types will be re-exported from TIA Portal when enabled.";
 
-            var missing = string.Join(", ", _dataBlockInfo.UnresolvedUdts);
+            var missing = string.Join(", ", _active.Info.UnresolvedUdts);
             return $"Disabled: UDT type definitions are missing ({missing}) and no PLC connection is available to export them.";
         }
     }
@@ -715,7 +714,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         _enumerateDataBlocks != null && _switchToDataBlock != null;
 
     /// <summary>Header label — the DB name part of the title combo.</summary>
-    public string CurrentDataBlockName => _dataBlockInfo.Name;
+    public string CurrentDataBlockName => _active.Info.Name;
 
     /// <summary>
     /// Owning PLC name for the active DB, surfaced as a dim prefix in the
@@ -849,7 +848,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     public bool SwitchToDataBlock(DataBlockSummary summary)
     {
         if (_switchToDataBlock == null) return false;
-        if (string.Equals(summary.Name, _dataBlockInfo.Name, StringComparison.Ordinal)
+        if (string.Equals(summary.Name, _active.Info.Name, StringComparison.Ordinal)
             && string.Equals(summary.FolderPath, GetCurrentFolderPath(), StringComparison.Ordinal)
             && string.Equals(summary.PlcName, _currentPlcName, StringComparison.Ordinal))
         {
@@ -867,7 +866,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         if (pendingSnapshot.Count > 0)
         {
             var message = Res.Format("Dialog_SwitchDb_KeepConfirm_Text",
-                pendingSnapshot.Count, _dataBlockInfo.Name, summary.Name);
+                pendingSnapshot.Count, _active.Info.Name, summary.Name);
             var choice = _messageBox.AskYesNoCancel(
                 message, Res.Get("Dialog_SwitchDb_KeepConfirm_Title"));
 
@@ -900,7 +899,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         try
         {
             var newXml = _switchToDataBlock(summary);
-            _currentXml = newXml;
+            _active.Xml = newXml;
             // Reset selection / scope before RefreshTree — the path / scope
             // we'd try to restore belong to a different DB and would log a
             // warning every switch.
@@ -920,7 +919,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             // already carries the right value from enumeration.
             CurrentPlcName = summary.PlcName ?? "";
             var version = typeof(BulkChangeViewModel).Assembly.GetName().Version;
-            Title = BuildTitle(version, _currentPlcName, _dataBlockInfo.Name);
+            Title = BuildTitle(version, _currentPlcName, _active.Info.Name);
             OnPropertyChanged(nameof(CurrentDataBlockName));
             OnPropertyChanged(nameof(SelectedFlatMember));
             OnPropertyChanged(nameof(SelectedScope));
@@ -937,13 +936,13 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             if (restored > 0 || dropped > 0)
             {
                 StatusText = dropped == 0
-                    ? Res.Format("Status_DbSwitched_StashRestored", _dataBlockInfo.Name, restored)
+                    ? Res.Format("Status_DbSwitched_StashRestored", _active.Info.Name, restored)
                     : Res.Format("Status_DbSwitched_StashPartial",
-                        _dataBlockInfo.Name, restored, dropped);
+                        _active.Info.Name, restored, dropped);
             }
             else
             {
-                StatusText = Res.Format("Status_DbSwitched", _dataBlockInfo.Name);
+                StatusText = Res.Format("Status_DbSwitched", _active.Info.Name);
             }
             return true;
         }
@@ -964,7 +963,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         // current DB's folder path. Empty fallback keeps dedupe permissive.
         if (_availableDataBlocks == null) return "";
         return _availableDataBlocks
-            .FirstOrDefault(b => string.Equals(b.Name, _dataBlockInfo.Name, StringComparison.Ordinal))
+            .FirstOrDefault(b => string.Equals(b.Name, _active.Info.Name, StringComparison.Ordinal))
             ?.FolderPath ?? "";
     }
 
@@ -1027,10 +1026,10 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     private void StashCurrentDb(IReadOnlyList<StashedEditEntry> edits)
     {
         var summary = new DataBlockSummary(
-            _dataBlockInfo.Name,
+            _active.Info.Name,
             GetCurrentFolderPath(),
-            blockType: _dataBlockInfo.BlockType,
-            isInstanceDb: string.Equals(_dataBlockInfo.BlockType, "InstanceDB", StringComparison.Ordinal),
+            blockType: _active.Info.BlockType,
+            isInstanceDb: string.Equals(_active.Info.BlockType, "InstanceDB", StringComparison.Ordinal),
             plcName: _currentPlcName);
         var key = StashKey(summary);
         var state = new StashedDbState(summary, edits);
@@ -1567,7 +1566,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
 
         ReloadSuggestions();
 
-        var result = _analyzer.Analyze(_dataBlockInfo, memberVm.Model);
+        var result = _analyzer.Analyze(_active.Info, memberVm.Model);
 
         if (!result.HasBulkOptions)
         {
@@ -1806,7 +1805,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         EnsureTagTableCache();
         var generator = new TemplateCommentGenerator(config, _tagTableCache);
         var previews = generator.GenerateForScope(
-            _dataBlockInfo, _selectedScope.MatchingMembers.ToList(),
+            _active.Info, _selectedScope.MatchingMembers.ToList(),
             valueResolver: ResolvePendingValue);
 
         foreach (var (target, comment) in previews)
@@ -1837,7 +1836,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
 
             foreach (var lang in _projectLanguages)
             {
-                var comment = templateGen!.Generate(_dataBlockInfo, node.Model, rule.CommentTemplate, lang, ResolvePendingValue);
+                var comment = templateGen!.Generate(_active.Info, node.Model, rule.CommentTemplate, lang, ResolvePendingValue);
                 xml = _writer.ModifyComment(xml, node.Model, comment, lang);
                 Log.Information("Comment updated: {Path} → {Comment} ({Lang})", node.Model.Path, comment, lang);
             }
@@ -1908,7 +1907,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         HashSet<string>? searchPaths = null;
         if (!string.IsNullOrWhiteSpace(_searchQuery))
         {
-            var searchResult = _searchService.Search(_dataBlockInfo, _searchQuery);
+            var searchResult = _searchService.Search(_active.Info, _searchQuery);
             searchPaths = new HashSet<string>(searchResult.Matches.Select(m => m.Path));
             SearchHitCount = searchResult.HitCount;
         }
@@ -1922,7 +1921,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
 
         HiddenByRuleCount = excludeSet == null
             ? 0
-            : _dataBlockInfo.AllMembers().Count(m => m.IsLeaf && excludeSet.Contains(m.Path));
+            : _active.Info.AllMembers().Count(m => m.IsLeaf && excludeSet.Contains(m.Path));
 
         foreach (var root in RootMembers)
             root.ApplyFilter(ruleFilterActive: true, searchPaths, excludeSet, _showSetpointsOnly);
@@ -1956,7 +1955,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     {
         if (!string.IsNullOrWhiteSpace(_searchQuery))
         {
-            var searchResult = _searchService.Search(_dataBlockInfo, _searchQuery);
+            var searchResult = _searchService.Search(_active.Info, _searchQuery);
             var searchPaths = new HashSet<string>(searchResult.Matches.Select(m => m.Path));
             foreach (var root in RootMembers)
                 SmartExpandSearchMatches(root, searchPaths);
@@ -2237,7 +2236,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
                 commentResolver.LoadFromDirectory(_udtDir);
             }
 
-            RefreshTree(_currentXml, resolver, commentResolver);
+            RefreshTree(_active.Xml, resolver, commentResolver);
 
             OnPropertyChanged(nameof(CanShowSetpointsOnly));
             OnPropertyChanged(nameof(ShowSetpointsOnlyTooltip));
@@ -2593,11 +2592,11 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             foreach (var (member, value) in pendingEdits)
             {
                 var writeResult = _writer.ModifyStartValues(
-                    _currentXml, new[] { member }, value);
+                    _active.Xml, new[] { member }, value);
 
                 if (writeResult.IsSuccess)
                 {
-                    _currentXml = writeResult.ModifiedXml;
+                    _active.Xml = writeResult.ModifiedXml;
                     totalChanged++;
                     Log.Information("Applied: {Path} → {Value}", member.Path, value);
                 }
@@ -2609,9 +2608,9 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             }
 
             // Apply comment previews
-            _currentXml = ApplyCommentPreviews(_currentXml);
+            _active.Xml = ApplyCommentPreviews(_active.Xml);
 
-            StatusText = Res.Format("Status_Changed", totalChanged, _dataBlockInfo.Name);
+            StatusText = Res.Format("Status_Changed", totalChanged, _active.Info.Name);
             _lastApplySucceeded = true;
 
             Log.Information("ExecuteApply: {Changed} values written to XML, importing to TIA...", totalChanged);
@@ -2642,14 +2641,14 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
                 if (remaining > 0)
                     _usageTracker.RecordUsage(remaining);
                 StatusText = Res.Format("Status_AppliedOverCap",
-                    totalChanged, _dataBlockInfo.Name);
+                    totalChanged, _active.Info.Name);
                 Log.Warning(
                     "ExecuteApply: quota race — wrote {N} past cap; counter pinned to limit",
                     totalChanged);
             }
 
             // Re-export from TIA to get the canonical XML after import
-            RefreshTree(_currentXml);
+            RefreshTree(_active.Xml);
 
             // RefreshTree rebuilds RootMembers (all PendingValue=null), but computed
             // properties only refresh their bindings when PropertyChanged is raised.
@@ -2687,12 +2686,12 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             var templateGen = new TemplateCommentGenerator(config, _tagTableCache);
             var scopeMembers = _selectedScope.MatchingMembers.ToList();
 
-            var modifiedXml = _currentXml;
+            var modifiedXml = _active.Xml;
             int affectedCount = 0;
             // Generate comments per language so {member.comment} resolves to the correct translation
             foreach (var lang in _projectLanguages)
             {
-                var targets = templateGen.GenerateForScope(_dataBlockInfo, scopeMembers, lang, ResolvePendingValue);
+                var targets = templateGen.GenerateForScope(_active.Info, scopeMembers, lang, ResolvePendingValue);
                 if (affectedCount == 0) affectedCount = targets.Count;
                 foreach (var (target, comment) in targets)
                 {
@@ -2700,8 +2699,8 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
                 }
             }
 
-            _currentXml = modifiedXml;
-            StatusText = Res.Format("Comments_Updated", affectedCount, _dataBlockInfo.Name);
+            _active.Xml = modifiedXml;
+            StatusText = Res.Format("Comments_Updated", affectedCount, _active.Info.Name);
             HasPendingChanges = true;
             RefreshTree(modifiedXml);
         }
@@ -2849,7 +2848,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         if (excludeRules.Count == 0) return null;
 
         var excluded = new HashSet<string>();
-        foreach (var member in _dataBlockInfo.AllMembers())
+        foreach (var member in _active.Info.AllMembers())
         {
             foreach (var rule in excludeRules)
             {
@@ -2949,11 +2948,11 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             ? new TagTableConstantResolver(_tagTableCache)
             : (IConstantResolver?)null;
         var parser = new SimaticMLParser(constantResolver, _udtResolver, _commentResolver);
-        _dataBlockInfo = parser.Parse(modifiedXml);
-        InlineRuleExtractor.ApplyTo(_configLoader.GetConfig(), _dataBlockInfo);
+        _active.Info = parser.Parse(modifiedXml);
+        InlineRuleExtractor.ApplyTo(_configLoader.GetConfig(), _active.Info);
 
         RootMembers.Clear();
-        foreach (var member in _dataBlockInfo.Members)
+        foreach (var member in _active.Info.Members)
         {
             var vm = new MemberNodeViewModel(member, null, _commentLanguagePolicy);
             SubscribeStartValueEdited(vm);
@@ -2982,7 +2981,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
 
                 // Re-populate scopes for the restored selection using the same
                 // ordering as OnMemberSelected so index/position stay stable.
-                var result = _analyzer.Analyze(_dataBlockInfo, restored.Model);
+                var result = _analyzer.Analyze(_active.Info, restored.Model);
                 AvailableScopes.Clear();
                 foreach (var scope in result.Scopes.Reverse())
                     AvailableScopes.Add(scope);
