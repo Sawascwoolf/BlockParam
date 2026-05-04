@@ -72,6 +72,13 @@ public partial class ConfigEditorDialog : Window
         var header = FindDescendantByName(root, "FileHeader") as Border;
         if (header == null) return;
 
+        // The inline <TranslateTransform/> declared in the DataTemplate gets
+        // auto-frozen by BAML (no bindings → shareable). A frozen Freezable
+        // throws InvalidOperationException on any property set, killing
+        // UpdateRollingSticky on every scroll tick. Swap in a per-instance
+        // mutable transform so the sticky math can mutate Y.
+        header.RenderTransform = new TranslateTransform();
+
         // Replace any existing entry for this file (template recycling).
         _fileSections.RemoveAll(fs => ReferenceEquals(fs.Root, root));
         _fileSections.Add(new FileSectionVisuals(file, root, header));

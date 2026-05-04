@@ -29,6 +29,15 @@ public class RuleFileViewModel : ViewModelBase
         "Timer", "Counter"
     };
 
+    /// <summary>The three sources a user can save a rule file to. Inline rules
+    /// live in DB/UDT comments and are not authored through this editor.</summary>
+    public static readonly RuleSource[] UserSelectableSources =
+    {
+        RuleSource.TiaProject,
+        RuleSource.Local,
+        RuleSource.Shared,
+    };
+
     private static readonly Regex AutoNamePattern =
         new(@"^new-rule(-\d+)?\.json$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
 

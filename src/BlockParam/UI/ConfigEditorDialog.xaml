@@ -15,9 +15,58 @@
         <local:StringNotEmptyToVisibilityConverter x:Key="StringToVis"/>
         <local:InvertBoolConverter x:Key="InvertBool"/>
         <local:RuleSourceToBoolConverter x:Key="RuleSourceConverter"/>
+        <local:RuleSourceToLabelConverter x:Key="RuleSourceLabel"/>
 
-        <!-- File icon (folder-document) -->
+        <!-- File icon (folder-document, Material-style fill) -->
         <Geometry x:Key="IconRuleFile">M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm-1 7V3.5L18.5 9H13z</Geometry>
+
+        <!-- Lucide-style stroke icons (24x24 viewBox). Used by IconButton style below. -->
+        <Geometry x:Key="IconPlus">M5 12h14M12 5v14</Geometry>
+        <Geometry x:Key="IconFilePlus">M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z M14 2v6h6 M9 15h6 M12 12v6</Geometry>
+        <Geometry x:Key="IconCopy">M10 8h12a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-12a2 2 0 0 1-2-2v-12a2 2 0 0 1 2-2z M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2</Geometry>
+        <Geometry x:Key="IconTrash">M3 6h18 M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6 M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2 M10 11v6 M14 11v6</Geometry>
+        <Geometry x:Key="IconDownload">M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4 M7 10l5 5 5-5 M12 15V3</Geometry>
+        <Geometry x:Key="IconUpload">M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4 M17 8l-5-5-5 5 M12 3v12</Geometry>
+
+        <!-- Icon-only action button. Pass the Geometry through Tag.
+             Tooltip + Command come from the call site. -->
+        <Style x:Key="IconButton" TargetType="Button">
+            <Setter Property="Width" Value="28"/>
+            <Setter Property="Height" Value="24"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bd"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="#B9BEC6"
+                                BorderThickness="0"
+                                CornerRadius="3">
+                            <Path Data="{TemplateBinding Tag}"
+                                  Stroke="#3a4250" StrokeThickness="1.6"
+                                  StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                                  StrokeLineJoin="Round"
+                                  Stretch="Uniform" Width="14" Height="14"
+                                  HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#E8F0FE"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#D6E5FA"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.4"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
 
         <!-- Style for help icons (?) next to labels -->
         <Style x:Key="HelpIcon" TargetType="ToggleButton">
@@ -50,37 +99,6 @@
             <Setter Property="AllowsTransparency" Value="True"/>
             <Setter Property="Placement" Value="Right"/>
             <Setter Property="StaysOpen" Value="False"/>
-        </Style>
-
-        <!-- Source segmented button: looks like a tiny pill in the file header -->
-        <Style x:Key="SourceSegment" TargetType="RadioButton">
-            <Setter Property="Margin" Value="0"/>
-            <Setter Property="Cursor" Value="Hand"/>
-            <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="RadioButton">
-                        <Border x:Name="Pill"
-                                Background="Transparent"
-                                BorderBrush="#B9BEC6" BorderThickness="1"
-                                Padding="6,1">
-                            <TextBlock Text="{TemplateBinding Content}"
-                                       FontSize="10" Foreground="#5b6471"
-                                       VerticalAlignment="Center"/>
-                        </Border>
-                        <ControlTemplate.Triggers>
-                            <Trigger Property="IsChecked" Value="True">
-                                <Setter TargetName="Pill" Property="Background" Value="#1f6feb"/>
-                                <Setter TargetName="Pill" Property="BorderBrush" Value="#1f6feb"/>
-                                <Setter Property="Foreground" Value="White"/>
-                            </Trigger>
-                            <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="Pill" Property="Background" Value="#E8F0FE"/>
-                            </Trigger>
-                        </ControlTemplate.Triggers>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
         </Style>
 
         <!-- File section template: header + collapsible body of rules -->
@@ -133,18 +151,20 @@
                                     MouseLeftButtonDown="OnHeaderControlsMouseDown"
                                     Margin="8,0,0,0">
                                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                                    <RadioButton Style="{StaticResource SourceSegment}"
-                                                 GroupName="{Binding GroupId}"
-                                                 Content="{loc:Loc ConfigEditor_Project}"
-                                                 IsChecked="{Binding SaveDestination, Converter={StaticResource RuleSourceConverter}, ConverterParameter=TiaProject}"/>
-                                    <RadioButton Style="{StaticResource SourceSegment}"
-                                                 GroupName="{Binding GroupId}"
-                                                 Content="{loc:Loc ConfigEditor_Local}"
-                                                 IsChecked="{Binding SaveDestination, Converter={StaticResource RuleSourceConverter}, ConverterParameter=Local}"/>
-                                    <RadioButton Style="{StaticResource SourceSegment}"
-                                                 GroupName="{Binding GroupId}"
-                                                 Content="{loc:Loc ConfigEditor_Shared}"
-                                                 IsChecked="{Binding SaveDestination, Converter={StaticResource RuleSourceConverter}, ConverterParameter=Shared}"/>
+                                    <!-- Source picker: selected item doubles as the
+                                         current-location indicator, freeing horizontal
+                                         space the 3-pill segmented control was eating. -->
+                                    <ComboBox ItemsSource="{x:Static local:RuleFileViewModel.UserSelectableSources}"
+                                              SelectedItem="{Binding SaveDestination, Mode=TwoWay}"
+                                              MinWidth="78" Height="20" Padding="4,0"
+                                              FontSize="10" VerticalAlignment="Center">
+                                        <ComboBox.ItemTemplate>
+                                            <DataTemplate>
+                                                <TextBlock Text="{Binding Converter={StaticResource RuleSourceLabel}}"
+                                                           FontSize="10"/>
+                                            </DataTemplate>
+                                        </ComboBox.ItemTemplate>
+                                    </ComboBox>
                                     <Button Content="&#x22EF;" FontSize="14" FontWeight="Bold"
                                             Width="22" Height="20" Margin="6,0,0,0"
                                             Background="Transparent" BorderThickness="0"
@@ -275,24 +295,25 @@
                         <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
                     <StackPanel Orientation="Horizontal">
-                        <Button Content="{loc:Loc ConfigEditor_NewRule_Short}" Command="{Binding NewRuleCommand}"
-                                Height="24" Padding="8,0"
+                        <Button Style="{StaticResource IconButton}" Tag="{StaticResource IconPlus}"
+                                Command="{Binding NewRuleCommand}"
                                 ToolTip="{loc:Loc ConfigEditor_NewRule_Tooltip}"/>
-                        <Button Content="{loc:Loc ConfigEditor_NewFile_Short}" Command="{Binding NewFileCommand}"
-                                Height="24" Margin="4,0,0,0" Padding="8,0"
+                        <Button Style="{StaticResource IconButton}" Tag="{StaticResource IconFilePlus}"
+                                Command="{Binding NewFileCommand}" Margin="2,0,0,0"
                                 ToolTip="{loc:Loc ConfigEditor_NewFile_Tooltip}"/>
-                        <Button Content="{loc:Loc ConfigEditor_Duplicate}" Command="{Binding DuplicateSelectedCommand}"
-                                Height="24" Margin="4,0,0,0" Padding="8,0"
+                        <Button Style="{StaticResource IconButton}" Tag="{StaticResource IconCopy}"
+                                Command="{Binding DuplicateSelectedCommand}" Margin="2,0,0,0"
                                 ToolTip="{loc:Loc ConfigEditor_Duplicate_Tooltip}"/>
-                        <Button Content="{loc:Loc ConfigEditor_Delete}" Command="{Binding DeleteSelectedCommand}"
-                                Height="24" Margin="4,0,0,0" Padding="8,0"/>
+                        <Button Style="{StaticResource IconButton}" Tag="{StaticResource IconTrash}"
+                                Command="{Binding DeleteSelectedCommand}" Margin="2,0,0,0"
+                                ToolTip="{loc:Loc ConfigEditor_Delete}"/>
                     </StackPanel>
                     <StackPanel Grid.Column="1" Orientation="Horizontal">
-                        <Button Content="{loc:Loc ConfigEditor_Import}" Command="{Binding ImportFilesCommand}"
-                                Height="24" Padding="8,0" Margin="8,0,0,0"
+                        <Button Style="{StaticResource IconButton}" Tag="{StaticResource IconDownload}"
+                                Command="{Binding ImportFilesCommand}" Margin="8,0,0,0"
                                 ToolTip="{loc:Loc ConfigEditor_Import_Tooltip}"/>
-                        <Button Content="{loc:Loc ConfigEditor_Export}" Command="{Binding ExportSelectedCommand}"
-                                Height="24" Padding="8,0" Margin="4,0,0,0"
+                        <Button Style="{StaticResource IconButton}" Tag="{StaticResource IconUpload}"
+                                Command="{Binding ExportSelectedCommand}" Margin="2,0,0,0"
                                 ToolTip="{loc:Loc ConfigEditor_Export_Tooltip}"/>
                     </StackPanel>
                 </Grid>
