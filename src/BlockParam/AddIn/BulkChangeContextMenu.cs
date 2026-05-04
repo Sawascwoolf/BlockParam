@@ -280,6 +280,10 @@ public class BulkChangeContextMenu : ContextMenuAddIn
             // (#59 follow-up). Single-PLC projects — the ≈85% common case —
             // get the cleaner "DB only" header; multi-PLC projects always
             // get the prefix so users can tell which PLC they're operating on.
+            // Single source of truth for the displayed PLC name: empty when
+            // we want it suppressed, real name otherwise. Both enumeration
+            // and the VM's currentPlcName use this value, so the stash key
+            // (which includes PlcName) stays consistent across stash + restore.
             var plcCount = CountPlcSoftwaresInProject(project);
             var displayPlcName = plcSoftware != null && plcCount > 1
                 ? SafeGetPlcName(plcSoftware)

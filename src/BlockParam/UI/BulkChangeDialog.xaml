@@ -155,7 +155,7 @@
                             Background="White" BorderBrush="#CCC" BorderThickness="1"
                             Padding="8,3,8,3"
                             HorizontalAlignment="Left" MinWidth="240"
-                            HorizontalContentAlignment="Left" Cursor="Hand">
+                            HorizontalContentAlignment="Stretch" Cursor="Hand">
                         <DockPanel LastChildFill="True">
                             <Path DockPanel.Dock="Right" Data="M 0,0 L 8,0 L 4,6 Z"
                                   Fill="#666" Width="8" Height="6"
@@ -1304,55 +1304,82 @@
                                 <ItemsControl.ItemTemplate>
                                     <DataTemplate>
                                         <StackPanel>
-                                            <!-- Section header (clickable: switches back to this DB). -->
+                                            <!-- Section header: chevron toggles collapse, the rest of
+                                                 the bar switches back to the stashed DB. -->
                                             <Border Background="#EEF0F3" BorderBrush="#B9BEC6"
                                                     BorderThickness="0,1,0,1"
                                                     ToolTip="{loc:Loc Inspector_StashedDb_Tooltip}">
-                                                <Button Background="Transparent" BorderThickness="0"
-                                                        Cursor="Hand" Padding="0"
-                                                        HorizontalContentAlignment="Stretch"
-                                                        Command="{Binding DataContext.SwitchToStashedDbCommand,
-                                                                  RelativeSource={RelativeSource AncestorType=ItemsControl}}"
-                                                        CommandParameter="{Binding}">
-                                                    <DockPanel>
-                                                        <Viewbox DockPanel.Dock="Left" Width="13" Height="13"
-                                                                 Margin="6,0,6,0" VerticalAlignment="Center">
-                                                            <Path Data="{StaticResource IconClock}" Fill="#7c63b5"/>
-                                                        </Viewbox>
-                                                        <TextBlock DockPanel.Dock="Left"
-                                                                   Margin="0,6,0,6"
-                                                                   FontSize="10.5" FontWeight="Bold"
-                                                                   Foreground="#1e2227"
-                                                                   VerticalAlignment="Center">
-                                                            <Run Text="PENDING IN "/>
-                                                            <!-- "{PLC} / " prefix: only visible when the
-                                                                 stash carries a non-empty PlcName so
-                                                                 single-PLC stashes stay tidy. -->
-                                                            <Run Text="{Binding Summary.PlcName, Mode=OneWay}"
-                                                                 Foreground="#5b6471"/>
-                                                            <Run Text="{Binding PlcSeparator, Mode=OneWay}"
-                                                                 Foreground="#5b6471"/>
-                                                            <Run Text="{Binding DbName, Mode=OneWay}"/>
-                                                        </TextBlock>
-                                                        <Border DockPanel.Dock="Left" Margin="6,0,0,0" Padding="5,0"
-                                                                Background="#7c63b5" CornerRadius="8"
-                                                                VerticalAlignment="Center">
-                                                            <TextBlock Text="{Binding Count}"
-                                                                       FontSize="10" FontWeight="Bold"
-                                                                       Foreground="White"/>
-                                                        </Border>
-                                                        <TextBlock DockPanel.Dock="Right" Text="Switch back &#x2192;"
-                                                                   FontSize="10" FontWeight="SemiBold"
-                                                                   Foreground="#0b4fbf"
-                                                                   VerticalAlignment="Center"
-                                                                   Margin="0,0,8,0"/>
-                                                        <Border/>
-                                                    </DockPanel>
-                                                </Button>
+                                                <DockPanel>
+                                                    <ToggleButton DockPanel.Dock="Left"
+                                                                  IsChecked="{Binding IsExpanded, Mode=TwoWay}"
+                                                                  Background="Transparent" BorderThickness="0"
+                                                                  Width="22" Cursor="Hand" Focusable="False">
+                                                        <Path Width="8" Height="8" Stretch="Uniform"
+                                                              Fill="#666"
+                                                              Data="M 0,0 L 8,0 L 4,6 Z">
+                                                            <Path.Style>
+                                                                <Style TargetType="Path">
+                                                                    <Setter Property="RenderTransformOrigin" Value="0.5,0.5"/>
+                                                                    <Style.Triggers>
+                                                                        <DataTrigger Binding="{Binding IsExpanded}" Value="False">
+                                                                            <Setter Property="RenderTransform">
+                                                                                <Setter.Value>
+                                                                                    <RotateTransform Angle="-90"/>
+                                                                                </Setter.Value>
+                                                                            </Setter>
+                                                                        </DataTrigger>
+                                                                    </Style.Triggers>
+                                                                </Style>
+                                                            </Path.Style>
+                                                        </Path>
+                                                    </ToggleButton>
+                                                    <Button Background="Transparent" BorderThickness="0"
+                                                            Cursor="Hand" Padding="0"
+                                                            HorizontalContentAlignment="Stretch"
+                                                            Command="{Binding DataContext.SwitchToStashedDbCommand,
+                                                                      RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                                            CommandParameter="{Binding}">
+                                                        <DockPanel>
+                                                            <Viewbox DockPanel.Dock="Left" Width="13" Height="13"
+                                                                     Margin="0,0,6,0" VerticalAlignment="Center">
+                                                                <Path Data="{StaticResource IconClock}" Fill="#7c63b5"/>
+                                                            </Viewbox>
+                                                            <TextBlock DockPanel.Dock="Left"
+                                                                       Margin="0,6,0,6"
+                                                                       FontSize="10.5" FontWeight="Bold"
+                                                                       Foreground="#1e2227"
+                                                                       VerticalAlignment="Center">
+                                                                <Run Text="PENDING IN "/>
+                                                                <!-- "{PLC} / " prefix: only visible when the
+                                                                     stash carries a non-empty PlcName so
+                                                                     single-PLC stashes stay tidy. -->
+                                                                <Run Text="{Binding Summary.PlcName, Mode=OneWay}"
+                                                                     Foreground="#5b6471"/>
+                                                                <Run Text="{Binding PlcSeparator, Mode=OneWay}"
+                                                                     Foreground="#5b6471"/>
+                                                                <Run Text="{Binding DbName, Mode=OneWay}"/>
+                                                            </TextBlock>
+                                                            <Border DockPanel.Dock="Left" Margin="6,0,0,0" Padding="5,0"
+                                                                    Background="#7c63b5" CornerRadius="8"
+                                                                    VerticalAlignment="Center">
+                                                                <TextBlock Text="{Binding Count}"
+                                                                           FontSize="10" FontWeight="Bold"
+                                                                           Foreground="White"/>
+                                                            </Border>
+                                                            <TextBlock DockPanel.Dock="Right" Text="Switch back &#x2192;"
+                                                                       FontSize="10" FontWeight="SemiBold"
+                                                                       Foreground="#0b4fbf"
+                                                                       VerticalAlignment="Center"
+                                                                       Margin="0,0,8,0"/>
+                                                            <Border/>
+                                                        </DockPanel>
+                                                    </Button>
+                                                </DockPanel>
                                             </Border>
                                             <!-- Per-edit rows: same shape as the active-DB Pending list,
                                                  but inert (no jump, no undo — these belong to a different DB). -->
-                                            <ItemsControl ItemsSource="{Binding Edits}" Background="White">
+                                            <ItemsControl ItemsSource="{Binding Edits}" Background="White"
+                                                          Visibility="{Binding IsExpanded, Converter={StaticResource BoolToVis}}">
                                                 <ItemsControl.ItemTemplate>
                                                     <DataTemplate>
                                                         <Border BorderBrush="#E6E8EC" BorderThickness="0,0,0,1"

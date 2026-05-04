@@ -9,8 +9,10 @@ namespace BlockParam.UI;
 /// only — closed dialog → stash gone. Re-applied to the live tree when the
 /// user switches back to the same DB.
 /// </summary>
-public class StashedDbState
+public class StashedDbState : ViewModelBase
 {
+    private bool _isExpanded = true;
+
     public StashedDbState(
         DataBlockSummary summary,
         IReadOnlyList<StashedEditEntry> edits)
@@ -28,6 +30,17 @@ public class StashedDbState
     public string DbName => Summary.Name;
     public string FolderPath => Summary.FolderPath;
     public int Count => Edits.Count;
+
+    /// <summary>
+    /// Whether the per-edit rows are visible. Per-section so each stash
+    /// remembers its own collapsed state across re-renders. Defaults to
+    /// expanded so the user sees their stashed work right after a switch.
+    /// </summary>
+    public bool IsExpanded
+    {
+        get => _isExpanded;
+        set => SetProperty(ref _isExpanded, value);
+    }
 
     /// <summary>
     /// " / " when this stash carries a PLC name, otherwise empty. Lets the
