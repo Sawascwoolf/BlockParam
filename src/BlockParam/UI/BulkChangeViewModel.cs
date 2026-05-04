@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Threading;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Threading;
@@ -13,6 +14,7 @@ using BlockParam.Localization;
 using BlockParam.Models;
 using BlockParam.Services;
 using BlockParam.SimaticML;
+using BlockParam.Updates;
 
 namespace BlockParam.UI;
 
@@ -90,6 +92,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     private bool _suppressSuggestions;
     private bool _lastApplySucceeded;
     private bool _hasPendingChanges;
+    private bool _limitWarningShown;
     private bool _isInspectorCollapsed;
     private bool _isBulkEditExpanded = true;
     private bool _isBulkPreviewExpanded = true;
@@ -100,6 +103,8 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     private readonly CommentLanguagePolicy _commentLanguagePolicy;
     private readonly Dispatcher _dispatcher;
     private readonly ILicenseService? _licenseService;
+    private readonly IUpdateCheckService? _updateCheckService;
+    private UpdateInfo? _availableUpdate;
 
     public BulkChangeViewModel(
         DataBlockInfo dataBlockInfo,
@@ -125,7 +130,8 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         string? referenceLanguage = null,
         Func<IReadOnlyList<DataBlockSummary>>? enumerateDataBlocks = null,
         Func<DataBlockSummary, string>? switchToDataBlock = null,
-        string? currentPlcName = null)
+        string? currentPlcName = null,
+        IUpdateCheckService? updateCheckService = null)
     {
         _dispatcher = Dispatcher.CurrentDispatcher;
         _projectLanguages = projectLanguages is { Count: > 0 } ? projectLanguages : new[] { "en-GB" };
@@ -151,6 +157,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         _enumerateDataBlocks = enumerateDataBlocks;
         _switchToDataBlock = switchToDataBlock;
         _currentPlcName = currentPlcName ?? "";
+        _updateCheckService = updateCheckService;
         _autocompleteProvider = tagTableCache != null
             ? new AutocompleteProvider(configLoader, tagTableCache)
             : null;
@@ -197,6 +204,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         EditConfigCommand = new RelayCommand(ExecuteEditConfig);
         RefreshConstantsCommand = new RelayCommand(ExecuteRefreshConstants);
         EnterLicenseKeyCommand = new RelayCommand(ExecuteEnterLicenseKey);
+        ShowUpdateDetailsCommand = new RelayCommand(ExecuteShowUpdateDetails, () => HasUpdateAvailable);
         UpgradeToProCommand = new RelayCommand(ExecuteUpgradeToPro);
         ExpandAllCommand = new RelayCommand(ExecuteExpandAll);
         CollapseAllCommand = new RelayCommand(ExecuteCollapseAll);
@@ -234,6 +242,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         ApplyAllFilters();
         RefreshFlatList();
         UpdateUsageStatus();
+        InitializeUpdateCheck();
 
         // #26: Surface pre-existing rule violations on dialog load. Runs after
         // RefreshRuleHints so RuleHint is available for the issue tooltip.
@@ -400,6 +409,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
                 OnPropertyChanged(nameof(HasScope));
                 OnPropertyChanged(nameof(CanEdit));
                 OnPropertyChanged(nameof(SetButtonText));
+                OnPropertyChanged(nameof(SetButtonTooltip));
             }
         }
     }
@@ -424,6 +434,8 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
                         ValidateValue();
                         UpdateFilteredSuggestions();
                         UpdateHighlighting();
+                        OnPropertyChanged(nameof(SetButtonText));
+                        OnPropertyChanged(nameof(SetButtonTooltip));
                     }));
                 }, null, 150, Timeout.Infinite);
             }
@@ -566,10 +578,44 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         get
         {
             if (IsManualMode)
-                return Res.Format("Dialog_SetManualCount", _manualSelectedPaths.Count);
+                return Res.Format("Dialog_SetManualCount", CountWouldChangeMembers());
             return _selectedScope != null
-                ? $"Set {_selectedScope.MatchCount} in '{_selectedScope.AncestorName}'"
+                ? $"Set {CountWouldChangeMembers()} in '{_selectedScope.AncestorName}'"
                 : "Set";
+        }
+    }
+
+    /// <summary>
+    /// Two-line tooltip for the Set button: action description + count breakdown.
+    /// Surfaces the total scope size so users still see "40 valves selected" even
+    /// when the button label drops to "Set 35" because 5 already match (#65).
+    /// </summary>
+    public string SetButtonTooltip
+    {
+        get
+        {
+            var action = Res.Get("Dialog_SetTooltip");
+            if (!CanEdit) return action;
+
+            int total = TotalCandidateMembers();
+            int willChange = CountWouldChangeMembers();
+            int alreadyMatch = total - willChange;
+
+            string breakdown;
+            if (string.IsNullOrEmpty(_newValue))
+            {
+                breakdown = IsManualMode
+                    ? Res.Format("Dialog_SetTooltip_ManualIdle", total)
+                    : Res.Format("Dialog_SetTooltip_ScopeIdle", total, _selectedScope?.AncestorName ?? "");
+            }
+            else
+            {
+                breakdown = IsManualMode
+                    ? Res.Format("Dialog_SetTooltip_ManualBreakdown", willChange, total, alreadyMatch)
+                    : Res.Format("Dialog_SetTooltip_ScopeBreakdown",
+                        willChange, total, _selectedScope?.AncestorName ?? "", alreadyMatch);
+            }
+            return action + "\n" + breakdown;
         }
     }
 
@@ -631,6 +677,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     public ICommand EditConfigCommand { get; }
     public ICommand EnterLicenseKeyCommand { get; }
     public ICommand UpgradeToProCommand { get; }
+    public ICommand ShowUpdateDetailsCommand { get; }
     public ICommand ExpandAllCommand { get; }
     public ICommand CollapseAllCommand { get; }
     public ICommand ClearManualSelectionCommand { get; }
@@ -1160,8 +1207,38 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         _licenseService?.IsProActive == true
             ? Res.Get("License_ManageKey")
             : Res.Get("License_EnterKey");
-    public bool IsLimitReached => _usageTracker.GetStatus().IsLimitReached
-                               || _usageTracker.GetInlineStatus().IsLimitReached;
+    public bool IsLimitReached => _usageTracker.GetStatus().IsLimitReached;
+
+    /// <summary>
+    /// Picked so a few back-to-back bulk applies on a normal day stay quiet, but
+    /// the user gets a nudge once they're close enough that the next batch could
+    /// push them over. Tied to the 200/day free-tier cap; revisit if that changes.
+    /// </summary>
+    private const int TightHeadroomThreshold = 50;
+
+    /// <summary>
+    /// Tooltip for the Apply button(s). Pro tier and the unsurprising free-tier
+    /// case (single change, plenty of headroom) get the plain advisory; otherwise
+    /// the cost line is appended so users see "this Apply uses N of M" before
+    /// they click.
+    /// </summary>
+    public string ApplyTooltip
+    {
+        get
+        {
+            var baseText = Res.Get("Dialog_ApplyTooltip");
+            if (_licenseService?.IsProActive == true) return baseText;
+
+            var cost = PendingInlineEditCount;
+            if (cost == 0) return baseText;
+
+            var remaining = _usageTracker.GetStatus().RemainingToday;
+            if (cost <= 1 && remaining >= TightHeadroomThreshold) return baseText;
+
+            return baseText + Environment.NewLine + Environment.NewLine +
+                Res.Format("Dialog_ApplyTooltip_CostLine", cost, remaining);
+        }
+    }
 
     /// <summary>Number of individual inline edits waiting to be applied.</summary>
     public int PendingInlineEditCount => CountPendingInlineEdits(RootMembers);
@@ -1642,6 +1719,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(PendingInlineEditCount));
         OnPropertyChanged(nameof(PendingStatusText));
         OnPropertyChanged(nameof(HasAnyChanges));
+        OnPropertyChanged(nameof(ApplyTooltip));
         ComputeBulkPreview();
         RebuildPendingEdits();
     }
@@ -2247,46 +2325,73 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     /// <summary>Can stage bulk scope or manual-selection values as pending.</summary>
     private bool CanExecuteSetPending()
     {
-        if (string.IsNullOrWhiteSpace(_newValue)
-            || HasValidationError
-            || _usageTracker.GetStatus().IsLimitReached)
+        if (string.IsNullOrWhiteSpace(_newValue) || HasValidationError)
             return false;
 
         if (IsManualMode)
         {
-            // Blocked when selection mixes datatypes.
             if (!IsSelectionTypeHomogeneous) return false;
-
-            // At least one selected member must actually change.
-            return _manualSelectedPaths.Any(p =>
-            {
-                var node = FindNodeByPath(p);
-                if (node == null || !node.IsLeaf) return false;
-                var effective = node.IsPendingInlineEdit
-                    ? (node.EditableStartValue ?? node.StartValue ?? "")
-                    : (node.StartValue ?? "");
-                return !string.Equals(effective, _newValue, StringComparison.OrdinalIgnoreCase);
-            });
+            return CountWouldChangeMembers() > 0;
         }
 
         if (!HasSelection || !HasScope) return false;
 
-        // Disabled when all affected members already have the target value
-        if (_selectedScope != null)
+        return CountWouldChangeMembers() > 0;
+    }
+
+    /// <summary>
+    /// Count of members that will actually be staged when Set Pending runs —
+    /// i.e. those whose effective start value differs from <c>NewValue</c>.
+    /// Shared by <see cref="CanExecuteSetPending"/> and <see cref="SetButtonText"/>
+    /// so the button's enable state and advertised count cannot drift apart (#65).
+    /// </summary>
+    private int CountWouldChangeMembers()
+    {
+        if (IsManualMode)
         {
-            var wouldChange = _selectedScope.MatchingMembers.Any(m =>
+            return _manualSelectedPaths.Count(p =>
             {
-                var node = FindNodeByPath(m.Path);
-                if (node == null) return true;
-                var effective = node.IsPendingInlineEdit
-                    ? (node.EditableStartValue ?? node.StartValue ?? "")
-                    : (node.StartValue ?? "");
-                return !string.Equals(effective, _newValue, StringComparison.OrdinalIgnoreCase);
+                var node = FindNodeByPath(p);
+                if (node == null || !node.IsLeaf) return false;
+                return WouldChange(node);
             });
-            if (!wouldChange) return false;
         }
 
-        return true;
+        if (_selectedScope == null) return 0;
+
+        return _selectedScope.MatchingMembers.Count(m =>
+        {
+            var node = FindNodeByPath(m.Path);
+            // Unresolved paths can't be staged by SetPendingOnNodes, so don't
+            // count them — that's exactly the inflation the old label had.
+            return node != null && WouldChange(node);
+        });
+    }
+
+    private bool WouldChange(MemberNodeViewModel node)
+    {
+        var effective = node.IsPendingInlineEdit
+            ? (node.EditableStartValue ?? node.StartValue ?? "")
+            : (node.StartValue ?? "");
+        return !string.Equals(effective, _newValue ?? "", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Total members in the active scope or manual selection — the denominator
+    /// for the tooltip's "X of Y will be staged" breakdown. Counts only paths
+    /// that resolve to a leaf so it matches what SetPendingOnNodes can act on.
+    /// </summary>
+    private int TotalCandidateMembers()
+    {
+        if (IsManualMode)
+        {
+            return _manualSelectedPaths.Count(p =>
+            {
+                var node = FindNodeByPath(p);
+                return node != null && node.IsLeaf;
+            });
+        }
+        return _selectedScope?.MatchCount ?? 0;
     }
 
     /// <summary>
@@ -2303,12 +2408,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
 
         if (_selectedScope == null) return;
 
-        if (!_usageTracker.RecordUsage())
-        {
-            StatusText = Res.Get("Status_LimitReached");
-            UpdateUsageStatus();
-            return;
-        }
+        MaybeWarnLimitReachedOnce();
 
         var affectedPaths = new HashSet<string>(
             _selectedScope.MatchingMembers.Select(m => m.Path));
@@ -2338,12 +2438,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     /// </summary>
     private void ExecuteSetPendingManual()
     {
-        if (!_usageTracker.RecordUsage())
-        {
-            StatusText = Res.Get("Status_LimitReached");
-            UpdateUsageStatus();
-            return;
-        }
+        MaybeWarnLimitReachedOnce();
 
         int count = 0;
         foreach (var path in _manualSelectedPaths)
@@ -2409,8 +2504,15 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     /// <summary>Can apply when there are any pending changes (inline or bulk-staged).</summary>
     private bool CanExecuteApply()
     {
-        return (PendingInlineEditCount > 0 || HasPendingChanges)
-            && !HasInlineErrors;
+        if (HasInlineErrors) return false;
+        if (PendingInlineEditCount == 0 && !HasPendingChanges) return false;
+
+        // Free-tier cap: block Apply when the pending batch would push past
+        // the daily quota. The user has to drop some edits or upgrade.
+        var status = _usageTracker.GetStatus();
+        if (PendingInlineEditCount > status.RemainingToday) return false;
+
+        return true;
     }
 
     public bool HasInlineErrors => HasInlineErrorsRecursive(RootMembers);
@@ -2454,6 +2556,20 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
 
         if (pendingEdits.Count == 0 && !_hasPendingChanges)
             return;
+
+        // Pre-check the daily cap: each pending edit is charged as one unit
+        // against the free-tier quota on Apply. Block the entire batch if it
+        // would push past the limit — partial Apply leaves the user in a
+        // confusing half-applied state. Pro tier always passes (DailyLimit
+        // is int.MaxValue via LicensedUsageTracker).
+        var status = _usageTracker.GetStatus();
+        if (pendingEdits.Count > status.RemainingToday)
+        {
+            StatusText = Res.Format("Status_WouldExceedLimit",
+                pendingEdits.Count, status.RemainingToday);
+            UpdateUsageStatus();
+            return;
+        }
 
         Log.Information("ExecuteApply: {Count} pending changes", pendingEdits.Count);
 
@@ -2513,6 +2629,25 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
                 return;
             }
 
+            // Charge the daily quota — one unit per value actually written.
+            // We pre-checked above, but the post-write call can still reject
+            // if a parallel writer (other Add-In instance, same machine)
+            // consumed quota between pre-check and write. The TIA mutation is
+            // already committed at this point, so we can't roll back — but we
+            // CAN consume whatever quota remains so the next Apply is blocked
+            // by CanExecuteApply, and warn the user that they're over-cap.
+            if (totalChanged > 0 && !_usageTracker.RecordUsage(totalChanged))
+            {
+                var remaining = _usageTracker.GetStatus().RemainingToday;
+                if (remaining > 0)
+                    _usageTracker.RecordUsage(remaining);
+                StatusText = Res.Format("Status_AppliedOverCap",
+                    totalChanged, _dataBlockInfo.Name);
+                Log.Warning(
+                    "ExecuteApply: quota race — wrote {N} past cap; counter pinned to limit",
+                    totalChanged);
+            }
+
             // Re-export from TIA to get the canonical XML after import
             RefreshTree(_currentXml);
 
@@ -2545,13 +2680,6 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         var config = _configLoader.GetConfig();
         if (config == null || _selectedScope == null) return;
         if (!config.Rules.Any(r => !string.IsNullOrEmpty(r.CommentTemplate))) return;
-
-        if (!_usageTracker.RecordUsage())
-        {
-            StatusText = Res.Get("Status_LimitReached");
-            UpdateUsageStatus();
-            return;
-        }
 
         try
         {
@@ -2588,7 +2716,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
 
     private bool CanExecuteUpdateComments()
     {
-        return HasScope && HasCommentConfig && !_usageTracker.GetStatus().IsLimitReached;
+        return HasScope && HasCommentConfig;
     }
 
     /// <summary>
@@ -2685,23 +2813,12 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             return;
         }
 
-        // Only count against inline limit if this is a new edit, not a correction of an existing pending value
+        // Single counter (issue #62): inline edits are free to stage. Quota is
+        // charged per-change on successful Apply, not per keystroke. Warn once
+        // per dialog open if the user starts editing while already at 0 left,
+        // so they aren't blindsided when Apply is disabled.
         if (!memberVm.IsPendingInlineEdit)
-        {
-            if (_usageTracker.GetInlineStatus().IsLimitReached)
-            {
-                StatusText = Res.Get("Status_InlineLimitReached");
-                UpdateUsageStatus();
-                return;
-            }
-
-            if (!_usageTracker.RecordInlineEdit())
-            {
-                StatusText = Res.Get("Status_InlineLimitReached");
-                UpdateUsageStatus();
-                return;
-            }
-        }
+            MaybeWarnLimitReachedOnce();
 
         // Shared validator → same rule language as the bulk inspector (#7).
         var error = BuildValidator().Validate(memberVm.Model, newValue);
@@ -2920,10 +3037,8 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         else
         {
             var status = _usageTracker.GetStatus();
-            var inlineStatus = _usageTracker.GetInlineStatus();
-            UsageStatusText = Res.Format("Status_RemainingBoth",
-                status.RemainingToday, status.DailyLimit,
-                inlineStatus.RemainingToday, inlineStatus.DailyLimit);
+            UsageStatusText = Res.Format("Status_Remaining",
+                status.RemainingToday, status.DailyLimit);
             LicenseTierText = Res.Get("License_Tier_Free");
         }
 
@@ -2932,16 +3047,116 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(ShowLicenseKeyButton));
         OnPropertyChanged(nameof(LicenseKeyButtonText));
         OnPropertyChanged(nameof(IsLimitReached));
+        OnPropertyChanged(nameof(ApplyTooltip));
+    }
+
+    /// <summary>
+    /// Shows the daily-cap-reached modal once per dialog open, when the user
+    /// first attempts to stage or edit a change while at 0 remaining quota.
+    /// Staging itself isn't blocked — Apply is the choke point — but a single
+    /// proactive heads-up beats discovering it via a disabled Apply button.
+    /// </summary>
+    private void MaybeWarnLimitReachedOnce()
+    {
+        if (_limitWarningShown) return;
+        if (!_usageTracker.GetStatus().IsLimitReached) return;
+
+        _limitWarningShown = true;
+        _messageBox.ShowInfo(
+            Res.Get("LimitReached_Modal_Message"),
+            Res.Get("LimitReached_Modal_Title"));
     }
 
     private void ExecuteEnterLicenseKey()
     {
         if (_licenseService == null) return;
 
-        var dialog = new LicenseKeyDialog(_licenseService);
+        var dialog = new LicenseKeyDialog(_licenseService, _updateCheckService, _configLoader);
         dialog.Owner = Application.Current?.Windows.OfType<Window>().FirstOrDefault(w => w.IsActive);
         dialog.ShowDialog();
         UpdateUsageStatus();
+        // The user may have toggled "Check for updates" — re-evaluate the badge.
+        InitializeUpdateCheck(forceRefresh: false);
+    }
+
+    /// <summary>
+    /// Update available (#61). Null when no newer version is on offer
+    /// (offline / opted out / already on latest / skipped).
+    /// </summary>
+    public UpdateInfo? AvailableUpdate
+    {
+        get => _availableUpdate;
+        private set
+        {
+            if (ReferenceEquals(_availableUpdate, value)) return;
+            _availableUpdate = value;
+            OnPropertyChanged(nameof(AvailableUpdate));
+            OnPropertyChanged(nameof(HasUpdateAvailable));
+            OnPropertyChanged(nameof(UpdateBadgeText));
+            OnPropertyChanged(nameof(UpdateBadgeTooltip));
+            (ShowUpdateDetailsCommand as RelayCommand)?.RaiseCanExecuteChanged();
+        }
+    }
+
+    public bool HasUpdateAvailable => _availableUpdate != null;
+
+    public string UpdateBadgeText
+    {
+        get
+        {
+            if (_availableUpdate == null) return "";
+            var current = typeof(BulkChangeViewModel).Assembly.GetName().Version;
+            var currentText = current != null
+                ? $"v{current.Major}.{Math.Max(0, current.Minor)}.{Math.Max(0, current.Build)}"
+                : "v?";
+            var latest = _availableUpdate.TagName;
+            if (latest.Length > 0 && latest[0] != 'v' && latest[0] != 'V') latest = "v" + latest;
+            return Res.Format("Update_BadgeText", currentText, latest);
+        }
+    }
+
+    public string UpdateBadgeTooltip => _availableUpdate == null
+        ? ""
+        : Res.Format("Update_BadgeTooltip",
+            string.IsNullOrEmpty(_availableUpdate.Name)
+                ? _availableUpdate.TagName
+                : _availableUpdate.Name);
+
+    private void InitializeUpdateCheck(bool forceRefresh = true)
+    {
+        if (_updateCheckService == null) return;
+
+        // Synchronous cached read so the badge shows up the moment the
+        // dialog opens — no flash where it appears half a second later.
+        try { AvailableUpdate = _updateCheckService.GetCached(); }
+        catch (Exception ex) { Log.Warning(ex, "UpdateCheck: GetCached threw"); }
+
+        if (!forceRefresh) return;
+
+        // Fire-and-forget refresh — never blocks the UI thread, never
+        // surfaces an error. Cache TTL gates the actual network hit.
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                var info = await _updateCheckService.CheckAsync().ConfigureAwait(false);
+                _dispatcher.BeginInvoke(new Action(() => AvailableUpdate = info));
+            }
+            catch (Exception ex)
+            {
+                Log.Warning(ex, "UpdateCheck: background CheckAsync threw");
+            }
+        });
+    }
+
+    private void ExecuteShowUpdateDetails()
+    {
+        var info = _availableUpdate;
+        if (info == null || _updateCheckService == null) return;
+
+        var dialog = new UpdateAvailableDialog(info);
+        dialog.Owner = Application.Current?.Windows.OfType<Window>().FirstOrDefault(w => w.IsActive);
+        dialog.ShowDialog();
     }
 
     /// <summary>
@@ -2985,6 +3200,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(HasScope));
         OnPropertyChanged(nameof(CanEdit));
         OnPropertyChanged(nameof(SetButtonText));
+        OnPropertyChanged(nameof(SetButtonTooltip));
         OnPropertyChanged(nameof(SelectedMemberDisplay));
 
         // Entering manual mode: the scope-based highlighting from the single
@@ -3078,6 +3294,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(HasScope));
         OnPropertyChanged(nameof(CanEdit));
         OnPropertyChanged(nameof(SetButtonText));
+        OnPropertyChanged(nameof(SetButtonTooltip));
         OnPropertyChanged(nameof(SelectedMemberDisplay));
 
         ValidateValue();

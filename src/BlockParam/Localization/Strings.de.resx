@@ -95,9 +95,11 @@ Nein = Aktuelles (möglicherweise unvollständiges) Ergebnis behalten</value></d
   <data name="Status_ErrorPartialKept" xml:space="preserve"><value>Fehler aufgetreten, teilweise Änderungen beibehalten: {0}</value></data>
   <data name="Status_ErrorNoBackup" xml:space="preserve"><value>Fehler: {0} (kein Backup für Rückgängig verfügbar)</value></data>
   <data name="Status_LimitReached" xml:space="preserve"><value>Tageslimit erreicht. Upgrade für unbegrenzte Nutzung.</value></data>
-  <data name="Status_Remaining" xml:space="preserve"><value>Verbleibend: {0}/{1} kostenlose Operationen</value></data>
-  <data name="Status_RemainingBoth" xml:space="preserve"><value>Massenbearbeitung: {0}/{1}  |  Inline-Änderungen: {2}/{3}</value></data>
-  <data name="Status_InlineLimitReached" xml:space="preserve"><value>Tägliches Inline-Limit erreicht. Upgrade für unbegrenzte Nutzung.</value></data>
+  <data name="Status_Remaining" xml:space="preserve"><value>Verbleibend: {0}/{1} kostenlose Änderungen heute</value></data>
+  <data name="Status_WouldExceedLimit" xml:space="preserve"><value>Dieses Übernehmen würde {0} Änderungen schreiben, aber nur {1} sind heute übrig. Auswahl reduzieren oder auf Pro upgraden für unbegrenzte Nutzung.</value></data>
+  <data name="Status_AppliedOverCap" xml:space="preserve"><value>{0} Werte in '{1}' geschrieben — Tageslimit überschritten (parallele Nutzung). Upgrade für unbegrenzte Nutzung.</value></data>
+  <data name="LimitReached_Modal_Title" xml:space="preserve"><value>Kostenloses Tageslimit erreicht</value></data>
+  <data name="LimitReached_Modal_Message" xml:space="preserve"><value>Sie haben alle heutigen kostenlosen Änderungen aufgebraucht. Sie können weiter Änderungen vorbereiten, aber Übernehmen ist bis morgen deaktiviert — oder upgraden Sie auf Pro für unbegrenzte Nutzung.</value></data>
   <data name="Status_Ready" xml:space="preserve"><value>Bereit</value></data>
   <!-- Lizenzierung -->
   <data name="Status_Pro" xml:space="preserve"><value>Pro-Lizenz — Unbegrenzte Operationen</value></data>
@@ -142,6 +144,10 @@ Dies kann nicht rückgängig gemacht werden.</value></data>
   <data name="Dialog_Constants" xml:space="preserve"><value>Konstanten</value></data>
   <data name="Dialog_RefreshConstants" xml:space="preserve"><value>Konstanten aktualisieren</value></data>
   <data name="Dialog_SetTooltip" xml:space="preserve"><value>Bulk-Werte als ausstehend markieren (gelb)</value></data>
+  <data name="Dialog_SetTooltip_ScopeIdle" xml:space="preserve"><value>{0} Element(e) in '{1}'</value></data>
+  <data name="Dialog_SetTooltip_ManualIdle" xml:space="preserve"><value>{0} Element(e) ausgewählt</value></data>
+  <data name="Dialog_SetTooltip_ScopeBreakdown" xml:space="preserve"><value>{0} von {1} in '{2}' werden gesetzt · {3} bereits auf diesem Wert</value></data>
+  <data name="Dialog_SetTooltip_ManualBreakdown" xml:space="preserve"><value>{0} von {1} ausgewählten werden gesetzt · {2} bereits auf diesem Wert</value></data>
   <data name="Dialog_LimitReachedOverlay_Title" xml:space="preserve"><value>Tägliches Gratis-Limit erreicht</value></data>
   <data name="Dialog_LimitReachedOverlay_Text" xml:space="preserve"><value>Upgrade auf Pro für unbegrenzte Massenänderungen, oder bis morgen warten.</value></data>
   <!-- Manuelle Mehrfachauswahl -->
@@ -152,6 +158,7 @@ Dies kann nicht rückgängig gemacht werden.</value></data>
   <data name="Dialog_SetManualCount" xml:space="preserve"><value>{0} ausgewählte setzen</value></data>
   <data name="Validation_MixedDatatypes" xml:space="preserve"><value>Auswahl enthält verschiedene Datentypen — auf einen Datentyp einschränken, um einen gemeinsamen Wert zu setzen.</value></data>
   <data name="Dialog_ApplyTooltip" xml:space="preserve"><value>Es werden nur Startwerte geändert. Aktualwerte müssen separat über 'Startwerte in Aktualwerte kopieren' in TIA Portal aktualisiert werden.</value></data>
+  <data name="Dialog_ApplyTooltip_CostLine" xml:space="preserve"><value>Dieses Übernehmen verbraucht {0} von {1} verbleibenden kostenlosen Änderungen heute.</value></data>
   <data name="Dialog_EditConfig" xml:space="preserve"><value>Konfiguration...</value></data>
   <data name="Column_Comment" xml:space="preserve"><value>Kommentar</value></data>
   <!-- ConfigEditorDialog -->
@@ -274,4 +281,19 @@ Datenbaustein jetzt kompilieren?</value></data>
   <data name="License_UnknownError" xml:space="preserve"><value>Unbekannter Fehler</value></data>
   <!-- Zoom-Anzeige (#28) -->
   <data name="Zoom_Tooltip" xml:space="preserve"><value>Zoom (Strg + Mausrad, Strg + / Strg −, Strg + 0 zum Zurücksetzen)</value></data>
+  <!-- In-App-Update-Hinweis (#61) -->
+  <data name="Update_BadgeText" xml:space="preserve"><value>{0} → {1} verfügbar</value></data>
+  <data name="Update_BadgeTooltip" xml:space="preserve"><value>Eine neuere Version ist verfügbar: {0}. Klicken Sie für Änderungen und Download.</value></data>
+  <data name="Update_DialogTitle" xml:space="preserve"><value>Update verfügbar</value></data>
+  <data name="Update_VersionDelta" xml:space="preserve"><value>Sie verwenden {0}. Die aktuelle Version ist {1}.</value></data>
+  <data name="Update_PublishedAt" xml:space="preserve"><value>Veröffentlicht am {0}</value></data>
+  <data name="Update_PublishedAtPrerelease" xml:space="preserve"><value>Veröffentlicht am {0} (Vorabversion)</value></data>
+  <data name="Update_NoChangelog" xml:space="preserve"><value>(Zu dieser Version sind keine Versionshinweise hinterlegt.)</value></data>
+  <data name="Update_OpenDownload" xml:space="preserve"><value>Download-Seite öffnen</value></data>
+  <data name="Update_RemindLater" xml:space="preserve"><value>Später erinnern</value></data>
+  <data name="Update_CheckEnabled" xml:space="preserve"><value>Nach Updates suchen</value></data>
+  <data name="Update_CheckEnabledTooltip" xml:space="preserve"><value>Wenn aktiviert, fragt BlockParam höchstens einmal pro Tag GitHub Releases nach neuen Versionen ab. Es werden keine Telemetriedaten gesendet.</value></data>
+  <data name="Update_IncludePrereleases" xml:space="preserve"><value>Vorabversionen einbeziehen</value></data>
+  <data name="Update_IncludePrereleasesTooltip" xml:space="preserve"><value>Release-Candidate- / Beta-Versionen (z. B. v0.4.0-rc1) als Updates anzeigen.</value></data>
+  <data name="Update_ManagedHint" xml:space="preserve"><value>Die Update-Prüfung wird zentral verwaltet und kann lokal nicht geändert werden.</value></data>
 </root>

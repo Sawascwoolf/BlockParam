@@ -10,21 +10,20 @@ namespace BlockParam.Licensing;
 /// </summary>
 public class LocalUsageTracker : IUsageTracker
 {
+    public const int DefaultDailyLimit = 200;
+
     private readonly string _storagePath;
     private readonly Func<DateTime> _dateProvider;
 
     public int DailyLimit { get; }
-    public int InlineEditDailyLimit { get; }
 
     public LocalUsageTracker(
         string storagePath,
-        int dailyLimit = 3,
-        int inlineEditDailyLimit = 50,
+        int dailyLimit = DefaultDailyLimit,
         Func<DateTime>? dateProvider = null)
     {
         _storagePath = storagePath;
         DailyLimit = dailyLimit;
-        InlineEditDailyLimit = inlineEditDailyLimit;
         _dateProvider = dateProvider ?? (() => DateTime.Now);
     }
 
@@ -34,30 +33,15 @@ public class LocalUsageTracker : IUsageTracker
         return new UsageStatus(data.Count, DailyLimit);
     }
 
-    public UsageStatus GetInlineStatus()
+    public bool RecordUsage(int count)
     {
-        var data = ReadData();
-        return new UsageStatus(data.InlineCount, InlineEditDailyLimit);
-    }
+        if (count <= 0) return true;
 
-    public bool RecordUsage()
-    {
         var data = ReadData();
-        if (data.Count >= DailyLimit)
+        if (data.Count + count > DailyLimit)
             return false;
 
-        data.Count++;
-        WriteData(data);
-        return true;
-    }
-
-    public bool RecordInlineEdit()
-    {
-        var data = ReadData();
-        if (data.InlineCount >= InlineEditDailyLimit)
-            return false;
-
-        data.InlineCount++;
+        data.Count += count;
         WriteData(data);
         return true;
     }
@@ -79,11 +63,10 @@ public class LocalUsageTracker : IUsageTracker
                 return new UsageData { Date = TodayString(), Count = 0 };
             }
 
-            // Basic tamper detection: counts should be within limits
-            if (data.Count < 0 || data.Count > DailyLimit + 10
-                || data.InlineCount < 0 || data.InlineCount > InlineEditDailyLimit + 10)
+            // Basic tamper detection: count must be within a sane range.
+            if (data.Count < 0 || data.Count > DailyLimit + 100)
             {
-                return new UsageData { Date = TodayString(), Count = 0, InlineCount = 0 };
+                return new UsageData { Date = TodayString(), Count = 0 };
             }
 
             return data;
@@ -137,10 +120,11 @@ public class LocalUsageTracker : IUsageTracker
 
     // Public so Newtonsoft.Json can reach the constructor under TIA's
     // partial-trust CAS sandbox — see UiZoomService.UiSettingsDto for context.
+    // Legacy "InlineCount" fields in saved JSON are silently ignored on read
+    // (Newtonsoft drops unknown properties) and dropped on next write.
     public class UsageData
     {
         public string Date { get; set; } = "";
         public int Count { get; set; }
-        public int InlineCount { get; set; }
     }
 }

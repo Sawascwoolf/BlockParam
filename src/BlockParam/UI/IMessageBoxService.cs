@@ -8,6 +8,7 @@ public interface IMessageBoxService
 {
     bool AskYesNo(string message, string title);
     void ShowError(string message, string title);
+    void ShowInfo(string message, string title);
 
     /// <summary>
     /// 3-way prompt used when an action would lose pending work and the user
@@ -46,6 +47,14 @@ public class WpfMessageBoxService : IMessageBoxService
             message, title,
             System.Windows.MessageBoxButton.OK,
             System.Windows.MessageBoxImage.Error);
+    }
+
+    public void ShowInfo(string message, string title)
+    {
+        System.Windows.MessageBox.Show(
+            message, title,
+            System.Windows.MessageBoxButton.OK,
+            System.Windows.MessageBoxImage.Information);
     }
 
     public YesNoCancelResult AskYesNoCancel(string message, string title)

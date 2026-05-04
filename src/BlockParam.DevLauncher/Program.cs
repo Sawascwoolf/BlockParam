@@ -15,6 +15,7 @@ using BlockParam.Models;
 using BlockParam.Services;
 using BlockParam.SimaticML;
 using BlockParam.UI;
+using BlockParam.Updates;
 
 namespace BlockParam.DevLauncher;
 
@@ -181,8 +182,7 @@ class Program
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
             "BlockParam");
         var freeTracker = new LocalUsageTracker(
-            Path.Combine(Path.GetTempPath(), "BlockParam_dev_usage.dat"),
-            dailyLimit: 3);
+            Path.Combine(Path.GetTempPath(), "BlockParam_dev_usage.dat"));
 
         var serverUrl = configLoader.ReadLicenseServerUrl() ?? OnlineLicenseService.DefaultServerUrl;
         var licenseService = new OnlineLicenseService(
@@ -190,6 +190,17 @@ class Program
             serverUrl,
             sharedLicenseFilePath: OnlineLicenseService.DefaultSharedLicenseFilePath);
         var usageTracker = new LicensedUsageTracker(licenseService, freeTracker);
+
+        // Update check (#61): mirror BulkChangeContextMenu wiring so the badge
+        // and dialog are exercisable without TIA. Uses the BlockParam assembly
+        // version (not DevLauncher's) so the badge text reads e.g. "v1.0.2 → vX.Y.Z".
+        var blockParamVersion = typeof(BulkChangeViewModel).Assembly.GetName().Version
+            ?? new Version(0, 0, 0);
+        var updateCheckService = new UpdateCheckService(
+            fetcher: new GitHubReleaseFetcher(),
+            currentVersion: VersionTag.FromSystemVersion(blockParamVersion),
+            cachePath: Path.Combine(appDataDir, "update-check.json"),
+            readSettings: () => configLoader.ReadUpdateCheckSettings());
 
         // 5. Show dialog
         var app = new Application();
@@ -231,7 +242,8 @@ class Program
                 xml = newXml;
                 Log.Information("DevLauncher DB switch: now editing {Name}", dbInfo.Name);
                 return newXml;
-            });
+            },
+            updateCheckService: updateCheckService);
 
         licenseService.StartHeartbeat();
         var dialog = new BulkChangeDialog(vm);

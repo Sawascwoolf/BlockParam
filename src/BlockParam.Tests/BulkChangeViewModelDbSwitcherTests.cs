@@ -54,8 +54,6 @@ public class BulkChangeViewModelDbSwitcherTests
         var bulkService = new BulkChangeService(new ChangeLogger(), configLoader);
         var usageTracker = Substitute.For<IUsageTracker>();
         usageTracker.GetStatus().Returns(new UsageStatus(0, 3));
-        usageTracker.GetInlineStatus().Returns(new UsageStatus(0, 10));
-        usageTracker.RecordInlineEdit().Returns(true);
 
         var mbx = new FakeMessageBox(promptResult);
 
@@ -100,7 +98,6 @@ public class BulkChangeViewModelDbSwitcherTests
         var bulkService = new BulkChangeService(new ChangeLogger(), configLoader);
         var usageTracker = Substitute.For<IUsageTracker>();
         usageTracker.GetStatus().Returns(new UsageStatus(0, 3));
-        usageTracker.GetInlineStatus().Returns(new UsageStatus(0, 10));
 
         var vm = new BulkChangeViewModel(
             primaryInfo, primary,
@@ -305,8 +302,6 @@ public class BulkChangeViewModelDbSwitcherTests
         var bulkService = new BulkChangeService(new ChangeLogger(), configLoader);
         var usageTracker = Substitute.For<IUsageTracker>();
         usageTracker.GetStatus().Returns(new UsageStatus(0, 3));
-        usageTracker.GetInlineStatus().Returns(new UsageStatus(0, 10));
-        usageTracker.RecordInlineEdit().Returns(true);
 
         var mbx = new FakeMessageBox(YesNoCancelResult.Yes);
         var vm = new BulkChangeViewModel(
@@ -357,8 +352,6 @@ public class BulkChangeViewModelDbSwitcherTests
         var bulkService = new BulkChangeService(new ChangeLogger(), configLoader);
         var usageTracker = Substitute.For<IUsageTracker>();
         usageTracker.GetStatus().Returns(new UsageStatus(0, 3));
-        usageTracker.GetInlineStatus().Returns(new UsageStatus(0, 10));
-        usageTracker.RecordInlineEdit().Returns(true);
         var mbx = new FakeMessageBox(YesNoCancelResult.No);
 
         var vm = new BulkChangeViewModel(
@@ -404,8 +397,6 @@ public class BulkChangeViewModelDbSwitcherTests
         var bulkService = new BulkChangeService(new ChangeLogger(), configLoader);
         var usageTracker = Substitute.For<IUsageTracker>();
         usageTracker.GetStatus().Returns(new UsageStatus(0, 3));
-        usageTracker.GetInlineStatus().Returns(new UsageStatus(0, 10));
-        usageTracker.RecordInlineEdit().Returns(true);
 
         var mbx = new FakeMessageBox(YesNoCancelResult.No);
         var vm = new BulkChangeViewModel(
@@ -456,8 +447,6 @@ public class BulkChangeViewModelDbSwitcherTests
         var bulkService = new BulkChangeService(new ChangeLogger(), configLoader);
         var usageTracker = Substitute.For<IUsageTracker>();
         usageTracker.GetStatus().Returns(new UsageStatus(0, 3));
-        usageTracker.GetInlineStatus().Returns(new UsageStatus(0, 10));
-        usageTracker.RecordInlineEdit().Returns(true);
         var mbx = new FakeMessageBox(YesNoCancelResult.No);
 
         var vm = new BulkChangeViewModel(
@@ -472,7 +461,7 @@ public class BulkChangeViewModelDbSwitcherTests
 
         // Stage on primary (consumes 1 inline-edit slot — that's expected).
         vm.RootMembers.First(m => m.IsLeaf).EditableStartValue = "777";
-        usageTracker.Received(1).RecordInlineEdit();
+        usageTracker.Received(1).RecordUsage(Arg.Any<int>());
         usageTracker.ClearReceivedCalls();
 
         // Switch away (Keep) → stash. No inline edits on the new tree, so
@@ -480,14 +469,14 @@ public class BulkChangeViewModelDbSwitcherTests
         vm.OpenDataBlocksDropdownCommand.Execute(null);
         var target = vm.FilteredDataBlocks.First(b => b.Name != primaryInfo.Name);
         vm.SwitchToDataBlock(target).Should().BeTrue();
-        usageTracker.DidNotReceive().RecordInlineEdit();
+        usageTracker.DidNotReceive().RecordUsage(Arg.Any<int>());
 
         // Switch back: the stash is restored. RecordInlineEdit MUST NOT fire
         // for the restored row — that was the bug.
         var back = vm.FilteredDataBlocks.First(b => b.Name == primaryInfo.Name);
         vm.SwitchToDataBlock(back).Should().BeTrue();
 
-        usageTracker.DidNotReceive().RecordInlineEdit();
+        usageTracker.DidNotReceive().RecordUsage(Arg.Any<int>());
         vm.PendingInlineEditCount.Should().Be(1, "the stashed edit was restored to the live tree");
     }
 
@@ -573,9 +562,7 @@ public class BulkChangeViewModelDbSwitcherTests
         var bulkService = new BulkChangeService(new ChangeLogger(), configLoader);
         var usageTracker = Substitute.For<IUsageTracker>();
         usageTracker.GetStatus().Returns(new UsageStatus(0, 3));
-        usageTracker.GetInlineStatus().Returns(new UsageStatus(0, 10));
-        usageTracker.RecordInlineEdit().Returns(true);
-        usageTracker.RecordUsage().Returns(true);
+        usageTracker.RecordUsage(Arg.Any<int>()).Returns(true);
 
         int applyCount = 0;
         var vm = new BulkChangeViewModel(
@@ -637,6 +624,7 @@ public class BulkChangeViewModelDbSwitcherTests
         public ScriptedMessageBox(Queue<YesNoCancelResult> answers) { _answers = answers; }
         public bool AskYesNo(string message, string title) => true;
         public void ShowError(string message, string title) { }
+        public void ShowInfo(string message, string title) { }
         public YesNoCancelResult AskYesNoCancel(string message, string title) =>
             _answers.Count > 0 ? _answers.Dequeue() : YesNoCancelResult.Cancel;
     }
@@ -649,6 +637,7 @@ public class BulkChangeViewModelDbSwitcherTests
         public FakeMessageBox(YesNoCancelResult result) { _result = result; }
         public bool AskYesNo(string message, string title) { AskYesNoCallCount++; return true; }
         public void ShowError(string message, string title) { }
+        public void ShowInfo(string message, string title) { }
         public YesNoCancelResult AskYesNoCancel(string message, string title)
         {
             AskYesNoCancelCallCount++;
