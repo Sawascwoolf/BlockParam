@@ -347,6 +347,16 @@ class Program
         var list = new List<DataBlockSummary>();
         foreach (var path in Directory.GetFiles(dir, "*.xml"))
         {
+            // *_modified.xml are Apply-output artifacts saved by the onApply
+            // callback above. They duplicate the original's internal Name,
+            // which collides on the stash-key (Plc + Folder + Name) and
+            // causes a second stash to overwrite the first. Real TIA can't
+            // produce two GlobalDBs with the same Name, so the product code
+            // assumes uniqueness — exclude the artifacts here.
+            if (Path.GetFileNameWithoutExtension(path).EndsWith("_modified",
+                    StringComparison.Ordinal))
+                continue;
+
             try
             {
                 var doc = System.Xml.Linq.XDocument.Load(path);
