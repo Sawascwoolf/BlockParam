@@ -502,6 +502,39 @@ This cannot be undone.</value>
   <data name="ConfigEditor_Shared" xml:space="preserve">
     <value>Shared</value>
   </data>
+  <data name="ConfigEditor_NewRule_Short" xml:space="preserve">
+    <value>+ Rule</value>
+  </data>
+  <data name="ConfigEditor_NewRule_Tooltip" xml:space="preserve">
+    <value>Add a new rule to the currently selected file. If no file is selected, creates a new file with one starter rule.</value>
+  </data>
+  <data name="ConfigEditor_NewFile_Short" xml:space="preserve">
+    <value>+ File</value>
+  </data>
+  <data name="ConfigEditor_NewFile_Tooltip" xml:space="preserve">
+    <value>Create a new rule file with one starter rule.</value>
+  </data>
+  <data name="ConfigEditor_Import" xml:space="preserve">
+    <value>Import...</value>
+  </data>
+  <data name="ConfigEditor_Import_Tooltip" xml:space="preserve">
+    <value>Import rule files (not yet implemented).</value>
+  </data>
+  <data name="ConfigEditor_Export" xml:space="preserve">
+    <value>Export...</value>
+  </data>
+  <data name="ConfigEditor_Export_Tooltip" xml:space="preserve">
+    <value>Export the selected rule file (not yet implemented).</value>
+  </data>
+  <data name="ConfigEditor_FileActions" xml:space="preserve">
+    <value>File actions</value>
+  </data>
+  <data name="ConfigEditor_DeleteFile" xml:space="preserve">
+    <value>Delete file</value>
+  </data>
+  <data name="ConfigEditor_ExportFile" xml:space="preserve">
+    <value>Export file...</value>
+  </data>
   <!-- Inline help tooltips for ConfigEditor fields -->
   <data name="ConfigEditor_Help_PathPattern" xml:space="preserve">
     <value>Regex pattern matching the member path inside the DB.
@@ -760,5 +793,53 @@ Compile the block now?</value>
   </data>
   <data name="Update_ManagedHint" xml:space="preserve">
     <value>Update-check policy is managed by IT and cannot be changed locally.</value>
+  </data>
+  <data name="ConfigEditor_NoPattern" xml:space="preserve">
+    <value>(no pattern)</value>
+  </data>
+  <data name="ConfigEditor_RuleSecondary_TagTable" xml:space="preserve">
+    <value>tagTable: {0}</value>
+  </data>
+  <data name="ConfigEditor_RuleSecondary_Allowed" xml:space="preserve">
+    <value>allowed: {0}</value>
+  </data>
+  <data name="ConfigEditor_RuleSecondary_Comment" xml:space="preserve">
+    <value>comment: {0}</value>
+  </data>
+  <data name="ConfigEditor_HeaderSummary_OneRule" xml:space="preserve">
+    <value>1 rule</value>
+  </data>
+  <data name="ConfigEditor_HeaderSummary_NRules" xml:space="preserve">
+    <value>{0} rules</value>
+  </data>
+  <data name="ConfigEditor_RuleValidation_NeedsPathPattern" xml:space="preserve">
+    <value>Rule in '{0}' must have a path pattern.</value>
+  </data>
+  <data name="ConfigEditor_RuleValidation_MinGtMax" xml:space="preserve">
+    <value>Rule '{0}' in '{1}': Min ({2}) must be ≤ Max ({3}).</value>
+  </data>
+  <data name="ConfigEditor_NewRule_Failed" xml:space="preserve">
+    <value>Could not create new rule: {0}</value>
+  </data>
+  <data name="ConfigEditor_NewFile_NoDir" xml:space="preserve">
+    <value>No valid save directory available.</value>
+  </data>
+  <data name="ConfigEditor_NewFile_Failed" xml:space="preserve">
+    <value>Could not create new file: {0}</value>
+  </data>
+  <data name="ConfigEditor_Duplicate_Failed" xml:space="preserve">
+    <value>Could not duplicate rule: {0}</value>
+  </data>
+  <data name="ConfigEditor_DeleteFile_Failed" xml:space="preserve">
+    <value>Cannot delete file: {0}</value>
+  </data>
+  <data name="ConfigEditor_Import_NotImplemented" xml:space="preserve">
+    <value>Import is not yet implemented.</value>
+  </data>
+  <data name="ConfigEditor_Export_NotImplemented" xml:space="preserve">
+    <value>Export is not yet implemented.</value>
+  </data>
+  <data name="ConfigEditor_ExportFile_NotImplemented" xml:space="preserve">
+    <value>Export of '{0}' is not yet implemented.</value>
   </data>
 </root>

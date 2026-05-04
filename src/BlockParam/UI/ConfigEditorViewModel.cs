@@ -6,40 +6,54 @@ using System.Windows.Input;
 using System.Windows.Threading;
 using BlockParam.Diagnostics;
 using BlockParam.Config;
+using BlockParam.Localization;
 
 namespace BlockParam.UI;
 
 /// <summary>
 /// ViewModel for the file-based Configuration Editor dialog.
-/// Scans Project/Local/Shared directories and shows individual rule files.
+///
+/// Two-level model: <see cref="RuleFiles"/> are physical .json files on disk,
+/// each containing 1..N <see cref="RuleViewModel"/> entries (issue #70 fix —
+/// previously rules 2..N were silently dropped on save).
 /// </summary>
 public class ConfigEditorViewModel : ViewModelBase
 {
     private readonly ConfigLoader _configLoader;
+    private readonly Dispatcher _dispatcher;
     private string _sharedRulesDirectory = "";
     private string _validationMessage = "";
     private string _filterText = "";
+    private RuleViewModel? _selectedRule;
     private RuleFileViewModel? _selectedFile;
 
-    /// <param name="configLoader">Config loader (provides directory paths).</param>
-    /// <param name="tagTableNames">Optional tag table names for dropdown.</param>
     public ConfigEditorViewModel(
         ConfigLoader configLoader,
         IEnumerable<string>? tagTableNames = null)
     {
         _configLoader = configLoader;
+        // Capture the UI-thread dispatcher at construction. Save flows defer
+        // a reload via this dispatcher; using Dispatcher.CurrentDispatcher
+        // inside the deferred callback would be wrong if Save was ever
+        // invoked from a non-UI thread.
+        _dispatcher = Dispatcher.CurrentDispatcher;
 
         RuleFiles = new ObservableCollection<RuleFileViewModel>();
         TagTableNames = new ObservableCollection<string>();
         FilteredRuleFiles = CollectionViewSource.GetDefaultView(RuleFiles);
-        FilteredRuleFiles.Filter = FilterRule;
+        FilteredRuleFiles.Filter = FilterFile;
 
         NewRuleCommand = new RelayCommand(ExecuteNewRule);
-        DuplicateSelectedCommand = new RelayCommand(ExecuteDuplicateSelected, () => SelectedFile != null);
-        DeleteSelectedCommand = new RelayCommand(ExecuteDeleteSelected, () => SelectedFile != null);
+        NewFileCommand = new RelayCommand(ExecuteNewFile);
+        DuplicateSelectedCommand = new RelayCommand(ExecuteDuplicateSelected, () => SelectedRule != null);
+        DeleteSelectedCommand = new RelayCommand(ExecuteDeleteSelected, () => SelectedRule != null || SelectedFile != null);
+        DeleteFileCommand = new RelayCommand(p => ExecuteDeleteFile(p as RuleFileViewModel), p => p is RuleFileViewModel);
         ResetToBaseCommand = new RelayCommand(ExecuteResetToBase, () => SelectedFile?.HasOverrides == true);
         SaveCommand = new RelayCommand(ExecuteSave);
         SaveAndCloseCommand = new RelayCommand(ExecuteSaveAndClose);
+        ImportFilesCommand = new RelayCommand(ExecuteImportFiles);
+        ExportFileCommand = new RelayCommand(p => ExecuteExportFile(p as RuleFileViewModel), p => p is RuleFileViewModel);
+        ExportSelectedCommand = new RelayCommand(ExecuteExportSelected, () => SelectedFile != null);
 
         LoadAllFiles();
 
@@ -54,6 +68,30 @@ public class ConfigEditorViewModel : ViewModelBase
 
     public event Action? RequestClose;
 
+    /// <summary>The rule currently bound to the detail panel.</summary>
+    public RuleViewModel? SelectedRule
+    {
+        get => _selectedRule;
+        set
+        {
+            var previous = _selectedRule;
+            if (SetProperty(ref _selectedRule, value))
+            {
+                if (previous != null) previous.IsSelected = false;
+                if (value != null)
+                {
+                    value.IsSelected = true;
+                    if (value.ParentFile != null)
+                        SelectedFile = value.ParentFile;
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// The file currently in focus. Set automatically when a rule is selected,
+    /// or explicitly when the user clicks a file header (no rule selected).
+    /// </summary>
     public RuleFileViewModel? SelectedFile
     {
         get => _selectedFile;
@@ -72,7 +110,10 @@ public class ConfigEditorViewModel : ViewModelBase
         set
         {
             if (SetProperty(ref _filterText, value))
+            {
                 FilteredRuleFiles.Refresh();
+                AutoExpandMatches();
+            }
         }
     }
 
@@ -83,33 +124,68 @@ public class ConfigEditorViewModel : ViewModelBase
     }
 
     public ICommand NewRuleCommand { get; }
+    public ICommand NewFileCommand { get; }
     public ICommand DuplicateSelectedCommand { get; }
     public ICommand DeleteSelectedCommand { get; }
+    public ICommand DeleteFileCommand { get; }
     public ICommand ResetToBaseCommand { get; }
     public ICommand SaveCommand { get; }
     public ICommand SaveAndCloseCommand { get; }
 
-    private bool FilterRule(object obj)
+    /// <summary>
+    /// UI-only stub for now (#70 follow-up). Wires the toolbar button so the
+    /// import flow can be added without touching the ViewModel surface again.
+    /// </summary>
+    public ICommand ImportFilesCommand { get; }
+
+    /// <summary>UI-only stub: export currently selected file. Logic out of scope.</summary>
+    public ICommand ExportSelectedCommand { get; }
+
+    /// <summary>UI-only stub: export a specific file (used by the file-header overflow).</summary>
+    public ICommand ExportFileCommand { get; }
+
+    private bool FilterFile(object obj)
     {
         if (string.IsNullOrWhiteSpace(_filterText)) return true;
-        if (obj is not RuleFileViewModel rule) return false;
-        return rule.PathPattern.IndexOf(_filterText, StringComparison.OrdinalIgnoreCase) >= 0;
+        if (obj is not RuleFileViewModel file) return false;
+
+        if (file.FileName.IndexOf(_filterText, StringComparison.OrdinalIgnoreCase) >= 0)
+            return true;
+
+        return file.Rules.Any(RuleMatchesFilter);
+    }
+
+    private bool RuleMatchesFilter(RuleViewModel r) =>
+        r.PathPattern.IndexOf(_filterText, StringComparison.OrdinalIgnoreCase) >= 0
+        || r.TagTableName.IndexOf(_filterText, StringComparison.OrdinalIgnoreCase) >= 0
+        || r.CommentTemplate.IndexOf(_filterText, StringComparison.OrdinalIgnoreCase) >= 0
+        || r.Datatype.IndexOf(_filterText, StringComparison.OrdinalIgnoreCase) >= 0
+        || r.AllowedValues.IndexOf(_filterText, StringComparison.OrdinalIgnoreCase) >= 0
+        || r.Min.IndexOf(_filterText, StringComparison.OrdinalIgnoreCase) >= 0
+        || r.Max.IndexOf(_filterText, StringComparison.OrdinalIgnoreCase) >= 0;
+
+    private void AutoExpandMatches()
+    {
+        if (string.IsNullOrWhiteSpace(_filterText)) return;
+        foreach (var file in RuleFiles)
+        {
+            if (file.Rules.Any(RuleMatchesFilter))
+                file.IsExpanded = true;
+        }
     }
 
     /// <summary>
-    /// Scans all 3 directories, groups by filename, and shows only the
-    /// highest-priority version per rule (TiaProject > Local > Shared).
-    /// Lower-priority versions are stored in OverriddenVersions for reset.
+    /// Scans Project / Local / Shared directories. Files with the same name
+    /// across multiple sources are grouped — the highest-priority version wins
+    /// and the others become <see cref="RuleFileViewModel.OverriddenVersions"/>.
     /// </summary>
     private void LoadAllFiles()
     {
         RuleFiles.Clear();
 
-        // Read shared directory from existing config
         var config = _configLoader.GetConfig();
         SharedRulesDirectory = config?.RulesDirectory ?? "";
 
-        // Load all files into a flat list first
         var allFiles = new List<RuleFileViewModel>();
 
         if (!string.IsNullOrWhiteSpace(SharedRulesDirectory))
@@ -125,10 +201,9 @@ public class ConfigEditorViewModel : ViewModelBase
         if (projectDir != null && Directory.Exists(projectDir))
             LoadFilesFromDirectory(projectDir, RuleSource.TiaProject, allFiles);
 
-        // Group by path pattern, keep highest priority, attach overridden versions.
-        // Skip duplicates that point to the same physical file (e.g. shared==local dir).
-        var groups = allFiles
-            .GroupBy(f => f.PathPattern, StringComparer.OrdinalIgnoreCase);
+        // Group by filename (override unit is the file). Same physical path
+        // across sources (shared==local) gets deduped first.
+        var groups = allFiles.GroupBy(f => f.FileName, StringComparer.OrdinalIgnoreCase);
 
         foreach (var group in groups)
         {
@@ -146,6 +221,7 @@ public class ConfigEditorViewModel : ViewModelBase
             if (effective.OverriddenVersions.Count > 0)
                 effective.IsOverride = true;
 
+            effective.NotifyOverrideChanged();
             RuleFiles.Add(effective);
         }
     }
@@ -189,9 +265,6 @@ public class ConfigEditorViewModel : ViewModelBase
         return rulesDir;
     }
 
-    /// <summary>
-    /// Returns the default save directory based on destination.
-    /// </summary>
     private string? GetDirectoryForSource(RuleSource source)
     {
         return source switch
@@ -204,86 +277,109 @@ public class ConfigEditorViewModel : ViewModelBase
         };
     }
 
+    /// <summary>
+    /// Adds a new rule to the currently selected file. If no file is selected
+    /// (e.g. first-run, empty editor) we create a new file with the rule inside.
+    /// </summary>
     private void ExecuteNewRule()
+    {
+        try
+        {
+            var file = SelectedFile ?? SelectedRule?.ParentFile;
+            if (file == null)
+            {
+                ExecuteNewFile();
+                return;
+            }
+
+            var rule = new RuleViewModel { IsNew = true };
+            file.Rules.Add(rule);
+            file.IsExpanded = true;
+            SelectedRule = rule;
+            ValidationMessage = "";
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "ExecuteNewRule failed");
+            ValidationMessage = Res.Format("ConfigEditor_NewRule_Failed", ex.Message);
+        }
+    }
+
+    /// <summary>Creates a new file with one starter rule and selects it.</summary>
+    private void ExecuteNewFile()
     {
         try
         {
             var defaultSource = GetDefaultNewFileSource();
             var dir = GetDirectoryForSource(defaultSource);
-            if (dir == null) { ValidationMessage = "No valid save directory available."; return; }
+            if (dir == null) { ValidationMessage = Res.Get("ConfigEditor_NewFile_NoDir"); return; }
 
-            var fileName = GenerateUniqueNewRuleFileName(dir);
-            var vm = new RuleFileViewModel
+            var fileName = GenerateUniqueNewFileName(dir);
+            var file = new RuleFileViewModel
             {
                 FileName = fileName,
                 FilePath = Path.Combine(dir, fileName),
                 Source = defaultSource,
                 SaveDestination = defaultSource,
                 FileType = "Rule",
-                IsNew = true
+                IsNew = true,
+                IsExpanded = true
             };
-            RuleFiles.Add(vm);
-            SelectedFile = vm;
+            var rule = new RuleViewModel { IsNew = true };
+            file.Rules.Add(rule);
+
+            RuleFiles.Add(file);
+            SelectedRule = rule;
+            SelectedFile = file;
             ValidationMessage = "";
         }
         catch (Exception ex)
         {
-            Log.Error(ex, "ExecuteNewRule failed");
-            ValidationMessage = $"Could not create new rule: {ex.Message}";
+            Log.Error(ex, "ExecuteNewFile failed");
+            ValidationMessage = Res.Format("ConfigEditor_NewFile_Failed", ex.Message);
         }
     }
 
     private void ExecuteDuplicateSelected()
     {
-        if (SelectedFile == null) return;
+        if (SelectedRule == null) return;
         try
         {
-            var source = SelectedFile;
-            var destination = source.SaveDestination;
-            var dir = GetDirectoryForSource(destination) ?? GetDirectoryForSource(GetDefaultNewFileSource());
-            if (dir == null) { ValidationMessage = "No valid save directory available."; return; }
+            var src = SelectedRule;
+            var file = src.ParentFile;
+            if (file == null) return;
 
-            // Order matters: set the fields first (with IsNew=false so the pattern setter
-            // does not auto-rename the file to the source's filename), then assign the
-            // unique filename, then flip IsNew=true so subsequent pattern edits auto-sync.
-            var vm = new RuleFileViewModel
+            var copy = new RuleViewModel
             {
-                FileType = source.FileType,
-                Source = destination,
-                SaveDestination = destination,
-                PathPattern = source.PathPattern,
-                Datatype = source.Datatype,
-                TagTableName = source.TagTableName,
-                RequireTagTableValue = source.RequireTagTableValue,
-                Min = source.Min,
-                Max = source.Max,
-                AllowedValues = source.AllowedValues,
-                CommentTemplate = source.CommentTemplate,
-                ExcludeFromSetpoints = source.ExcludeFromSetpoints
+                PathPattern = src.PathPattern,
+                Datatype = src.Datatype,
+                TagTableName = src.TagTableName,
+                RequireTagTableValue = src.RequireTagTableValue,
+                Min = src.Min,
+                Max = src.Max,
+                AllowedValues = src.AllowedValues,
+                CommentTemplate = src.CommentTemplate,
+                ExcludeFromSetpoints = src.ExcludeFromSetpoints,
+                IsNew = true
             };
-            var fileName = GenerateUniqueNewRuleFileName(dir);
-            vm.FileName = fileName;
-            vm.FilePath = Path.Combine(dir, fileName);
-            vm.IsNew = true;
-            RuleFiles.Add(vm);
-            SelectedFile = vm;
+            var idx = file.Rules.IndexOf(src);
+            file.Rules.Insert(idx + 1, copy);
+            file.IsExpanded = true;
+            SelectedRule = copy;
             ValidationMessage = "";
         }
         catch (Exception ex)
         {
             Log.Error(ex, "ExecuteDuplicateSelected failed");
-            ValidationMessage = $"Could not duplicate rule: {ex.Message}";
+            ValidationMessage = Res.Format("ConfigEditor_Duplicate_Failed", ex.Message);
         }
     }
 
     /// <summary>
-    /// Returns a filename that does not collide with an existing file on disk
-    /// or an unsaved rule already staged in memory. Two successive "+"-clicks
-    /// previously produced two rules pointing at the same "new-rule.json",
-    /// which caused the second Save to overwrite — and in some environments
-    /// crashed the DataGrid when the new row was committed over a pending edit.
+    /// Tracks unique filenames against staged + on-disk files so successive
+    /// "+ File" clicks don't both produce "new-rule.json".
     /// </summary>
-    private string GenerateUniqueNewRuleFileName(string dir)
+    private string GenerateUniqueNewFileName(string dir)
     {
         var stagedNames = new HashSet<string>(
             RuleFiles.Select(r => r.FileName),
@@ -300,50 +396,79 @@ public class ConfigEditorViewModel : ViewModelBase
         return $"{baseName}-{Guid.NewGuid():N}.json";
     }
 
-
     private RuleSource GetDefaultNewFileSource()
     {
-        // Prefer Project if available, otherwise Local
         var projectDir = _configLoader.GetTiaProjectRulesDirectory();
         return projectDir != null ? RuleSource.TiaProject : RuleSource.Local;
     }
 
+    /// <summary>
+    /// Context-aware delete: removes the selected rule. If it's the last rule
+    /// in the file, the file is removed from disk too.
+    /// </summary>
     private void ExecuteDeleteSelected()
     {
-        if (SelectedFile == null) return;
-
-        // Delete the file from disk if it exists
-        if (File.Exists(SelectedFile.FilePath))
+        if (SelectedRule != null)
         {
-            try
+            var file = SelectedRule.ParentFile;
+            if (file == null) return;
+
+            file.Rules.Remove(SelectedRule);
+            SelectedRule = null;
+
+            if (file.Rules.Count == 0)
             {
-                File.Delete(SelectedFile.FilePath);
+                DeleteFileFromDisk(file);
+                RuleFiles.Remove(file);
+                if (SelectedFile == file) SelectedFile = null;
             }
-            catch (Exception ex)
-            {
-                ValidationMessage = $"Cannot delete file: {ex.Message}";
-                return;
-            }
+
+            _configLoader.Invalidate();
+            return;
         }
 
-        RuleFiles.Remove(SelectedFile);
-        SelectedFile = null;
+        if (SelectedFile != null)
+        {
+            ExecuteDeleteFile(SelectedFile);
+        }
+    }
+
+    private void ExecuteDeleteFile(RuleFileViewModel? file)
+    {
+        if (file == null) return;
+        DeleteFileFromDisk(file);
+        RuleFiles.Remove(file);
+        if (SelectedFile == file) SelectedFile = null;
+        if (SelectedRule?.ParentFile == file) SelectedRule = null;
         _configLoader.Invalidate();
     }
 
+    private void DeleteFileFromDisk(RuleFileViewModel file)
+    {
+        if (!File.Exists(file.FilePath)) return;
+        try
+        {
+            File.Delete(file.FilePath);
+        }
+        catch (Exception ex)
+        {
+            ValidationMessage = Res.Format("ConfigEditor_DeleteFile_Failed", ex.Message);
+        }
+    }
+
     /// <summary>
-    /// Deletes the current override and reveals the next-priority version.
+    /// Deletes the current override file and reveals the next-priority version.
+    /// Operates at the file level — all rules in the file are reset together.
     /// </summary>
     private void ExecuteResetToBase()
     {
         if (SelectedFile == null || SelectedFile.OverriddenVersions.Count == 0) return;
 
         var current = SelectedFile;
-        var baseRule = current.OverriddenVersions[0];
+        var baseFile = current.OverriddenVersions[0];
 
-        // Delete the override file (only if physically different from the base)
         var currentPath = Path.GetFullPath(current.FilePath);
-        var basePath = Path.GetFullPath(baseRule.FilePath);
+        var basePath = Path.GetFullPath(baseFile.FilePath);
         if (File.Exists(currentPath)
             && !string.Equals(currentPath, basePath, StringComparison.OrdinalIgnoreCase))
         {
@@ -358,16 +483,16 @@ public class ConfigEditorViewModel : ViewModelBase
             }
         }
 
-        // Reload deferred to avoid collection modification during active bindings
-        var patternToSelect = baseRule.PathPattern;
+        var nameToSelect = baseFile.FileName;
         _configLoader.Invalidate();
-        Dispatcher.CurrentDispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() =>
+        _dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() =>
         {
+            SelectedRule = null;
             SelectedFile = null;
             LoadAllFiles();
             FilteredRuleFiles.Refresh();
             SelectedFile = RuleFiles.FirstOrDefault(f =>
-                string.Equals(f.PathPattern, patternToSelect, StringComparison.OrdinalIgnoreCase));
+                string.Equals(f.FileName, nameToSelect, StringComparison.OrdinalIgnoreCase));
         }));
     }
 
@@ -391,23 +516,47 @@ public class ConfigEditorViewModel : ViewModelBase
             RequestClose?.Invoke();
     }
 
-    /// <summary>
-    /// Rebuilds the rule list after save to update override grouping.
-    /// Deferred via Dispatcher to avoid modifying the collection during active bindings.
-    /// </summary>
+    /// <summary>UI-only stub. Logic intentionally out of scope.</summary>
+    private void ExecuteImportFiles()
+    {
+        ValidationMessage = Res.Get("ConfigEditor_Import_NotImplemented");
+    }
+
+    /// <summary>UI-only stub. Logic intentionally out of scope.</summary>
+    private void ExecuteExportSelected()
+    {
+        ExecuteExportFile(SelectedFile);
+    }
+
+    /// <summary>UI-only stub. Logic intentionally out of scope.</summary>
+    private void ExecuteExportFile(RuleFileViewModel? file)
+    {
+        ValidationMessage = file != null
+            ? Res.Format("ConfigEditor_ExportFile_NotImplemented", file.FileName)
+            : Res.Get("ConfigEditor_Export_NotImplemented");
+    }
+
     private void ReloadAfterSave()
     {
-        var selectedPattern = SelectedFile?.PathPattern;
-        Dispatcher.CurrentDispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() =>
+        var selectedFileName = SelectedFile?.FileName;
+        var selectedRulePattern = SelectedRule?.PathPattern;
+        _dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() =>
         {
             try
             {
+                SelectedRule = null;
                 SelectedFile = null;
                 LoadAllFiles();
                 FilteredRuleFiles.Refresh();
-                if (selectedPattern != null)
-                    SelectedFile = RuleFiles.FirstOrDefault(f =>
-                        string.Equals(f.PathPattern, selectedPattern, StringComparison.OrdinalIgnoreCase));
+                if (selectedFileName != null)
+                {
+                    var file = RuleFiles.FirstOrDefault(f =>
+                        string.Equals(f.FileName, selectedFileName, StringComparison.OrdinalIgnoreCase));
+                    SelectedFile = file;
+                    if (file != null && selectedRulePattern != null)
+                        SelectedRule = file.Rules.FirstOrDefault(r =>
+                            string.Equals(r.PathPattern, selectedRulePattern, StringComparison.OrdinalIgnoreCase));
+                }
             }
             catch (Exception ex)
             {
@@ -416,27 +565,40 @@ public class ConfigEditorViewModel : ViewModelBase
         }));
     }
 
-    /// <summary>
-    /// Validates and saves all modified files. Returns true on success.
-    /// </summary>
     private bool SaveAll()
     {
-        // Validate all files
+        // Auto-derive filename for new files whose name still matches the
+        // placeholder pattern (^new-rule(-\d+)?\.json$). Once the user types
+        // anything else, IsAutoNamed flips to false and we keep their name —
+        // so a file the user explicitly named "my-rules.json" never gets
+        // silently renamed to a pattern-derived name on save.
         foreach (var file in RuleFiles)
         {
+            if (file.IsNew && file.IsAutoNamed)
+            {
+                var derived = file.DeriveFileNameFromFirstRule();
+                if (!string.Equals(file.FileName, derived, StringComparison.OrdinalIgnoreCase))
+                {
+                    file.FileName = derived;
+                    var dir = Path.GetDirectoryName(file.FilePath);
+                    if (!string.IsNullOrEmpty(dir))
+                        file.FilePath = Path.Combine(dir, derived);
+                }
+            }
+
             var error = file.Validate();
             if (error != null)
             {
                 ValidationMessage = error;
                 SelectedFile = file;
+                if (file.Rules.Count > 0)
+                    SelectedRule = file.Rules.FirstOrDefault(r => r.Validate(file.FileName) != null) ?? file.Rules[0];
                 return false;
             }
         }
 
-        // Save shared directory setting to config.json
         SaveSharedDirectorySetting();
 
-        // Save each file to its destination
         foreach (var file in RuleFiles)
         {
             try
@@ -452,7 +614,6 @@ public class ConfigEditorViewModel : ViewModelBase
                 var config = file.ToBulkChangeConfig();
                 _configLoader.SaveRuleFile(targetPath, config);
 
-                // Update file's path and source to new location
                 file.FilePath = targetPath;
                 file.Source = file.SaveDestination;
                 file.MarkClean();
@@ -475,5 +636,4 @@ public class ConfigEditorViewModel : ViewModelBase
         _configLoader.SaveSharedRulesDirectory(
             string.IsNullOrWhiteSpace(SharedRulesDirectory) ? null : SharedRulesDirectory);
     }
-
 }

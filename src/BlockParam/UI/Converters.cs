@@ -72,6 +72,26 @@ public class RuleSourceToBoolConverter : IValueConverter
     }
 }
 
+/// <summary>
+/// Converts a RuleSource enum to its localized label
+/// (Project / Local / Shared). One-way; ConvertBack is unused.
+/// </summary>
+public class RuleSourceToLabelConverter : IValueConverter
+{
+    public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
+    {
+        if (value is RuleSource source)
+        {
+            var key = source == RuleSource.TiaProject ? "Project" : source.ToString();
+            return Localization.Res.Get($"ConfigEditor_{key}");
+        }
+        return value?.ToString() ?? "";
+    }
+
+    public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
+        => System.Windows.Data.Binding.DoNothing;
+}
+
 public class StringNotEmptyToVisibilityConverter : IValueConverter
 {
     public object Convert(object value, Type targetType, object parameter, CultureInfo culture)

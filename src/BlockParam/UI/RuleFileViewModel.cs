@@ -1,21 +1,23 @@
+using System.Collections.ObjectModel;
+using System.Collections.Specialized;
 using System.IO;
 using System.Text.RegularExpressions;
 using Newtonsoft.Json;
 using BlockParam.Config;
+using BlockParam.Localization;
 using BlockParam.Services;
 
 namespace BlockParam.UI;
 
 /// <summary>
-/// ViewModel representing a single rule file from any source (Project/Local/Shared).
-/// Supports two file types: Rule, Excludes.
-/// Comment templates are now part of Rule files (per-rule, not a separate file type).
+/// ViewModel representing a single rule file (one .json on disk).
+/// A file contains 1..N <see cref="RuleViewModel"/> entries — issue #70 fix:
+/// the editor now round-trips the entire <c>rules[]</c> array instead of
+/// silently dropping rules 2..N on save.
 /// </summary>
 public class RuleFileViewModel : ViewModelBase
 {
-    /// <summary>
-    /// Well-known TIA Portal primitive data types for the Datatype dropdown.
-    /// </summary>
+    /// <summary>Well-known TIA Portal primitive data types for the Datatype dropdown.</summary>
     public static readonly string[] TiaDataTypes =
     {
         "", "Bool", "Byte", "Word", "DWord", "LWord",
@@ -28,42 +30,141 @@ public class RuleFileViewModel : ViewModelBase
         "Timer", "Counter"
     };
 
+    /// <summary>The three sources a user can save a rule file to. Inline rules
+    /// live in DB/UDT comments and are not authored through this editor.</summary>
+    public static readonly RuleSource[] UserSelectableSources =
+    {
+        RuleSource.TiaProject,
+        RuleSource.Local,
+        RuleSource.Shared,
+    };
+
+    private static readonly Regex AutoNamePattern =
+        new(@"^new-rule(-\d+)?\.json$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
     private string _fileName = "";
     private string _filePath = "";
     private RuleSource _source;
     private string _fileType = "Rule";
     private bool _isOverride;
     private RuleSource _saveDestination;
-    private bool _isNew;
-
-    // Rule fields
-    private string _pathPattern = "";
-    private string _datatype = "";
-    private string _tagTableName = "";
-    private bool _requireTagTableValue;
-    private string _min = "";
-    private string _max = "";
-    private string _allowedValues = "";
-    private string _commentTemplate = "";
-    private bool _excludeFromSetpoints;
-
-    // Snapshot of saved state for dirty tracking
-    private string _savedPathPattern = "";
-    private string _savedDatatype = "";
-    private string _savedTagTableName = "";
-    private bool _savedRequireTagTableValue;
-    private string _savedMin = "";
-    private string _savedMax = "";
-    private string _savedAllowedValues = "";
-    private string _savedCommentTemplate = "";
-    private bool _savedExcludeFromSetpoints;
     private RuleSource _savedSaveDestination;
+    private string _savedFileName = "";
+    private bool _isNew;
+    private bool _isExpanded = true;
+
+    /// <summary>
+    /// Tracks which rules we've subscribed to. Doubles as the source of truth
+    /// for <see cref="NotifyCollectionChangedAction.Reset"/>, where neither
+    /// OldItems nor NewItems is populated — without this, Reset would leak
+    /// PropertyChanged subscriptions on the cleared rules.
+    /// </summary>
+    private readonly HashSet<RuleViewModel> _subscribedRules = new();
+
+    public RuleFileViewModel()
+    {
+        // Stable per-instance identifier — used as RadioButton GroupName so
+        // each file's source pills stay grouped only with each other, even
+        // across save/reload cycles where FilePath transitions briefly.
+        GroupId = Guid.NewGuid().ToString("N");
+        Rules = new ObservableCollection<RuleViewModel>();
+        Rules.CollectionChanged += OnRulesCollectionChanged;
+    }
+
+    /// <summary>
+    /// Rules contained in this file. Order is preserved on save.
+    /// </summary>
+    public ObservableCollection<RuleViewModel> Rules { get; }
+
+    /// <summary>Stable per-instance ID for grouping the file's source RadioButtons.</summary>
+    public string GroupId { get; }
+
+    private void Subscribe(RuleViewModel r)
+    {
+        if (_subscribedRules.Add(r))
+        {
+            r.ParentFile = this;
+            r.PropertyChanged += OnRulePropertyChanged;
+        }
+    }
+
+    private void Unsubscribe(RuleViewModel r)
+    {
+        if (_subscribedRules.Remove(r))
+        {
+            r.PropertyChanged -= OnRulePropertyChanged;
+            if (ReferenceEquals(r.ParentFile, this))
+                r.ParentFile = null;
+        }
+    }
+
+    /// <summary>
+    /// Re-parents rules and (un)subscribes to their PropertyChanged so the
+    /// file's aggregate <see cref="IsDirty"/> updates without each rule
+    /// setter having to call back. Handles Add / Remove / Replace / Reset.
+    /// </summary>
+    private void OnRulesCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        if (e.Action == NotifyCollectionChangedAction.Reset)
+        {
+            // Reset (e.g. Rules.Clear()) populates neither OldItems nor NewItems.
+            // Diff against our subscription set: drop anything no longer present,
+            // pick up anything new.
+            foreach (var r in _subscribedRules.ToList())
+                if (!Rules.Contains(r)) Unsubscribe(r);
+            foreach (var r in Rules) Subscribe(r);
+        }
+        else
+        {
+            // OldItems first: a Replace event populates both OldItems and
+            // NewItems with the (potentially same) instances. Subscribing
+            // last guarantees ParentFile ends up correct on Replace.
+            if (e.OldItems != null)
+                foreach (RuleViewModel r in e.OldItems) Unsubscribe(r);
+            if (e.NewItems != null)
+                foreach (RuleViewModel r in e.NewItems) Subscribe(r);
+        }
+
+        OnPropertyChanged(nameof(RuleCount));
+        OnPropertyChanged(nameof(HasMultipleRules));
+        OnPropertyChanged(nameof(IsDirty));
+        OnPropertyChanged(nameof(HeaderSummary));
+    }
+
+    private void OnRulePropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(RuleViewModel.IsDirty)
+            || string.IsNullOrEmpty(e.PropertyName))
+        {
+            OnPropertyChanged(nameof(IsDirty));
+        }
+    }
+
+    public int RuleCount => Rules.Count;
+    public bool HasMultipleRules => Rules.Count > 1;
 
     public string FileName
     {
         get => _fileName;
-        set => SetProperty(ref _fileName, value);
+        set
+        {
+            if (SetProperty(ref _fileName, value))
+            {
+                OnPropertyChanged(nameof(IsDirty));
+                OnPropertyChanged(nameof(HeaderSummary));
+                OnPropertyChanged(nameof(IsAutoNamed));
+            }
+        }
     }
+
+    /// <summary>
+    /// True when the filename still matches the placeholder auto-name pattern
+    /// produced by <c>GenerateUniqueNewFileName</c>. Used by SaveAll to decide
+    /// whether to derive the final filename from the first rule's pathPattern.
+    /// Once the user types anything else, this becomes false and the user's
+    /// name is preserved verbatim.
+    /// </summary>
+    public bool IsAutoNamed => AutoNamePattern.IsMatch(_fileName);
 
     public string FilePath
     {
@@ -74,7 +175,11 @@ public class RuleFileViewModel : ViewModelBase
     public RuleSource Source
     {
         get => _source;
-        set => SetProperty(ref _source, value);
+        set
+        {
+            if (SetProperty(ref _source, value))
+                OnPropertyChanged(nameof(SourceDisplay));
+        }
     }
 
     public string SourceDisplay => Source switch
@@ -85,6 +190,7 @@ public class RuleFileViewModel : ViewModelBase
         _ => Source.ToString()
     };
 
+    /// <summary>Kept for backwards compat with tests; "Rule" is the only supported value.</summary>
     public string FileType
     {
         get => _fileType;
@@ -101,21 +207,19 @@ public class RuleFileViewModel : ViewModelBase
         }
     }
 
-    /// <summary>Lower-priority versions that this rule overrides (same path pattern).</summary>
+    /// <summary>Lower-priority versions of this file (same filename in another source).</summary>
     public List<RuleFileViewModel> OverriddenVersions { get; } = new();
 
-    /// <summary>True when this rule overrides a lower-priority version.</summary>
     public bool HasOverrides => OverriddenVersions.Count > 0;
 
-    /// <summary>Notifies the UI that override state changed.</summary>
     public void NotifyOverrideChanged()
     {
         OnPropertyChanged(nameof(HasOverrides));
         OnPropertyChanged(nameof(StatusDisplay));
         OnPropertyChanged(nameof(IsOverride));
+        OnPropertyChanged(nameof(HeaderSummary));
     }
 
-    /// <summary>Display text showing what this rule overrides.</summary>
     public string StatusDisplay
     {
         get
@@ -123,6 +227,23 @@ public class RuleFileViewModel : ViewModelBase
             if (OverriddenVersions.Count == 0) return "";
             var sources = string.Join(", ", OverriddenVersions.Select(v => v.SourceDisplay));
             return $"overrides {sources}";
+        }
+    }
+
+    /// <summary>
+    /// One-line summary used as the secondary text in the file header
+    /// (e.g. "Project · 11 rules · overrides Local").
+    /// </summary>
+    public string HeaderSummary
+    {
+        get
+        {
+            var parts = new List<string> { SourceDisplay };
+            parts.Add(RuleCount == 1
+                ? Res.Get("ConfigEditor_HeaderSummary_OneRule")
+                : Res.Format("ConfigEditor_HeaderSummary_NRules", RuleCount));
+            if (HasOverrides) parts.Add(StatusDisplay);
+            return string.Join(" · ", parts);
         }
     }
 
@@ -136,224 +257,63 @@ public class RuleFileViewModel : ViewModelBase
         }
     }
 
-    /// <summary>True for newly created rules that haven't been saved yet.</summary>
+    /// <summary>True for files created in the editor that haven't been written to disk yet.</summary>
     public bool IsNew
     {
         get => _isNew;
-        set => SetProperty(ref _isNew, value);
+        set
+        {
+            if (SetProperty(ref _isNew, value))
+                OnPropertyChanged(nameof(IsDirty));
+        }
     }
 
-    /// <summary>True when any field differs from its last-saved state.</summary>
+    /// <summary>UI-only state: whether the file's rule list is expanded in the left panel.</summary>
+    public bool IsExpanded
+    {
+        get => _isExpanded;
+        set => SetProperty(ref _isExpanded, value);
+    }
+
+    /// <summary>True when any field — file-level metadata or any contained rule — has changed since last save.</summary>
     public bool IsDirty =>
         IsNew
-        || _pathPattern != _savedPathPattern
-        || _datatype != _savedDatatype
-        || _tagTableName != _savedTagTableName
-        || _requireTagTableValue != _savedRequireTagTableValue
-        || _min != _savedMin
-        || _max != _savedMax
-        || _allowedValues != _savedAllowedValues
-        || _commentTemplate != _savedCommentTemplate
-        || _excludeFromSetpoints != _savedExcludeFromSetpoints
-        || _saveDestination != _savedSaveDestination;
+        || _saveDestination != _savedSaveDestination
+        || _fileName != _savedFileName
+        || Rules.Any(r => r.IsDirty);
 
-    /// <summary>Captures the current field values as the "saved" baseline.</summary>
     public void MarkClean()
     {
         IsNew = false;
-        _savedPathPattern = _pathPattern;
-        _savedDatatype = _datatype;
-        _savedTagTableName = _tagTableName;
-        _savedRequireTagTableValue = _requireTagTableValue;
-        _savedMin = _min;
-        _savedMax = _max;
-        _savedAllowedValues = _allowedValues;
-        _savedCommentTemplate = _commentTemplate;
-        _savedExcludeFromSetpoints = _excludeFromSetpoints;
         _savedSaveDestination = _saveDestination;
+        _savedFileName = _fileName;
+        foreach (var r in Rules) r.MarkClean();
         OnPropertyChanged(nameof(IsDirty));
     }
 
-    // --- Rule fields ---
-
-    public string PathPattern
-    {
-        get => _pathPattern;
-        set
-        {
-            if (SetProperty(ref _pathPattern, value))
-            {
-                OnPropertyChanged(nameof(IsDirty));
-                SyncFileNameFromPattern();
-            }
-        }
-    }
-
-    public string Datatype
-    {
-        get => _datatype;
-        set
-        {
-            if (SetProperty(ref _datatype, value))
-            {
-                OnPropertyChanged(nameof(IsDirty));
-                OnPropertyChanged(nameof(IsMinMaxSupported));
-
-                // Clear Min/Max when switching to unsupported type
-                if (!IsMinMaxSupported)
-                {
-                    Min = "";
-                    Max = "";
-                }
-
-                // Re-validate existing Min/Max against new datatype
-                ValidateMinMax();
-            }
-        }
-    }
-
     /// <summary>
-    /// True when the selected data type supports Min/Max constraints.
-    /// Empty datatype = true (conservative: rule might match various types).
-    /// </summary>
-    public bool IsMinMaxSupported =>
-        string.IsNullOrEmpty(Datatype) || TiaDataTypeValidator.SupportsMinMax(Datatype);
-
-    public string TagTableName
-    {
-        get => _tagTableName;
-        set
-        {
-            if (SetProperty(ref _tagTableName, value))
-                OnPropertyChanged(nameof(IsDirty));
-        }
-    }
-
-    public bool RequireTagTableValue
-    {
-        get => _requireTagTableValue;
-        set
-        {
-            if (SetProperty(ref _requireTagTableValue, value))
-                OnPropertyChanged(nameof(IsDirty));
-        }
-    }
-
-    public string Min
-    {
-        get => _min;
-        set
-        {
-            if (SetProperty(ref _min, value))
-            {
-                OnPropertyChanged(nameof(IsDirty));
-                ValidateMinMax();
-            }
-        }
-    }
-
-    public string Max
-    {
-        get => _max;
-        set
-        {
-            if (SetProperty(ref _max, value))
-            {
-                OnPropertyChanged(nameof(IsDirty));
-                ValidateMinMax();
-            }
-        }
-    }
-
-    private string _minError = "";
-    private string _maxError = "";
-
-    /// <summary>Validation error for Min field, or empty if valid.</summary>
-    public string MinError
-    {
-        get => _minError;
-        private set => SetProperty(ref _minError, value);
-    }
-
-    /// <summary>Validation error for Max field, or empty if valid.</summary>
-    public string MaxError
-    {
-        get => _maxError;
-        private set => SetProperty(ref _maxError, value);
-    }
-
-    private void ValidateMinMax()
-    {
-        var dt = string.IsNullOrWhiteSpace(Datatype) ? null : Datatype;
-
-        // Validate Min format against datatype
-        MinError = !string.IsNullOrWhiteSpace(Min) && dt != null
-            ? TiaDataTypeValidator.Validate(Min.Trim(), dt) ?? ""
-            : "";
-
-        // Validate Max format against datatype
-        MaxError = !string.IsNullOrWhiteSpace(Max) && dt != null
-            ? TiaDataTypeValidator.Validate(Max.Trim(), dt) ?? ""
-            : "";
-    }
-
-    public string AllowedValues
-    {
-        get => _allowedValues;
-        set
-        {
-            if (SetProperty(ref _allowedValues, value))
-                OnPropertyChanged(nameof(IsDirty));
-        }
-    }
-
-    public string CommentTemplate
-    {
-        get => _commentTemplate;
-        set
-        {
-            if (SetProperty(ref _commentTemplate, value))
-                OnPropertyChanged(nameof(IsDirty));
-        }
-    }
-
-    public bool ExcludeFromSetpoints
-    {
-        get => _excludeFromSetpoints;
-        set
-        {
-            if (SetProperty(ref _excludeFromSetpoints, value))
-                OnPropertyChanged(nameof(IsDirty));
-        }
-    }
-
-    /// <summary>
-    /// Derives a safe filename from the path pattern.
-    /// Replaces characters that are invalid in filenames.
+    /// Derives a safe filename from a rule's path pattern. Used when a new file
+    /// is being authored — auto-syncs filename to match the pattern.
     /// </summary>
     public static string PatternToFileName(string pattern)
     {
         if (string.IsNullOrWhiteSpace(pattern)) return "new-rule.json";
 
-        // Replace path separators and common glob tokens with readable alternatives
         var name = pattern
-            .Replace("\\.", ".")       // unescape dots first
-            .Replace(".*", "_any_")    // regex wildcard
-            .Replace(".+", "_some_")   // regex one-or-more
-            .Replace("$", "")          // anchor
-            .Replace("^", "");         // anchor
+            .Replace("\\.", ".")
+            .Replace(".*", "_any_")
+            .Replace(".+", "_some_")
+            .Replace("$", "")
+            .Replace("^", "");
 
-        // Replace {token:value} with just value
         name = Regex.Replace(name, @"\{[^:}]+:([^}]+)\}", "$1");
-        // Replace remaining {token} with token
         name = Regex.Replace(name, @"\{([^}]+)\}", "$1");
 
-        // Replace invalid filename characters with underscore
-        var invalidChars = new HashSet<char>(Path.GetInvalidFileNameChars()) { '*', '?', '{', '}', '[', ']', '|', '\\', '/' };
+        var invalidChars = new HashSet<char>(Path.GetInvalidFileNameChars())
+            { '*', '?', '{', '}', '[', ']', '|', '\\', '/' };
         var chars = name.Select(c => invalidChars.Contains(c) ? '_' : c).ToArray();
         name = new string(chars);
 
-        // Collapse consecutive underscores, trim trailing only
         name = Regex.Replace(name, @"_+", "_").TrimEnd('_', '.').TrimStart('.');
 
         if (string.IsNullOrWhiteSpace(name)) return "new-rule.json";
@@ -361,28 +321,8 @@ public class RuleFileViewModel : ViewModelBase
     }
 
     /// <summary>
-    /// Updates FileName to match the current PathPattern (auto-sync).
-    /// Only auto-syncs for new rules or when the filename was previously derived from the pattern.
-    /// </summary>
-    private void SyncFileNameFromPattern()
-    {
-        // Only auto-sync for new (unsaved) rules
-        if (!IsNew) return;
-
-        var derived = PatternToFileName(_pathPattern);
-        FileName = derived;
-
-        // Also update FilePath if directory is known
-        var dir = Path.GetDirectoryName(FilePath);
-        if (!string.IsNullOrEmpty(dir))
-            FilePath = Path.Combine(dir, derived);
-    }
-
-    /// <summary>True when FileType is "Rule" (used for XAML binding).</summary>
-    public bool IsRuleType => FileType == "Rule";
-
-    /// <summary>
-    /// Loads a rule file from disk and creates a RuleFileViewModel.
+    /// Loads a rule file from disk. Returns null when the file is missing,
+    /// unreadable, or doesn't carry the BlockParam version sentinel.
     /// </summary>
     public static RuleFileViewModel? FromFile(string filePath, RuleSource source)
     {
@@ -392,7 +332,10 @@ public class RuleFileViewModel : ViewModelBase
         try { json = File.ReadAllText(filePath); }
         catch { return null; }
 
-        var config = JsonConvert.DeserializeObject<BulkChangeConfig>(json);
+        BulkChangeConfig? config;
+        try { config = JsonConvert.DeserializeObject<BulkChangeConfig>(json); }
+        catch (JsonException) { return null; }
+
         if (config == null || string.IsNullOrEmpty(config.Version))
             return null;
 
@@ -401,25 +344,15 @@ public class RuleFileViewModel : ViewModelBase
             FileName = Path.GetFileName(filePath),
             FilePath = filePath,
             Source = source,
-            SaveDestination = source
+            SaveDestination = source,
+            FileType = "Rule"
         };
 
-        // Populate fields from first rule
-        vm.FileType = "Rule";
-        if (config.Rules.Count > 0)
+        foreach (var rule in config.Rules)
         {
-            var rule = config.Rules[0];
-            vm.PathPattern = rule.PathPattern ?? "";
-            vm.Datatype = rule.Datatype ?? "";
-            vm.Min = rule.Constraints?.Min?.ToString() ?? "";
-            vm.Max = rule.Constraints?.Max?.ToString() ?? "";
-            vm.RequireTagTableValue = rule.Constraints?.RequireTagTableValue ?? false;
-            vm.AllowedValues = rule.Constraints?.AllowedValues != null
-                ? string.Join(", ", rule.Constraints.AllowedValues)
-                : "";
-            vm.TagTableName = rule.TagTableReference?.TableName ?? "";
-            vm.CommentTemplate = rule.CommentTemplate ?? "";
-            vm.ExcludeFromSetpoints = rule.ExcludeFromSetpoints;
+            var rvm = new RuleViewModel();
+            rvm.LoadFromRule(rule);
+            vm.Rules.Add(rvm);
         }
 
         vm.MarkClean();
@@ -427,72 +360,41 @@ public class RuleFileViewModel : ViewModelBase
     }
 
     /// <summary>
-    /// Converts this ViewModel back to a BulkChangeConfig for serialization.
+    /// Serializes the file back into a <see cref="BulkChangeConfig"/>. All rules
+    /// are emitted in order — preserving multi-rule files (issue #70).
     /// </summary>
     public BulkChangeConfig ToBulkChangeConfig()
     {
         var config = new BulkChangeConfig { Version = "1.0" };
-
-        var rule = new MemberRule
-        {
-            PathPattern = PathPattern,
-            Datatype = string.IsNullOrWhiteSpace(Datatype) ? null : Datatype,
-            CommentTemplate = string.IsNullOrWhiteSpace(CommentTemplate) ? null : CommentTemplate,
-            ExcludeFromSetpoints = ExcludeFromSetpoints
-        };
-
-        if (!string.IsNullOrWhiteSpace(Min) || !string.IsNullOrWhiteSpace(Max)
-            || !string.IsNullOrWhiteSpace(AllowedValues) || RequireTagTableValue)
-        {
-            rule.Constraints = new ValueConstraint();
-            if (!string.IsNullOrWhiteSpace(Min))
-                rule.Constraints.Min = double.TryParse(Min, out var minNum) ? (object)minNum : Min.Trim();
-            if (!string.IsNullOrWhiteSpace(Max))
-                rule.Constraints.Max = double.TryParse(Max, out var maxNum) ? (object)maxNum : Max.Trim();
-            rule.Constraints.RequireTagTableValue = RequireTagTableValue;
-            if (!string.IsNullOrWhiteSpace(AllowedValues))
-            {
-                rule.Constraints.AllowedValues = AllowedValues
-                    .Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries)
-                    .Select(v => v.Trim())
-                    .Select(v => (object)v)
-                    .ToList();
-            }
-        }
-
-        if (!string.IsNullOrWhiteSpace(TagTableName))
-        {
-            rule.TagTableReference = new TagTableReference { TableName = TagTableName };
-        }
-
-        config.Rules.Add(rule);
-
+        foreach (var rule in Rules)
+            config.Rules.Add(rule.ToMemberRule());
         return config;
     }
 
     /// <summary>
-    /// Returns the validation error for this file, or null if valid.
+    /// Validates every rule in the file. Returns the first error encountered,
+    /// or null when all rules are valid.
     /// </summary>
     public string? Validate()
     {
-        if (FileType == "Rule" && string.IsNullOrWhiteSpace(PathPattern))
-            return $"Rule '{FileName}' must have a path pattern.";
+        if (Rules.Count == 0)
+            return $"File '{FileName}' has no rules.";
 
-        if (FileType == "Rule" && !string.IsNullOrWhiteSpace(Min) && !string.IsNullOrWhiteSpace(Max))
+        foreach (var r in Rules)
         {
-            // Use TIA-aware parsing when datatype is known (handles T#, D#, 16# etc.)
-            var dt = string.IsNullOrWhiteSpace(Datatype) ? null : Datatype;
-            bool minParsed = dt != null
-                ? TiaDataTypeValidator.TryParseNumericValue(Min.Trim(), dt, out var minVal)
-                : double.TryParse(Min, out minVal);
-            bool maxParsed = dt != null
-                ? TiaDataTypeValidator.TryParseNumericValue(Max.Trim(), dt, out var maxVal)
-                : double.TryParse(Max, out maxVal);
-
-            if (minParsed && maxParsed && minVal > maxVal)
-                return $"Rule '{FileName}': Min ({Min}) must be ≤ Max ({Max}).";
+            var err = r.Validate(FileName);
+            if (err != null) return err;
         }
-
         return null;
+    }
+
+    /// <summary>
+    /// Convenience accessor: filename auto-derive from the first rule's pattern,
+    /// used while the file is still <see cref="IsNew"/>. Returns a safe filename.
+    /// </summary>
+    public string DeriveFileNameFromFirstRule()
+    {
+        var first = Rules.FirstOrDefault();
+        return PatternToFileName(first?.PathPattern ?? "");
     }
 }
