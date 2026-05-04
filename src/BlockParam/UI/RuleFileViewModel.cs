@@ -4,6 +4,7 @@ using System.IO;
 using System.Text.RegularExpressions;
 using Newtonsoft.Json;
 using BlockParam.Config;
+using BlockParam.Localization;
 using BlockParam.Services;
 
 namespace BlockParam.UI;
@@ -238,7 +239,9 @@ public class RuleFileViewModel : ViewModelBase
         get
         {
             var parts = new List<string> { SourceDisplay };
-            parts.Add(RuleCount == 1 ? "1 rule" : $"{RuleCount} rules");
+            parts.Add(RuleCount == 1
+                ? Res.Get("ConfigEditor_HeaderSummary_OneRule")
+                : Res.Format("ConfigEditor_HeaderSummary_NRules", RuleCount));
             if (HasOverrides) parts.Add(StatusDisplay);
             return string.Join(" · ", parts);
         }

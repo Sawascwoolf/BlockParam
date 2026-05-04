@@ -107,7 +107,7 @@
                 <StackPanel>
                     <!-- Sticky header bar -->
                     <Border x:Name="FileHeader"
-                            Background="#EEF0F3" BorderBrush="#B9BEC6"
+                            BorderBrush="#B9BEC6"
                             BorderThickness="0,1,0,1"
                             Cursor="Hand"
                             MouseLeftButtonUp="OnFileHeaderClick"
@@ -117,6 +117,7 @@
                         </Border.RenderTransform>
                         <Border.Style>
                             <Style TargetType="Border">
+                                <Setter Property="Background" Value="#EEF0F3"/>
                                 <Style.Triggers>
                                     <DataTrigger Binding="{Binding IsDirty}" Value="True">
                                         <Setter Property="Background" Value="#FFF8DC"/>
@@ -225,7 +226,7 @@
                                                     <Style.Triggers>
                                                         <DataTrigger Binding="{Binding PathPattern}" Value="">
                                                             <Setter Property="Foreground" Value="#999999"/>
-                                                            <Setter Property="Text" Value="(no pattern)"/>
+                                                            <Setter Property="Text" Value="{loc:Loc ConfigEditor_NoPattern}"/>
                                                             <Setter Property="FontStyle" Value="Italic"/>
                                                         </DataTrigger>
                                                     </Style.Triggers>

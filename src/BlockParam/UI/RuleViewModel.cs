@@ -1,4 +1,6 @@
+using System.Globalization;
 using BlockParam.Config;
+using BlockParam.Localization;
 using BlockParam.Services;
 
 namespace BlockParam.UI;
@@ -213,9 +215,12 @@ public class RuleViewModel : ViewModelBase
     {
         get
         {
-            if (!string.IsNullOrWhiteSpace(_tagTableName)) return $"tagTable: {_tagTableName}";
-            if (!string.IsNullOrWhiteSpace(_allowedValues)) return $"allowed: {_allowedValues}";
-            if (!string.IsNullOrWhiteSpace(_commentTemplate)) return $"comment: {_commentTemplate}";
+            if (!string.IsNullOrWhiteSpace(_tagTableName))
+                return Res.Format("ConfigEditor_RuleSecondary_TagTable", _tagTableName);
+            if (!string.IsNullOrWhiteSpace(_allowedValues))
+                return Res.Format("ConfigEditor_RuleSecondary_Allowed", _allowedValues);
+            if (!string.IsNullOrWhiteSpace(_commentTemplate))
+                return Res.Format("ConfigEditor_RuleSecondary_Comment", _commentTemplate);
             if (!string.IsNullOrWhiteSpace(_datatype)) return _datatype;
             return "";
         }
@@ -253,20 +258,21 @@ public class RuleViewModel : ViewModelBase
     public string? Validate(string fileNameForMessages)
     {
         if (string.IsNullOrWhiteSpace(_pathPattern))
-            return $"Rule in '{fileNameForMessages}' must have a path pattern.";
+            return Res.Format("ConfigEditor_RuleValidation_NeedsPathPattern", fileNameForMessages);
 
         if (!string.IsNullOrWhiteSpace(_min) && !string.IsNullOrWhiteSpace(_max))
         {
             var dt = string.IsNullOrWhiteSpace(_datatype) ? null : _datatype;
             bool minParsed = dt != null
                 ? TiaDataTypeValidator.TryParseNumericValue(_min.Trim(), dt, out var minVal)
-                : double.TryParse(_min, out minVal);
+                : double.TryParse(_min, NumberStyles.Float, CultureInfo.InvariantCulture, out minVal);
             bool maxParsed = dt != null
                 ? TiaDataTypeValidator.TryParseNumericValue(_max.Trim(), dt, out var maxVal)
-                : double.TryParse(_max, out maxVal);
+                : double.TryParse(_max, NumberStyles.Float, CultureInfo.InvariantCulture, out maxVal);
 
             if (minParsed && maxParsed && minVal > maxVal)
-                return $"Rule '{_pathPattern}' in '{fileNameForMessages}': Min ({_min}) must be ≤ Max ({_max}).";
+                return Res.Format("ConfigEditor_RuleValidation_MinGtMax",
+                    _pathPattern, fileNameForMessages, _min, _max);
         }
 
         return null;
@@ -277,8 +283,8 @@ public class RuleViewModel : ViewModelBase
     {
         _pathPattern = rule.PathPattern ?? "";
         _datatype = rule.Datatype ?? "";
-        _min = rule.Constraints?.Min?.ToString() ?? "";
-        _max = rule.Constraints?.Max?.ToString() ?? "";
+        _min = FormatNumeric(rule.Constraints?.Min);
+        _max = FormatNumeric(rule.Constraints?.Max);
         _requireTagTableValue = rule.Constraints?.RequireTagTableValue ?? false;
         _allowedValues = rule.Constraints?.AllowedValues != null
             ? string.Join(", ", rule.Constraints.AllowedValues)
@@ -308,9 +314,9 @@ public class RuleViewModel : ViewModelBase
         {
             rule.Constraints = new ValueConstraint();
             if (!string.IsNullOrWhiteSpace(Min))
-                rule.Constraints.Min = double.TryParse(Min, out var minNum) ? (object)minNum : Min.Trim();
+                rule.Constraints.Min = double.TryParse(Min, NumberStyles.Float, CultureInfo.InvariantCulture, out var minNum) ? (object)minNum : Min.Trim();
             if (!string.IsNullOrWhiteSpace(Max))
-                rule.Constraints.Max = double.TryParse(Max, out var maxNum) ? (object)maxNum : Max.Trim();
+                rule.Constraints.Max = double.TryParse(Max, NumberStyles.Float, CultureInfo.InvariantCulture, out var maxNum) ? (object)maxNum : Max.Trim();
             rule.Constraints.RequireTagTableValue = RequireTagTableValue;
             if (!string.IsNullOrWhiteSpace(AllowedValues))
             {
@@ -327,4 +333,16 @@ public class RuleViewModel : ViewModelBase
 
         return rule;
     }
+
+    private static string FormatNumeric(object? value) => value switch
+    {
+        null => "",
+        double d => d.ToString(CultureInfo.InvariantCulture),
+        float f => f.ToString(CultureInfo.InvariantCulture),
+        decimal m => m.ToString(CultureInfo.InvariantCulture),
+        long l => l.ToString(CultureInfo.InvariantCulture),
+        int i => i.ToString(CultureInfo.InvariantCulture),
+        IFormattable f => f.ToString(null, CultureInfo.InvariantCulture),
+        _ => value.ToString() ?? ""
+    };
 }

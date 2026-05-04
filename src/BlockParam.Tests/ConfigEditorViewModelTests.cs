@@ -1,3 +1,5 @@
+using System.Globalization;
+using System.Threading;
 using FluentAssertions;
 using BlockParam.Config;
 using BlockParam.UI;
@@ -273,7 +275,7 @@ public class ConfigEditorViewModelTests : IDisposable
     }
 
     [Fact]
-    public void Validation_RuleMissingPathPattern_ShowsWarning()
+    public void Validation_RuleMissingPathPattern_ShowsWarning() => WithEnglishUICulture(() =>
     {
         var loader = CreateLoader();
         var vm = new ConfigEditorViewModel(loader);
@@ -282,10 +284,10 @@ public class ConfigEditorViewModelTests : IDisposable
         vm.SaveCommand.Execute(null);
 
         vm.ValidationMessage.Should().Contain("path pattern");
-    }
+    });
 
     [Fact]
-    public void Validation_MinGreaterThanMax_ShowsWarning()
+    public void Validation_MinGreaterThanMax_ShowsWarning() => WithEnglishUICulture(() =>
     {
         var loader = CreateLoader();
         var vm = new ConfigEditorViewModel(loader);
@@ -298,7 +300,7 @@ public class ConfigEditorViewModelTests : IDisposable
         vm.SaveCommand.Execute(null);
 
         vm.ValidationMessage.Should().Contain("Min");
-    }
+    });
 
     [Fact]
     public void Load_MultipleFiles_SortedAlphabetically()
@@ -424,7 +426,7 @@ public class ConfigEditorViewModelTests : IDisposable
     }
 
     [Fact]
-    public void HeaderSummary_ReflectsRuleCount()
+    public void HeaderSummary_ReflectsRuleCount() => WithEnglishUICulture(() =>
     {
         var loader = CreateLoader();
         var vm = new ConfigEditorViewModel(loader);
@@ -434,5 +436,19 @@ public class ConfigEditorViewModelTests : IDisposable
 
         vm.NewRuleCommand.Execute(null);
         vm.SelectedFile.HeaderSummary.Should().Contain("2 rules");
+    });
+
+    private static void WithEnglishUICulture(Action action)
+    {
+        var prevUI = Thread.CurrentThread.CurrentUICulture;
+        var prev = Thread.CurrentThread.CurrentCulture;
+        Thread.CurrentThread.CurrentUICulture = new CultureInfo("en-US");
+        Thread.CurrentThread.CurrentCulture = new CultureInfo("en-US");
+        try { action(); }
+        finally
+        {
+            Thread.CurrentThread.CurrentUICulture = prevUI;
+            Thread.CurrentThread.CurrentCulture = prev;
+        }
     }
 }

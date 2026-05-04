@@ -6,6 +6,7 @@ using System.Windows.Input;
 using System.Windows.Threading;
 using BlockParam.Diagnostics;
 using BlockParam.Config;
+using BlockParam.Localization;
 
 namespace BlockParam.UI;
 
@@ -300,7 +301,7 @@ public class ConfigEditorViewModel : ViewModelBase
         catch (Exception ex)
         {
             Log.Error(ex, "ExecuteNewRule failed");
-            ValidationMessage = $"Could not create new rule: {ex.Message}";
+            ValidationMessage = Res.Format("ConfigEditor_NewRule_Failed", ex.Message);
         }
     }
 
@@ -311,7 +312,7 @@ public class ConfigEditorViewModel : ViewModelBase
         {
             var defaultSource = GetDefaultNewFileSource();
             var dir = GetDirectoryForSource(defaultSource);
-            if (dir == null) { ValidationMessage = "No valid save directory available."; return; }
+            if (dir == null) { ValidationMessage = Res.Get("ConfigEditor_NewFile_NoDir"); return; }
 
             var fileName = GenerateUniqueNewFileName(dir);
             var file = new RuleFileViewModel
@@ -335,7 +336,7 @@ public class ConfigEditorViewModel : ViewModelBase
         catch (Exception ex)
         {
             Log.Error(ex, "ExecuteNewFile failed");
-            ValidationMessage = $"Could not create new file: {ex.Message}";
+            ValidationMessage = Res.Format("ConfigEditor_NewFile_Failed", ex.Message);
         }
     }
 
@@ -370,7 +371,7 @@ public class ConfigEditorViewModel : ViewModelBase
         catch (Exception ex)
         {
             Log.Error(ex, "ExecuteDuplicateSelected failed");
-            ValidationMessage = $"Could not duplicate rule: {ex.Message}";
+            ValidationMessage = Res.Format("ConfigEditor_Duplicate_Failed", ex.Message);
         }
     }
 
@@ -451,7 +452,7 @@ public class ConfigEditorViewModel : ViewModelBase
         }
         catch (Exception ex)
         {
-            ValidationMessage = $"Cannot delete file: {ex.Message}";
+            ValidationMessage = Res.Format("ConfigEditor_DeleteFile_Failed", ex.Message);
         }
     }
 
@@ -518,7 +519,7 @@ public class ConfigEditorViewModel : ViewModelBase
     /// <summary>UI-only stub. Logic intentionally out of scope.</summary>
     private void ExecuteImportFiles()
     {
-        ValidationMessage = "Import is not yet implemented.";
+        ValidationMessage = Res.Get("ConfigEditor_Import_NotImplemented");
     }
 
     /// <summary>UI-only stub. Logic intentionally out of scope.</summary>
@@ -531,8 +532,8 @@ public class ConfigEditorViewModel : ViewModelBase
     private void ExecuteExportFile(RuleFileViewModel? file)
     {
         ValidationMessage = file != null
-            ? $"Export of '{file.FileName}' is not yet implemented."
-            : "Export is not yet implemented.";
+            ? Res.Format("ConfigEditor_ExportFile_NotImplemented", file.FileName)
+            : Res.Get("ConfigEditor_Export_NotImplemented");
     }
 
     private void ReloadAfterSave()
