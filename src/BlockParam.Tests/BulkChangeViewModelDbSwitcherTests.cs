@@ -570,6 +570,7 @@ public class BulkChangeViewModelDbSwitcherTests
         public ScriptedMessageBox(Queue<YesNoCancelResult> answers) { _answers = answers; }
         public bool AskYesNo(string message, string title) => true;
         public void ShowError(string message, string title) { }
+        public void ShowInfo(string message, string title) { }
         public YesNoCancelResult AskYesNoCancel(string message, string title) =>
             _answers.Count > 0 ? _answers.Dequeue() : YesNoCancelResult.Cancel;
     }
@@ -582,6 +583,7 @@ public class BulkChangeViewModelDbSwitcherTests
         public FakeMessageBox(YesNoCancelResult result) { _result = result; }
         public bool AskYesNo(string message, string title) { AskYesNoCallCount++; return true; }
         public void ShowError(string message, string title) { }
+        public void ShowInfo(string message, string title) { }
         public YesNoCancelResult AskYesNoCancel(string message, string title)
         {
             AskYesNoCancelCallCount++;

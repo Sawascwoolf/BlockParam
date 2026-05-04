@@ -42,7 +42,12 @@ public class HierarchyAnalyzerMultiDbTests
     public void AnalyzeMulti_TwoDbsSamePaths_EmitsCrossDbSiblings()
     {
         // Two copies of the same DB structure → every cross-DB sibling
-        // doubles the within-DB match count, plus a mega-scope.
+        // doubles the within-DB match count. The "All selected DBs"
+        // mega-scope is *not* expected here: the broadest cross-DB lift
+        // already covers every match across both DBs, so emitting it
+        // would duplicate an existing scope with a different label.
+        // The mega-scope path is exercised separately in
+        // <see cref="AnalyzeMulti_NoWithinDbScopes_StillEmitsMegaScope"/>.
         var db1 = _parser.Parse(TestFixtures.LoadXml("udt-instances-db.xml"));
         var db2 = _parser.Parse(TestFixtures.LoadXml("udt-instances-db.xml"));
         var moduleId = db1.Members[0].Children[0].Children[0];
@@ -52,14 +57,31 @@ public class HierarchyAnalyzerMultiDbTests
 
         // The within-DB analysis on db1 finds 4 ModuleId instances.
         // Cross-DB lifts each scope to include db2's matches as well —
-        // doubling the counts. Plus an All-selected-DBs mega-scope.
+        // doubling the counts.
         result.Scopes.Should().Contain(s => s.MatchCount == 4,
             "within-DB scope: 4 ModuleId in db1");
         result.Scopes.Should().Contain(s => s.MatchCount == 8,
             "cross-DB lift: 4 in db1 + 4 in db2 = 8");
+    }
+
+    [Fact]
+    public void AnalyzeMulti_NoWithinDbScopes_StillEmitsMegaScope()
+    {
+        // When the focused DB has the selected member only once (no
+        // within-DB scopes to lift, no cross-DB siblings), the
+        // "All selected DBs" mega-scope is the only way to reach
+        // matching members in companion DBs — so the analyzer emits
+        // it via the combined.Count == 0 branch.
+        var db1 = _parser.Parse(TestFixtures.LoadXml("flat-db.xml"));
+        var db2 = _parser.Parse(TestFixtures.LoadXml("flat-db.xml"));
+        var speed = db1.Members[0];
+        speed.Name.Should().Be("Speed");
+
+        var result = _analyzer.AnalyzeMulti(new[] { db1, db2 }, db1, speed);
+
         result.Scopes.Should().Contain(s =>
             s.AncestorName == "All selected DBs"
-            && s.MatchCount == 8);
+            && s.MatchCount == 2);
     }
 
     [Fact]

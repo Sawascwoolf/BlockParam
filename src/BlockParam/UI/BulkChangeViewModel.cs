@@ -2541,8 +2541,10 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         {
             // Route per synthetic root so each DB's filter sets only affect
             // its own subtree.
-            foreach (var (db, syntheticRoot) in _dbToSynthetic)
+            foreach (var kvp in _dbToSynthetic)
             {
+                var db = kvp.Key;
+                var syntheticRoot = kvp.Value;
                 perDbSearchPaths.TryGetValue(db, out var sp);
                 perDbExcludeSet.TryGetValue(db, out var ex);
                 syntheticRoot.ApplyFilter(
@@ -2589,8 +2591,10 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         {
             // Per-DB search so a path that's a hit in one DB doesn't smart-
             // expand the same path in companion DBs that don't have a hit.
-            foreach (var (db, syntheticRoot) in _dbToSynthetic)
+            foreach (var kvp in _dbToSynthetic)
             {
+                var db = kvp.Key;
+                var syntheticRoot = kvp.Value;
                 var result = _searchService.Search(db.Info, _searchQuery);
                 var searchPaths = new HashSet<string>(result.Matches.Select(m => m.Path));
                 SmartExpandSearchMatches(syntheticRoot, searchPaths);
@@ -2642,7 +2646,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
                     {
                         node.HasInlineError = true;
                         node.InlineErrorMessage = memberError;
-                        _bulkErrorPaths.Add(path);
+                        _bulkErrorPaths.Add(node.Path);
                     }
                     if (firstError == null)
                     {
@@ -3580,8 +3584,10 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             }
 
             int totalAffected = 0;
-            foreach (var (db, members) in byDb)
+            foreach (var kvp in byDb)
             {
+                var db = kvp.Key;
+                var members = kvp.Value;
                 var modifiedXml = db.Xml;
                 int dbAffected = 0;
                 foreach (var lang in _projectLanguages)
