@@ -1,8 +1,8 @@
 using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Forms;
 using System.Windows.Input;
 using System.Windows.Media;
+using FolderBrowserDialog = System.Windows.Forms.FolderBrowserDialog;
 
 namespace BlockParam.UI;
 
