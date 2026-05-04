@@ -22,11 +22,11 @@ public class DataBlockListItem : ViewModelBase
     // this guard the recomputation re-fires ToggleRequested in a loop.
     private bool _suppressToggle;
 
-    public DataBlockListItem(DataBlockSummary summary, bool isActive, bool isFocused)
+    public DataBlockListItem(DataBlockSummary summary, bool isActive, bool isAnchor)
     {
         Summary = summary;
         _isActive = isActive;
-        IsFocused = isFocused;
+        IsAnchor = isAnchor;
     }
 
     public DataBlockSummary Summary { get; }
@@ -37,8 +37,8 @@ public class DataBlockListItem : ViewModelBase
     public string PlcName => Summary.PlcName;
 
     /// <summary>
-    /// True when this DB is part of the dialog's current active set (focused
-    /// or companion). Two-way bound to the row's checkbox.
+    /// True when this DB is part of the dialog's current active set.
+    /// Two-way bound to the row's checkbox.
     /// </summary>
     public bool IsActive
     {
@@ -54,21 +54,23 @@ public class DataBlockListItem : ViewModelBase
     }
 
     /// <summary>
-    /// True when this is the focused DB (index 0 of the active set). Used by
-    /// the row template to render a small "★" / different chrome. Stays in
-    /// sync with the VM via <see cref="SyncFrom"/>.
+    /// True when this row corresponds to the active set's anchor (index 0,
+    /// the DB the dialog uses for default title / scope display). Carries
+    /// no privilege over removability — peer DBs can still be unchecked
+    /// individually; the next remaining DB just becomes the new anchor.
     /// </summary>
-    public bool IsFocused
+    public bool IsAnchor
     {
-        get => _isFocused;
-        set { if (SetProperty(ref _isFocused, value)) /* no side-effect */ ; }
+        get => _isAnchor;
+        set => SetProperty(ref _isAnchor, value);
     }
-    private bool _isFocused;
+    private bool _isAnchor;
 
     /// <summary>
     /// Raised when the user toggles the row's checkbox. The VM resolves the
-    /// new state (add to companions / remove with stash prompt / promote to
-    /// focused DB if it was the last unchecked).
+    /// new state (add to active set / remove with stash prompt; the next
+    /// remaining DB becomes the new anchor when the current anchor is
+    /// removed).
     /// </summary>
     public event System.Action<DataBlockListItem>? ToggleRequested;
 
@@ -77,13 +79,13 @@ public class DataBlockListItem : ViewModelBase
     /// re-firing <see cref="ToggleRequested"/>. Called when the active set
     /// changes through any path other than this row's own checkbox.
     /// </summary>
-    public void SyncFrom(bool isActive, bool isFocused)
+    public void SyncFrom(bool isActive, bool isAnchor)
     {
         _suppressToggle = true;
         try
         {
             IsActive = isActive;
-            IsFocused = isFocused;
+            IsAnchor = isAnchor;
         }
         finally
         {

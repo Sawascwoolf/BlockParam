@@ -46,12 +46,19 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     private AutocompleteProvider? _autocompleteProvider;
     private TagTableCache? _tagTableCache;
 
-    // The focused DB (selection / scope / status text are computed against
-    // this one). Per-DB state lives in ActiveDb. For multi-DB workflows
-    // (#58) the focus stays on _active and additional DBs hang off
-    // _companions; bulk preview / Apply iterate _active + _companions.
-    private ActiveDb _active;
-    private readonly List<ActiveDb> _companions = new();
+    // Active DB set. All DBs in this list are peers — index 0 is just the
+    // first one in storage order, used as the anchor when the UI needs a
+    // single representative (title, default scope, "current" name display).
+    // Per-DB state (Info, Xml, OnApply) lives on each ActiveDb instance, so
+    // bulk preview / Apply iterate the whole list without privileging any
+    // entry. Mutations go through Add / RemoveActiveDb so anchor display
+    // updates stay consistent.
+    private readonly List<ActiveDb> _activeDbs = new();
+    // _active is kept as a derived alias over _activeDbs[0] so the ~50
+    // call sites that expected "the anchor DB" don't all need rewriting.
+    // It carries no privilege — removing _activeDbs[0] just shifts the next
+    // one into position.
+    private ActiveDb _active => _activeDbs[0];
     private string _title = "";
     // DB-switcher state (#59). Lazy-loaded on first dropdown open and cached
     // for the dialog session; the ↻ button re-enumerates on demand.
@@ -164,9 +171,9 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         _dispatcher = Dispatcher.CurrentDispatcher;
         _projectLanguages = projectLanguages is { Count: > 0 } ? projectLanguages : new[] { "en-GB" };
         _commentLanguagePolicy = new CommentLanguagePolicy(editingLanguage, referenceLanguage, _projectLanguages);
-        _active = new ActiveDb(dataBlockInfo, currentXml, onApply);
+        _activeDbs.Add(new ActiveDb(dataBlockInfo, currentXml, onApply));
         if (additionalActiveDbs != null)
-            _companions.AddRange(additionalActiveDbs);
+            _activeDbs.AddRange(additionalActiveDbs);
         _analyzer = analyzer;
         _bulkChangeService = bulkChangeService;
         _usageTracker = usageTracker;
@@ -255,10 +262,14 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             () => _enumerateDataBlocks != null && !_isLoadingDataBlocks);
         SwitchToStashedDbCommand = new RelayCommand(parameter =>
         {
-            if (parameter is StashedDbState stash) SwitchToDataBlock(stash.Summary);
+            // Peer model: clicking a stashed-DB header re-activates that DB
+            // by adding it back to the active set, then restoring its stash
+            // edits. The previous anchor stays — the user can remove it
+            // themselves if desired. Overwriting the anchor in place would
+            // destroy the user's other active DBs, which the legacy
+            // SwitchToDataBlock path did under the old single-DB model.
+            if (parameter is StashedDbState stash) ReactivateStashedDb(stash);
         });
-        GoToFirstChangeCommand = new RelayCommand(ExecuteGoToFirstChange,
-            () => HasAnyChanges);
 
         if (_licenseService != null)
         {
@@ -738,22 +749,6 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     public ICommand CloseDataBlocksDropdownCommand { get; }
     public ICommand RefreshDataBlocksCommand { get; }
     public ICommand SwitchToStashedDbCommand { get; }
-    public ICommand GoToFirstChangeCommand { get; }
-
-    /// <summary>
-    /// True when there's any work to jump to — either an active-DB pending
-    /// edit or a stashed DB. Drives the visibility of the "jump to changes"
-    /// header button so it disappears when nothing's queued.
-    /// </summary>
-    public bool HasAnyChanges => PendingInlineEditCount > 0 || HasStashedDbs;
-
-    /// <summary>
-    /// Raised when <see cref="GoToFirstChangeCommand"/> needs the view to
-    /// scroll + select a member in the live tree. The view subscribes and
-    /// drives <c>ListView.ScrollIntoView</c> + selection — the VM doesn't
-    /// know about the visual list (#59 follow-up).
-    /// </summary>
-    public event Action<MemberNodeViewModel>? RequestJumpToMember;
 
     /// <summary>
     /// True when the host wired up DB enumeration + switching callbacks.
@@ -784,14 +779,15 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         _modelToDb.Clear();
         _dbToSynthetic.Clear();
 
-        if (_companions.Count == 0)
+        if (_activeDbs.Count == 1)
         {
             // Single-DB: flat list of top-level members, identical to legacy.
-            foreach (var member in _active.Info.Members)
+            var only = _activeDbs[0];
+            foreach (var member in only.Info.Members)
             {
                 var vm = new MemberNodeViewModel(member, null, _commentLanguagePolicy);
                 SubscribeStartValueEdited(vm);
-                IndexSubtree(vm, _active);
+                IndexSubtree(vm, only);
                 RootMembers.Add(vm);
             }
             return;
@@ -801,9 +797,8 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         // real top-level members, reused by reference — Path strings stay
         // unchanged, so existing rule patterns / scope-detection on member
         // paths still match across DBs.
-        AddDbGroupRoot(_active);
-        foreach (var companion in _companions)
-            AddDbGroupRoot(companion);
+        foreach (var db in _activeDbs)
+            AddDbGroupRoot(db);
     }
 
     private void AddDbGroupRoot(ActiveDb db)
@@ -878,18 +873,30 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     /// non-empty — index 0 is the focused DB; indices 1+ are companions
     /// added via multi-select. Bulk preview / Apply iterate the whole list.
     /// </summary>
-    public IReadOnlyList<ActiveDb> AllActiveDbs
+    public IReadOnlyList<ActiveDb> AllActiveDbs => _activeDbs.AsReadOnly();
+
+    /// <summary>True when more than one DB is active in this session (#58).</summary>
+    public bool HasMultipleActiveDbs => _activeDbs.Count > 1;
+
+    /// <summary>
+    /// Comma-joined list of all active DB names, shown in the toolbar so
+    /// the user can read the full active set at a glance without opening
+    /// the dropdown. Empty when only one DB is active (the dropdown button
+    /// already shows it). Truncates past four names with "+N more" so
+    /// large active sets don't push the toolbar layout.
+    /// </summary>
+    public string ActiveDbsSummary
     {
         get
         {
-            var list = new List<ActiveDb>(1 + _companions.Count) { _active };
-            list.AddRange(_companions);
-            return list;
+            if (_activeDbs.Count <= 1) return "";
+            var names = _activeDbs.Select(d => d.Info.Name).ToList();
+            const int maxShown = 4;
+            if (names.Count <= maxShown)
+                return string.Join(", ", names);
+            return $"{string.Join(", ", names.Take(maxShown))} +{names.Count - maxShown} more";
         }
     }
-
-    /// <summary>True when more than one DB is active in this session (#58).</summary>
-    public bool HasMultipleActiveDbs => _companions.Count > 0;
 
     /// <summary>
     /// Owning PLC name for the active DB, surfaced as a dim prefix in the
@@ -958,8 +965,8 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         var items = new List<DataBlockListItem>(_filteredDataBlocks.Count);
         foreach (var summary in _filteredDataBlocks)
         {
-            var (isActive, isFocused) = GetActiveStatusFor(summary);
-            var item = new DataBlockListItem(summary, isActive, isFocused);
+            var (isActive, isAnchor) = GetActiveStatusFor(summary);
+            var item = new DataBlockListItem(summary, isActive, isAnchor);
             item.ToggleRequested += OnDataBlockListItemToggled;
             items.Add(item);
         }
@@ -968,22 +975,24 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
 
     /// <summary>
     /// True/false pair for a row: (isActive: in the dialog's active set,
-    /// isFocused: index 0 of the active set). Companions are isActive but
-    /// not isFocused.
+    /// isAnchor: index 0 of the active set, used as the UI's display
+    /// anchor). isAnchor carries no privilege over removability — it just
+    /// tells the row template whether to render the anchor decoration.
     /// </summary>
-    private (bool isActive, bool isFocused) GetActiveStatusFor(DataBlockSummary summary)
+    private (bool isActive, bool isAnchor) GetActiveStatusFor(DataBlockSummary summary)
     {
         // Match on (Name, PlcName) — multi-PLC projects can host two DBs
         // with the same name on different PLCs (#58 review must-fix #4).
-        // The focused DB's PLC is _currentPlcName; companions carry their
-        // own ActiveDb.PlcName.
-        if (string.Equals(_active.Info.Name, summary.Name, StringComparison.Ordinal)
-            && string.Equals(_currentPlcName, summary.PlcName, StringComparison.Ordinal))
-            return (true, true);
-        foreach (var companion in _companions)
-            if (string.Equals(companion.Info.Name, summary.Name, StringComparison.Ordinal)
-                && string.Equals(companion.PlcName, summary.PlcName, StringComparison.Ordinal))
-                return (true, false);
+        // For index 0 the PLC name comes from _currentPlcName (display state);
+        // for the rest we read each ActiveDb.PlcName directly.
+        for (int i = 0; i < _activeDbs.Count; i++)
+        {
+            var db = _activeDbs[i];
+            var plc = i == 0 ? _currentPlcName : db.PlcName;
+            if (string.Equals(db.Info.Name, summary.Name, StringComparison.Ordinal)
+                && string.Equals(plc, summary.PlcName, StringComparison.Ordinal))
+                return (true, i == 0);
+        }
         return (false, false);
     }
 
@@ -996,18 +1005,19 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     {
         foreach (var item in _filteredDataBlockItems)
         {
-            var (isActive, isFocused) = GetActiveStatusFor(item.Summary);
-            item.SyncFrom(isActive, isFocused);
+            var (isActive, isAnchor) = GetActiveStatusFor(item.Summary);
+            item.SyncFrom(isActive, isAnchor);
         }
     }
 
     private void OnDataBlockListItemToggled(DataBlockListItem item)
     {
-        // The IsActive setter has already flipped to the new value. Reflect
-        // that into the active set: checked → add as companion; unchecked →
-        // remove (with a guard preventing the focused DB from being
-        // unchecked while it still owns pending edits).
-        var (wasActive, wasFocused) = GetActiveStatusFor(item.Summary);
+        // The IsActive setter has already flipped to the new value. Peer
+        // model: checked → add to active set; unchecked → remove from active
+        // set, with the same Apply / Stash / Cancel prompt regardless of
+        // whether the row is the current anchor. The active set must keep
+        // at least one DB — refuse the last uncheck.
+        var (wasActive, _) = GetActiveStatusFor(item.Summary);
         bool wantActive = item.IsActive;
 
         try
@@ -1018,39 +1028,151 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             }
             else if (!wantActive && wasActive)
             {
-                if (wasFocused)
+                if (_activeDbs.Count <= 1)
                 {
-                    // Unchecking the focused DB is intentionally blocked in
-                    // this commit — it would require promoting a companion
-                    // to focus and re-driving the title / scope state, which
-                    // is a follow-up. Snap the checkbox back so the user
-                    // sees the rejection without an error dialog.
                     Log.Information(
-                        "Refusing to remove focused DB {Name} via dropdown — uncheck a companion instead",
+                        "Refusing to remove {Name} — at least one DB must stay active",
                         item.Name);
                 }
                 else
                 {
-                    RemoveCompanion(item.Summary);
+                    var match = FindActiveDb(item.Summary);
+                    if (match != null) RemoveActiveDb(match);
                 }
             }
         }
         finally
         {
-            // Always re-sync the row checkbox states from the authoritative
-            // active set so a refused toggle snaps back visually.
-            RefreshFilteredDataBlockItemsActiveState();
-            // The tree depends on the active set: rebuild it so the new DB
-            // appears as a synthetic-rooted subtree (or vanishes on remove).
-            RootMembers.Clear();
-            BuildRootMembersFromActiveDbs();
-            OnPropertyChanged(nameof(HasMultipleActiveDbs));
+            RebuildAfterActiveSetChanged();
         }
     }
 
     /// <summary>
+    /// Solo gesture (#58 peer-mode): replace the active set with just the
+    /// target DB. Each dropped DB runs through the same Apply / Stash /
+    /// Cancel prompt RemoveActiveDb uses; if the user cancels on any one,
+    /// the remaining drops are aborted (the set ends up partially soloed).
+    /// </summary>
+    public void SoloActiveDb(DataBlockSummary target)
+    {
+        // Make sure the target is in the active set first — if the user
+        // soloed a row that wasn't checked, we add it before pruning the
+        // others so the "leave only this one" invariant always holds.
+        if (FindActiveDb(target) == null)
+            AddCompanionFromSummary(target);
+
+        // Take a snapshot up front: removing entries while iterating shifts
+        // indices and we'd skip neighbors. Reference identity is what
+        // RemoveActiveDb matches on.
+        var others = _activeDbs
+            .Where(db => !IsSameSummary(db, target))
+            .ToList();
+
+        foreach (var db in others)
+        {
+            if (!RemoveActiveDb(db))
+            {
+                // User cancelled mid-solo — stop pruning. The set is now
+                // {target, db, ...still-not-pruned}; user can retry.
+                Log.Information(
+                    "SoloActiveDb cancelled at {Name} — leaving partial set",
+                    db.Info.Name);
+                break;
+            }
+        }
+
+        IsDataBlocksDropdownOpen = false;
+        RebuildAfterActiveSetChanged();
+    }
+
+    private bool IsSameSummary(ActiveDb db, DataBlockSummary summary)
+    {
+        // Mirror FindActiveDb's anchor PLC handling: index 0 reads
+        // _currentPlcName; the rest carry their own PlcName on ActiveDb.
+        var idx = _activeDbs.IndexOf(db);
+        var plc = idx == 0 ? _currentPlcName : db.PlcName;
+        return string.Equals(db.Info.Name, summary.Name, StringComparison.Ordinal)
+            && string.Equals(plc, summary.PlcName, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Inspector path: re-add a previously-stashed DB back into the active
+    /// set and restore its stash edits onto the live tree. Symmetric with
+    /// the dropdown re-check flow — same Add helper, same rebuild — so the
+    /// inspector header click and re-checking the dropdown row produce the
+    /// same end state. Existing active DBs are preserved.
+    /// </summary>
+    private void ReactivateStashedDb(StashedDbState stash)
+    {
+        var summary = stash.Summary;
+
+        // No-op if it's already active (defensive — the stash entry only
+        // exists for inactive DBs, but the click could double-fire).
+        if (FindActiveDb(summary) != null)
+        {
+            Log.Information(
+                "ReactivateStashedDb: {Name} already active — restoring stash only",
+                summary.Name);
+        }
+        else
+        {
+            AddCompanionFromSummary(summary);
+        }
+
+        RebuildAfterActiveSetChanged();
+
+        // Now that the DB's nodes are in the live tree, replay the stash.
+        // RestoreStashFor pops the stash entry on success.
+        var (restored, dropped) = RestoreStashFor(summary);
+        if (restored > 0 || dropped > 0)
+        {
+            StatusText = dropped == 0
+                ? Res.Format("Status_DbSwitched_StashRestored", summary.Name, restored)
+                : Res.Format("Status_DbSwitched_StashPartial",
+                    summary.Name, restored, dropped);
+        }
+    }
+
+    /// <summary>
+    /// Re-runs the full UI rebuild after _activeDbs is mutated (add / remove /
+    /// reactivate). Refreshes dropdown checkbox states, clears stale selection
+    /// /scope/manual-selection (held by VM references that the rebuild
+    /// invalidates), rebuilds the tree from the new active set, then re-applies
+    /// filters + the flat list so the visible ListView (bound to FlatMembers,
+    /// not RootMembers) doesn't need a stray click to refresh.
+    /// </summary>
+    private void RebuildAfterActiveSetChanged()
+    {
+        // Always re-sync the row checkbox states from the authoritative
+        // active set so a refused toggle snaps back visually.
+        RefreshFilteredDataBlockItemsActiveState();
+        // BuildRootMembersFromActiveDbs creates fresh MemberNodeViewModel
+        // instances on every rebuild, so any selection / scope / manual-
+        // selection state held by reference points at orphaned VMs from
+        // the previous tree. Clear them before the rebuild — same pattern
+        // SwitchToDataBlock uses — so the count machinery doesn't accumulate
+        // phantom entries from a deactivated DB.
+        _selectedFlatMember = null;
+        _selectedScope = null;
+        _manualSelectedPaths.Clear();
+        RootMembers.Clear();
+        BuildRootMembersFromActiveDbs();
+        ApplyAllFilters();
+        RefreshFlatList();
+        OnPropertyChanged(nameof(HasMultipleActiveDbs));
+        OnPropertyChanged(nameof(ActiveDbsSummary));
+        OnPropertyChanged(nameof(SelectedFlatMember));
+        OnPropertyChanged(nameof(SelectedScope));
+        OnPropertyChanged(nameof(HasSelection));
+        OnPropertyChanged(nameof(HasScope));
+        OnPropertyChanged(nameof(IsManualMode));
+        OnPropertyChanged(nameof(ManualSelectionCount));
+        OnPropertyChanged(nameof(SelectedMemberDisplay));
+    }
+
+    /// <summary>
     /// Loads + parses a DB picked from the dropdown and appends it to
-    /// <see cref="_companions"/> (#58). Reuses the host's
+    /// <see cref="_activeDbs"/> (#58). Reuses the host's
     /// <see cref="_switchToDataBlock"/> callback for export — it already
     /// handles the compile-prompt for inconsistent DBs and re-parses with
     /// the same resolvers as the focused DB.
@@ -1072,8 +1194,8 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
                     Log.Information("Companion build returned null for {Name}", summary.Name);
                     return;
                 }
-                _companions.Add(built);
-                Log.Information("Companion DB enabled via dropdown (writable): {Name}",
+                _activeDbs.Add(built);
+                Log.Information("DB enabled via dropdown (writable): {Name}",
                     built.Info.Name);
                 return;
             }
@@ -1099,10 +1221,10 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             var parser = new SimaticMLParser(constantResolver, _udtResolver, _commentResolver);
             var info = parser.Parse(xml);
             // PlcName from _currentPlcName: the dropdown only enumerates DBs
-            // from the focused PLC, so any read-only-fallback companion is
-            // implicitly on the same PLC as the focused DB.
-            _companions.Add(new ActiveDb(info, xml, onApply: null, plcName: _currentPlcName));
-            Log.Information("Companion DB enabled via dropdown (read-only fallback): {Name}",
+            // from the anchor's PLC, so any read-only-fallback addition is
+            // implicitly on the same PLC as the anchor.
+            _activeDbs.Add(new ActiveDb(info, xml, onApply: null, plcName: _currentPlcName));
+            Log.Information("DB enabled via dropdown (read-only fallback): {Name}",
                 info.Name);
         }
         catch (Exception ex)
@@ -1113,75 +1235,98 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
-    /// Removes a companion identified by <see cref="DataBlockSummary"/>
-    /// (#58). When the companion has pending edits in the live tree, asks
-    /// the user what to do via the same 3-way Apply / Stash / Cancel
-    /// prompt the #59 single-switch uses, so unchecking a row doesn't
-    /// silently drop edits.
-    ///
-    /// Identifies the companion by (Name, PlcName) so multi-PLC projects
-    /// where two PLCs share a DB name don't accidentally drop the wrong
-    /// companion (#58 review must-fix #4).
+    /// Looks up an active DB by (Name, PlcName) so dropdown rows resolve to
+    /// the right ActiveDb instance even in multi-PLC projects where two
+    /// PLCs share a DB name (#58 review must-fix #4).
     /// </summary>
-    /// <returns>true if the companion was removed; false if the user
-    /// cancelled (caller should re-check the dropdown row).</returns>
-    private bool RemoveCompanion(DataBlockSummary summary)
+    private ActiveDb? FindActiveDb(DataBlockSummary summary)
     {
-        for (int i = 0; i < _companions.Count; i++)
+        for (int i = 0; i < _activeDbs.Count; i++)
         {
-            var companion = _companions[i];
-            // Match by (Name, PlcName). PlcName comparison is empty-safe:
-            // single-PLC DataBlockListItems carry "" for PlcName, which
-            // matches the VM's _currentPlcName fallback.
-            if (!string.Equals(companion.Info.Name, summary.Name, StringComparison.Ordinal))
-                continue;
-            if (!string.Equals(_currentPlcName, summary.PlcName, StringComparison.Ordinal))
-                continue;
+            var db = _activeDbs[i];
+            // Index 0 reads its display PLC from _currentPlcName; the rest
+            // read it from each ActiveDb directly.
+            var plc = i == 0 ? _currentPlcName : db.PlcName;
+            if (string.Equals(db.Info.Name, summary.Name, StringComparison.Ordinal)
+                && string.Equals(plc, summary.PlcName, StringComparison.Ordinal))
+                return db;
+        }
+        return null;
+    }
 
-            // Count pending edits within this companion's synthetic subtree.
-            var pendingCount = CountPendingEditsForDb(companion);
-            if (pendingCount > 0)
+    /// <summary>
+    /// Removes a DB from the active set (#58). Peer model — works on any
+    /// active DB, not just non-anchor ones. When pending edits exist, runs
+    /// the same 3-way Apply / Stash / Cancel prompt the #59 single-switch
+    /// uses; on Cancel the row stays checked. The active set must always
+    /// hold at least one DB; caller is expected to enforce that before
+    /// calling.
+    ///
+    /// When the removed DB was the anchor (index 0), the next remaining
+    /// entry shifts into position automatically via List.Remove. The UI's
+    /// CurrentPlcName / Title / CurrentDataBlockName re-derive off the new
+    /// anchor before we return.
+    /// </summary>
+    /// <returns>true if removed; false if the user cancelled.</returns>
+    private bool RemoveActiveDb(ActiveDb db)
+    {
+        var pendingCount = CountPendingEditsForDb(db);
+        if (pendingCount > 0)
+        {
+            var result = _messageBox.AskYesNoCancel(
+                Res.Format("Dialog_SwitchDb_KeepConfirm_Text",
+                    pendingCount, db.Info.Name),
+                Res.Get("Dialog_SwitchDb_KeepConfirm_Title"));
+
+            if (result == YesNoCancelResult.Cancel)
             {
-                var result = _messageBox.AskYesNoCancel(
-                    Res.Format("Dialog_SwitchDb_KeepConfirm_Text",
-                        pendingCount, companion.Info.Name),
-                    Res.Get("Dialog_SwitchDb_KeepConfirm_Title"));
-
-                if (result == YesNoCancelResult.Cancel)
+                Log.Information("DB remove cancelled by user: {Name}", db.Info.Name);
+                return false;
+            }
+            if (result == YesNoCancelResult.Yes)
+            {
+                // Apply this DB's edits before removing. TryApplyCompanionInPlace
+                // is a misnomer — the helper works for any ActiveDb, not just
+                // companions; rename pending. Aborts (cap hit / null OnApply)
+                // leave the DB in place.
+                if (!TryApplyCompanionInPlace(db))
                 {
-                    Log.Information("Companion remove cancelled by user: {Name}", summary.Name);
+                    Log.Information(
+                        "DB remove aborted: pending Apply did not succeed for {Name}",
+                        db.Info.Name);
                     return false;
                 }
-                if (result == YesNoCancelResult.Yes)
-                {
-                    // Apply this companion's edits before removing it.
-                    // Re-uses the multi-DB Apply path so the unified counter
-                    // gets charged correctly. Aborts on Apply failure (cap
-                    // hit, validation error) — leaves the companion present.
-                    var applyOk = TryApplyCompanionInPlace(companion);
-                    if (!applyOk)
-                    {
-                        Log.Information(
-                            "Companion remove aborted: pending Apply did not succeed for {Name}",
-                            summary.Name);
-                        return false;
-                    }
-                }
-                else
-                {
-                    // No: stash the pending edits keyed by DB identity so
-                    // re-checking the row in the same dialog session
-                    // restores them. Mirrors the #59 stash semantics for
-                    // the dropdown-driven multi-DB path.
-                    StashPendingEditsForDb(companion);
-                }
             }
-
-            _companions.RemoveAt(i);
-            Log.Information("Companion DB disabled via dropdown: {Name}", summary.Name);
-            return true;
+            else
+            {
+                // No: stash the pending edits keyed by DB identity so
+                // re-checking the row in the same dialog session restores
+                // them.
+                StashPendingEditsForDb(db);
+            }
         }
-        return false;
+
+        bool wasAnchor = ReferenceEquals(db, _activeDbs[0]);
+        _activeDbs.Remove(db);
+
+        if (wasAnchor)
+        {
+            // The new anchor is whichever DB shifted into _activeDbs[0].
+            // Refresh display state derived from the anchor.
+            var newAnchor = _activeDbs[0];
+            CurrentPlcName = newAnchor.PlcName;
+            var version = typeof(BulkChangeViewModel).Assembly.GetName().Version;
+            Title = BuildTitle(version, _currentPlcName, newAnchor.Info.Name);
+            OnPropertyChanged(nameof(CurrentDataBlockName));
+            Log.Information(
+                "Anchor shifted after removal: now {NewName} (was: {OldName})",
+                newAnchor.Info.Name, db.Info.Name);
+        }
+        else
+        {
+            Log.Information("DB disabled via dropdown: {Name}", db.Info.Name);
+        }
+        return true;
     }
 
     /// <summary>
@@ -1545,31 +1690,6 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     private static string StashKey(DataBlockSummary summary) =>
         $"{summary.PlcName}\u0001{summary.FolderPath}\u0001{summary.Name}";
 
-    /// <summary>
-    /// Jumps to the first DB with pending work (#59 follow-up). Active-DB
-    /// pending edits win — scroll + select the first one. If the active DB
-    /// is clean but stashes exist, switch to the first stashed DB and let
-    /// the restore path surface its edits.
-    /// </summary>
-    private void ExecuteGoToFirstChange()
-    {
-        if (PendingInlineEditCount > 0)
-        {
-            var first = PendingEdits.FirstOrDefault();
-            if (first != null)
-            {
-                first.Node.EnsureVisible();
-                SelectedFlatMember = first.Node;
-                RequestJumpToMember?.Invoke(first.Node);
-            }
-            return;
-        }
-
-        var firstStash = StashedDbs.FirstOrDefault();
-        if (firstStash != null)
-            SwitchToDataBlock(firstStash.Summary);
-    }
-
     private void StashCurrentDb(IReadOnlyList<StashedEditEntry> edits)
     {
         var summary = new DataBlockSummary(
@@ -1663,7 +1783,6 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             StashedDbs.Add(state);
         }
         OnPropertyChanged(nameof(HasStashedDbs));
-        OnPropertyChanged(nameof(HasAnyChanges));
     }
 
     /// <summary>
@@ -2294,7 +2413,6 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(PendingInlineEditCount));
         OnPropertyChanged(nameof(PendingStatusText));
         OnPropertyChanged(nameof(ApplyTooltip));
-        OnPropertyChanged(nameof(HasAnyChanges));
         ComputeBulkPreview();
         RebuildPendingEdits();
     }
@@ -3228,7 +3346,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         // inside the same dialog tick. Host wires all OnApply invocations
         // into a single ExclusiveAccess block so multi-DB Apply is one TIA
         // undo step (matches issue #58 decision).
-        if (_companions.Count > 0)
+        if (_activeDbs.Count > 1)
         {
             ExecuteApplyMultiDb();
             return;

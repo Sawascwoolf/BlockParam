@@ -46,21 +46,7 @@ public partial class BulkChangeDialog : Window
         viewModel.RequestClose += () => Close();
         viewModel.FlatListRefreshed += RehydrateManualSelection;
         viewModel.PropertyChanged += OnViewModelPropertyChanged;
-        // VM raises this when "go to first change" picks a member to scroll
-        // into view (#59 follow-up). VM owns the selection logic; we just
-        // do the visual scroll the ListView needs. Named so we can unhook
-        // on close — matches the _licenseStateChangedHandler cleanup pattern.
-        Action<MemberNodeViewModel> jumpHandler = target =>
-        {
-            target.EnsureVisible();
-            MemberListView.ScrollIntoView(target);
-        };
-        viewModel.RequestJumpToMember += jumpHandler;
-        Closed += (_, _) =>
-        {
-            viewModel.RequestJumpToMember -= jumpHandler;
-            viewModel.Dispose();
-        };
+        Closed += (_, _) => viewModel.Dispose();
 
         // Briefly set Topmost to appear above TIA Portal, then release
         // so other windows (non-TIA) can go in front.
@@ -1195,6 +1181,26 @@ public partial class BulkChangeDialog : Window
         {
             vm.SwitchToDataBlock(picked);
             lb.SelectedItem = null;
+        }), System.Windows.Threading.DispatcherPriority.Background);
+    }
+
+    /// <summary>
+    /// "Solo" click on a dropdown row's name button (#58 peer-mode follow-up).
+    /// Replaces the active set with just this DB so the user can drop back
+    /// to a single-DB view in one click. The CheckBox to the left of this
+    /// button still owns add / remove behavior.
+    /// </summary>
+    private void OnDbSwitcherSoloClick(object sender, RoutedEventArgs e)
+    {
+        if (DataContext is not BulkChangeViewModel vm) return;
+        if (sender is not Button b) return;
+        if (b.DataContext is not DataBlockListItem item) return;
+
+        // Defer so the popup absorbs the StaysOpen=False close cleanly
+        // before we mutate the active set + rebuild the tree.
+        Dispatcher.BeginInvoke(new Action(() =>
+        {
+            vm.SoloActiveDb(item.Summary);
         }), System.Windows.Threading.DispatcherPriority.Background);
     }
 }

@@ -801,6 +801,19 @@ Closing the dialog will discard them. Close anyway?</value>
   <data name="Dialog_SwitchDb_InstanceBadge" xml:space="preserve">
     <value>Instance</value>
   </data>
+  <!-- "Solo" tooltip on each dropdown row's name button (peer-mode #58
+       follow-up). Distinct from the checkbox: checkbox toggles, name-button
+       click replaces the active set with just this DB so the user can drop
+       back to a single-DB view in one click. -->
+  <data name="Dialog_SwitchDb_SoloTooltip" xml:space="preserve">
+    <value>Show only this DB (uncheck the others)</value>
+  </data>
+  <!-- Tooltip on the toolbar's comma-joined active-DB list (#58 peer-mode).
+       Helps users who hover the summary read the full unabbreviated set
+       even when "+N more" truncated it. -->
+  <data name="Dialog_ActiveDbsSummary_Tooltip" xml:space="preserve">
+    <value>All data blocks currently active in this dialog. Open the picker (left) to add or remove.</value>
+  </data>
   <data name="Dialog_SwitchDb_DiscardConfirm_Title" xml:space="preserve">
     <value>Discard staged changes?</value>
   </data>
@@ -841,14 +854,6 @@ Cancel — Stay on '{1}'.</value>
   </data>
   <data name="Inspector_StashedDb_Tooltip" xml:space="preserve">
     <value>Click to switch back to this DB. The current DB's edits will be re-prompted.</value>
-  </data>
-  <!-- "Jump to changes" header button (#59 follow-up). Visible only while
-       there's something to jump to (active pending or a stashed DB). -->
-  <data name="Dialog_GoToFirstChange_Label" xml:space="preserve">
-    <value>Jump to changes</value>
-  </data>
-  <data name="Dialog_GoToFirstChange_Tooltip" xml:space="preserve">
-    <value>Jump to the first pending change — in the current DB if any, otherwise switches to the first stashed DB.</value>
   </data>
   <data name="Dialog_SwitchDb_LoadFailed" xml:space="preserve">
     <value>Failed to load '{0}':

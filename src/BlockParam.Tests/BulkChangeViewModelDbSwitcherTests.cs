@@ -427,53 +427,6 @@ public class BulkChangeViewModelDbSwitcherTests
     // unified Apply-based counter (#62), which has no inline-edit charge to bypass.
 
     [Fact]
-    public void GoToFirstChange_ActivePending_FiresJumpEventForFirstPendingNode()
-    {
-        var h = CreateVm();
-        // Stage one inline edit on the active DB.
-        var leaf = h.Vm.RootMembers.First(m => m.IsLeaf);
-        leaf.EditableStartValue = "999";
-
-        MemberNodeViewModel? jumpedTo = null;
-        h.Vm.RequestJumpToMember += node => jumpedTo = node;
-
-        h.Vm.HasAnyChanges.Should().BeTrue();
-        h.Vm.GoToFirstChangeCommand.CanExecute(null).Should().BeTrue();
-
-        h.Vm.GoToFirstChangeCommand.Execute(null);
-
-        jumpedTo.Should().NotBeNull("active-DB pending wins — view should scroll to the first pending member");
-        jumpedTo!.Path.Should().Be(leaf.Path);
-        h.Vm.SelectedFlatMember.Should().Be(leaf);
-    }
-
-    [Fact]
-    public void GoToFirstChange_OnlyStashes_SwitchesToFirstStashedDb()
-    {
-        var h = CreateVm(promptResult: YesNoCancelResult.No);
-
-        // Stage on primary, switch away (Keep) so the active DB ends up clean.
-        var leaf = h.Vm.RootMembers.First(m => m.IsLeaf);
-        var originalDb = h.Vm.CurrentDataBlockName;
-        leaf.EditableStartValue = "888";
-
-        h.Vm.OpenDataBlocksDropdownCommand.Execute(null);
-        var target = h.Vm.FilteredDataBlocks.First(b => b.Name != originalDb);
-        h.Vm.SwitchToDataBlock(target).Should().BeTrue();
-        h.Vm.PendingInlineEditCount.Should().Be(0);
-        h.Vm.HasStashedDbs.Should().BeTrue();
-
-        // Active is clean, stash exists → GoToFirstChange should switch BACK
-        // to the stashed DB (which is the original primary).
-        h.Vm.HasAnyChanges.Should().BeTrue();
-        h.Vm.GoToFirstChangeCommand.Execute(null);
-
-        h.Vm.CurrentDataBlockName.Should().Be(originalDb);
-        h.Vm.PendingInlineEditCount.Should().Be(1, "stash restored on switch-back");
-        h.Vm.HasStashedDbs.Should().BeFalse();
-    }
-
-    [Fact]
     public void StashOnA_KeepToB_ApplyToC_PreservesAStash()
     {
         // Regression for the mid-cycle Apply path (#59 review): user stages
@@ -549,14 +502,6 @@ public class BulkChangeViewModelDbSwitcherTests
         vm.StashedDbs[0].DbName.Should().Be(aInfo.Name);
         vm.StashedDbs[0].Edits.Should().HaveCount(1);
         vm.StashedDbs[0].Edits[0].PendingValue.Should().Be("111");
-    }
-
-    [Fact]
-    public void GoToFirstChange_NothingQueued_CommandDisabled()
-    {
-        var h = CreateVm();
-        h.Vm.HasAnyChanges.Should().BeFalse();
-        h.Vm.GoToFirstChangeCommand.CanExecute(null).Should().BeFalse();
     }
 
     /// <summary>

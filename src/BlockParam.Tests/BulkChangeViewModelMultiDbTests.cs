@@ -209,7 +209,7 @@ public class BulkChangeViewModelMultiDbTests
     [Fact]
     public void FilteredDataBlockItems_FlagsActiveAndFocusedRows()
     {
-        // Dropdown wrapper layer (#58): each row carries its IsActive / IsFocused
+        // Dropdown wrapper layer (#58): each row carries its IsActive / IsAnchor
         // flags so the multi-select UI can render the right checkbox / chrome.
         var focusedXml = TestFixtures.LoadXml("flat-db.xml");
         var companionXml = TestFixtures.LoadXml("nested-struct-db.xml");
@@ -246,15 +246,15 @@ public class BulkChangeViewModelMultiDbTests
 
         var focusedRow = items.First(i => i.Name == focused.Name);
         focusedRow.IsActive.Should().BeTrue();
-        focusedRow.IsFocused.Should().BeTrue();
+        focusedRow.IsAnchor.Should().BeTrue();
 
         var companionRow = items.First(i => i.Name == companion.Name);
         companionRow.IsActive.Should().BeTrue();
-        companionRow.IsFocused.Should().BeFalse();
+        companionRow.IsAnchor.Should().BeFalse();
 
         var unusedRow = items.First(i => i.Name == "DB_OtherUnused");
         unusedRow.IsActive.Should().BeFalse();
-        unusedRow.IsFocused.Should().BeFalse();
+        unusedRow.IsAnchor.Should().BeFalse();
     }
 
     [Fact]

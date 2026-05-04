@@ -175,22 +175,18 @@
                                        FontWeight="SemiBold" VerticalAlignment="Center"/>
                         </DockPanel>
                     </Button>
-                    <!-- Quick "jump to first change" button (#59 follow-up).
-                         Auto-collapses when nothing's queued so the header
-                         stays clean in the empty state. Active-DB pending
-                         wins; otherwise switches to the first stashed DB. -->
-                    <Button Margin="6,0,0,0" Padding="8,3"
-                            Background="Transparent" BorderBrush="#7c63b5"
-                            BorderThickness="1" Foreground="#3f2d6b"
-                            Cursor="Hand" FontSize="11" FontWeight="SemiBold"
-                            Command="{Binding GoToFirstChangeCommand}"
-                            Visibility="{Binding HasAnyChanges, Converter={StaticResource BoolToVis}}"
-                            ToolTip="{loc:Loc Dialog_GoToFirstChange_Tooltip}">
-                        <TextBlock>
-                            <Run Text="↓ "/>
-                            <Run Text="{loc:Loc Dialog_GoToFirstChange_Label}"/>
-                        </TextBlock>
-                    </Button>
+                    <!-- Active-DB summary (#58 peer-mode): comma-joined list of every
+                         active DB, shown only when 2+ are active so single-DB users
+                         keep a clean header. Truncates past 4 with "+N more" so
+                         large active sets don't push the toolbar layout. -->
+                    <TextBlock DockPanel.Dock="Left"
+                               Text="{Binding ActiveDbsSummary}"
+                               VerticalAlignment="Center"
+                               Margin="12,0,0,0"
+                               Foreground="#666" FontSize="11"
+                               TextTrimming="CharacterEllipsis"
+                               ToolTip="{loc:Loc Dialog_ActiveDbsSummary_Tooltip}"
+                               Visibility="{Binding HasMultipleActiveDbs, Converter={StaticResource BoolToVis}}"/>
                     <Popup x:Name="DbSwitcherPopup"
                            IsOpen="{Binding IsDataBlocksDropdownOpen, Mode=TwoWay}"
                            PlacementTarget="{Binding ElementName=DbSwitcherButton}"
@@ -242,25 +238,41 @@
                                     </ListBox.ItemContainerStyle>
                                     <ListBox.ItemTemplate>
                                         <DataTemplate>
+                                            <!-- Two click targets per row: the CheckBox (left)
+                                                 toggles this DB in the multi-select active set;
+                                                 the Button wrapping name + folder + badge "soloes"
+                                                 the row — replaces the active set with just this
+                                                 DB. Solo gives a one-click "back to single-DB
+                                                 view" gesture without forcing the user to uncheck
+                                                 every other row. -->
                                             <DockPanel LastChildFill="True">
                                                 <CheckBox DockPanel.Dock="Left"
                                                           IsChecked="{Binding IsActive, Mode=TwoWay}"
                                                           VerticalAlignment="Center"
                                                           Margin="0,0,8,0"/>
-                                                <Border DockPanel.Dock="Right" Background="#EEE"
-                                                        Padding="4,0" CornerRadius="2" Margin="6,0,0,0"
-                                                        Visibility="{Binding IsInstanceDb, Converter={StaticResource BoolToVis}}">
-                                                    <TextBlock Text="{loc:Loc Dialog_SwitchDb_InstanceBadge}"
-                                                               FontSize="9" Foreground="#555"
-                                                               VerticalAlignment="Center"/>
-                                                </Border>
-                                                <TextBlock Text="{Binding FolderPath}" Foreground="#888"
-                                                           FontSize="10" Margin="6,0,0,0"
-                                                           VerticalAlignment="Center"
-                                                           DockPanel.Dock="Right"
-                                                           Visibility="{Binding FolderPath, Converter={StaticResource StringToVis}}"/>
-                                                <TextBlock Text="{Binding Name}" FontWeight="SemiBold"
-                                                           VerticalAlignment="Center"/>
+                                                <Button Background="Transparent" BorderThickness="0"
+                                                        Padding="0" Cursor="Hand"
+                                                        HorizontalContentAlignment="Stretch"
+                                                        Click="OnDbSwitcherSoloClick"
+                                                        ToolTip="{loc:Loc Dialog_SwitchDb_SoloTooltip}">
+                                                    <DockPanel LastChildFill="True">
+                                                        <Border DockPanel.Dock="Right" Background="#EEE"
+                                                                Padding="4,0" CornerRadius="2" Margin="6,0,0,0"
+                                                                Visibility="{Binding IsInstanceDb, Converter={StaticResource BoolToVis}}">
+                                                            <TextBlock Text="{loc:Loc Dialog_SwitchDb_InstanceBadge}"
+                                                                       FontSize="9" Foreground="#555"
+                                                                       VerticalAlignment="Center"/>
+                                                        </Border>
+                                                        <TextBlock Text="{Binding FolderPath}" Foreground="#888"
+                                                                   FontSize="10" Margin="6,0,0,0"
+                                                                   VerticalAlignment="Center"
+                                                                   DockPanel.Dock="Right"
+                                                                   Visibility="{Binding FolderPath, Converter={StaticResource StringToVis}}"/>
+                                                        <TextBlock Text="{Binding Name}" FontWeight="SemiBold"
+                                                                   VerticalAlignment="Center"
+                                                                   HorizontalAlignment="Left"/>
+                                                    </DockPanel>
+                                                </Button>
                                             </DockPanel>
                                         </DataTemplate>
                                     </ListBox.ItemTemplate>
