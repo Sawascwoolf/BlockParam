@@ -703,6 +703,27 @@ Compile the block now?</value>
     <value>Do you want to save {0} pending change(s) before closing?</value>
     <comment>{0} = number of pending inline edits</comment>
   </data>
+  <!-- Combined prompt fired by OnClosing when both active-DB and stashed-DB
+       edits exist (#59 follow-up). Yes applies the active DB only — stashed
+       edits still get discarded; the message spells that out so the user
+       picks knowingly. -->
+  <data name="Dialog_UnsavedChanges_Prompt_WithStash" xml:space="preserve">
+    <value>You have {0} pending change(s) on the current DB and {1} stashed change(s) in other DB(s): {2}.
+
+Yes — Apply the current DB now (stashed changes in other DBs are still discarded on close).
+No  — Discard everything and close.
+Cancel — Stay in the dialog.</value>
+    <comment>{0} = active pending count, {1} = stashed count, {2} = comma-separated stashed DB names</comment>
+  </data>
+  <!-- Stash-only close prompt (#59 follow-up). Active DB is clean but
+       stashes from earlier switches still hold edits the user hasn't
+       reviewed. Yes/No is enough — there's nothing to "Apply" here. -->
+  <data name="Dialog_UnsavedChanges_StashOnly" xml:space="preserve">
+    <value>You have {0} stashed change(s) in other DB(s): {1}.
+
+Closing the dialog will discard them. Close anyway?</value>
+    <comment>{0} = stashed count, {1} = comma-separated stashed DB names</comment>
+  </data>
   <!-- Fallback shown if license activation returns an unrecognised status (defensive — switch is exhaustive today). -->
   <data name="License_UnknownError" xml:space="preserve">
     <value>Unknown error</value>
@@ -760,5 +781,91 @@ Compile the block now?</value>
   </data>
   <data name="Update_ManagedHint" xml:space="preserve">
     <value>Update-check policy is managed by IT and cannot be changed locally.</value>
+  </data>
+  <!-- DB-switcher dropdown (#59): in-dialog combo for switching between DBs without closing. -->
+  <data name="Dialog_SwitchDb_Tooltip" xml:space="preserve">
+    <value>Switch to a different Data Block in this project</value>
+  </data>
+  <data name="Dialog_SwitchDb_SearchHint" xml:space="preserve">
+    <value>Type to filter…</value>
+  </data>
+  <data name="Dialog_SwitchDb_Refresh" xml:space="preserve">
+    <value>Re-enumerate DBs from the project</value>
+  </data>
+  <data name="Dialog_SwitchDb_Loading" xml:space="preserve">
+    <value>Loading DBs…</value>
+  </data>
+  <data name="Dialog_SwitchDb_Empty" xml:space="preserve">
+    <value>No matching DB.</value>
+  </data>
+  <data name="Dialog_SwitchDb_InstanceBadge" xml:space="preserve">
+    <value>Instance</value>
+  </data>
+  <data name="Dialog_SwitchDb_DiscardConfirm_Title" xml:space="preserve">
+    <value>Discard staged changes?</value>
+  </data>
+  <data name="Dialog_SwitchDb_DiscardConfirm_Text" xml:space="preserve">
+    <value>You have {0} staged change(s) on this DB. Switching to '{1}' will discard them.
+
+Continue?</value>
+    <comment>{0} = pending edit count, {1} = target DB name</comment>
+  </data>
+  <!-- 3-way prompt fired by SwitchToDataBlock when staged edits exist (#59).
+       Yes = apply to TIA before switching, No = stash in memory and switch,
+       Cancel = stay on the current DB. -->
+  <data name="Dialog_SwitchDb_KeepConfirm_Title" xml:space="preserve">
+    <value>Apply staged changes before switching?</value>
+  </data>
+  <data name="Dialog_SwitchDb_KeepConfirm_Text" xml:space="preserve">
+    <value>You have {0} staged change(s) on '{1}'.
+
+Yes — Apply to TIA Portal, then switch.
+No — Stash them, then switch.
+Cancel — Stay on '{1}'.</value>
+    <comment>{0} = pending edit count, {1} = current DB name, {2} = target DB name (unused since prompt was tightened)</comment>
+  </data>
+  <data name="Status_DbSwitch_ApplyBlocked" xml:space="preserve">
+    <value>Cannot apply staged edits — fix invalid entries or wait for the daily limit to reset.</value>
+  </data>
+  <data name="Status_DbSwitched_StashRestored" xml:space="preserve">
+    <value>Switched to {0} — restored {1} stashed edit(s).</value>
+    <comment>{0} = DB name, {1} = restored count</comment>
+  </data>
+  <data name="Status_DbSwitched_StashPartial" xml:space="preserve">
+    <value>Switched to {0} — restored {1} stashed edit(s); {2} no longer apply to the current DB structure.</value>
+    <comment>{0} = DB name, {1} = restored count, {2} = dropped count</comment>
+  </data>
+  <data name="Inspector_StashedDb_Header" xml:space="preserve">
+    <value>PENDING IN {0}</value>
+    <comment>{0} = stashed DB name (uppercased to match other section headers)</comment>
+  </data>
+  <data name="Inspector_StashedDb_Tooltip" xml:space="preserve">
+    <value>Click to switch back to this DB. The current DB's edits will be re-prompted.</value>
+  </data>
+  <!-- "Jump to changes" header button (#59 follow-up). Visible only while
+       there's something to jump to (active pending or a stashed DB). -->
+  <data name="Dialog_GoToFirstChange_Label" xml:space="preserve">
+    <value>Jump to changes</value>
+  </data>
+  <data name="Dialog_GoToFirstChange_Tooltip" xml:space="preserve">
+    <value>Jump to the first pending change — in the current DB if any, otherwise switches to the first stashed DB.</value>
+  </data>
+  <data name="Dialog_SwitchDb_LoadFailed" xml:space="preserve">
+    <value>Failed to load '{0}':
+
+{1}</value>
+    <comment>{0} = DB name, {1} = error message</comment>
+  </data>
+  <data name="Status_DbSwitched" xml:space="preserve">
+    <value>Switched to {0}</value>
+    <comment>{0} = DB name</comment>
+  </data>
+  <data name="Status_DbSwitchFailed" xml:space="preserve">
+    <value>Could not switch to {0}: {1}</value>
+    <comment>{0} = DB name, {1} = error message</comment>
+  </data>
+  <data name="Status_DbEnumFailed" xml:space="preserve">
+    <value>Could not list DBs: {0}</value>
+    <comment>{0} = error message</comment>
   </data>
 </root>

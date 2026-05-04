@@ -3,6 +3,8 @@ using System.Threading;
 using Siemens.Engineering;
 using Siemens.Engineering.AddIn.Menu;
 using Siemens.Engineering.Compiler;
+using Siemens.Engineering.HW;
+using Siemens.Engineering.HW.Features;
 using Siemens.Engineering.SW;
 using Siemens.Engineering.SW.Blocks;
 using Siemens.Engineering.SW.Tags;
@@ -11,6 +13,7 @@ using BlockParam.Config;
 using BlockParam.Diagnostics;
 using BlockParam.Licensing;
 using BlockParam.Localization;
+using BlockParam.Models;
 using BlockParam.Services;
 using BlockParam.SimaticML;
 using BlockParam.UI;
@@ -115,17 +118,24 @@ public class BulkChangeContextMenu : ContextMenuAddIn
     {
         try
         {
+            // Multi-DB selection (#58). The user can right-click multiple DBs in
+            // the project tree; we open one dialog that operates on all of them.
+            // Index 0 is the focused DB (drives the dialog title / scope view);
+            // additional selections become companions and participate in bulk
+            // preview / Apply equally.
+            var allSelected = provider.GetSelection<DataBlock>().ToList();
+            if (allSelected.Count == 0) return;
             // Mutable: ImportBlock disposes the old DataBlock instance; we must refresh
             // this reference after every import so subsequent Apply clicks don't hit a
             // disposed GlobalDB.
-            var selection = provider.GetSelection<DataBlock>().FirstOrDefault();
-            if (selection == null) return;
+            var selection = allSelected[0];
 
             EnsureTempCacheCleaned();
             ApplyConfiguredLanguage();
 
-            Log.Information("Bulk Change v{Version} clicked on DB: {DbName}",
-                typeof(BulkChangeContextMenu).Assembly.GetName().Version, selection.Name);
+            Log.Information("Bulk Change v{Version} clicked on DB: {DbName}{Extra}",
+                typeof(BulkChangeContextMenu).Assembly.GetName().Version, selection.Name,
+                allSelected.Count > 1 ? $" (+{allSelected.Count - 1} companion DB(s))" : "");
 
             // Two language axes (#50). UI language: Thread.CurrentUICulture,
             // either the OS default or the user's config.json override
@@ -266,6 +276,35 @@ public class BulkChangeContextMenu : ContextMenuAddIn
                 Log.Warning(ex, "UpdateCheck: cannot construct service — feature disabled this session");
             }
 
+            // PLC count drives whether the header shows a "{PLC} / " prefix
+            // (#59 follow-up). Single-PLC projects — the ≈85% common case —
+            // get the cleaner "DB only" header; multi-PLC projects always
+            // get the prefix so users can tell which PLC they're operating on.
+            // Single source of truth for the displayed PLC name: empty when
+            // we want it suppressed, real name otherwise. Both enumeration
+            // and the VM's currentPlcName use this value, so the stash key
+            // (which includes PlcName) stays consistent across stash + restore.
+            var plcCount = CountPlcSoftwaresInProject(project);
+            var displayPlcName = plcSoftware != null && plcCount > 1
+                ? SafeGetPlcName(plcSoftware)
+                : "";
+
+            // Companion DBs (#58). Index 0 of allSelected is the focused DB
+            // (already exported / parsed above); 1+ each get the same export +
+            // parse + per-DB Apply closure as the focused one.
+            var companions = new List<ActiveDb>();
+            for (int i = 1; i < allSelected.Count; i++)
+            {
+                var companion = BuildCompanionActiveDb(
+                    allSelected[i], adapter, tempDir, constantResolver,
+                    udtResolver, commentResolver, displayPlcName);
+                if (companion != null)
+                    companions.Add(companion);
+            }
+            if (companions.Count > 0)
+                Log.Information("Multi-DB session: {N} companion DB(s) active alongside {Primary}",
+                    companions.Count, dbInfo.Name);
+
             // Open dialog
             var vm = new BulkChangeViewModel(
                 dbInfo, xml, analyzer, bulkService, usageTracker, configLoader,
@@ -316,7 +355,80 @@ public class BulkChangeContextMenu : ContextMenuAddIn
                 commentResolver: commentResolver,
                 editingLanguage: editingLanguage,
                 referenceLanguage: referenceLanguage,
-                updateCheckService: updateCheckService);
+                updateCheckService: updateCheckService,
+                // DB-switcher (#59). Wired only when a PlcSoftware was found —
+                // otherwise enumeration has nowhere to walk and the dropdown
+                // stays hidden.
+                enumerateDataBlocks: plcSoftware != null
+                    ? new Func<IReadOnlyList<DataBlockSummary>>(() => EnumerateDataBlocks(plcSoftware, displayPlcName))
+                    : null,
+                currentPlcName: displayPlcName,
+                switchToDataBlock: plcSoftware != null
+                    ? new Func<DataBlockSummary, string>(summary =>
+                    {
+                        var newSelection = ResolveDataBlock(plcSoftware, summary)
+                            ?? throw new InvalidOperationException(
+                                $"DB '{summary.Name}' not found in project");
+
+                        // Re-export under the same compile-prompt guard the
+                        // initial export used (#19/#27) so an inconsistent
+                        // target DB surfaces the same UX, not a raw stack trace.
+                        string newXmlPath = null!;
+                        if (!TryExportWithCompilePrompt(newSelection, adapter,
+                                () => newXmlPath = adapter.ExportBlock(newSelection, tempDir)))
+                            throw new OperationCanceledException(
+                                "User declined to compile the inconsistent target DB.");
+
+                        var newXml = File.ReadAllText(newXmlPath);
+
+                        // Re-parse with the same resolvers so UDT setpoints /
+                        // comments and tag-table constants stay consistent
+                        // across the switch.
+                        IConstantResolver? newConstantResolver = null;
+                        if (Directory.Exists(tagTableDir)
+                            && Directory.GetFiles(tagTableDir, "*.xml").Length > 0)
+                        {
+                            newConstantResolver = new TagTableConstantResolver(
+                                new TagTableCache(new XmlFileTagTableReader(tagTableDir)));
+                        }
+                        var newParser = new SimaticMLParser(
+                            newConstantResolver, udtResolver, commentResolver);
+                        var newDbInfo = newParser.Parse(newXml);
+
+                        // Update the closure-captured locals so the next Apply
+                        // talks to the right DataBlock instance and uses the
+                        // new DB name in log messages / file paths.
+                        selection = newSelection;
+                        dbInfo = newDbInfo;
+
+                        Log.Information("DB switch: now editing {DbName}", newDbInfo.Name);
+                        return newXml;
+                    })
+                    : null,
+                additionalActiveDbs: companions,
+                // Multi-DB add via dropdown (#58): the VM calls back here
+                // to build a fully-wired ActiveDb (with per-DB OnApply)
+                // for any DB the user checks in the popup. Resolves the
+                // summary back to a live DataBlock first, then routes
+                // through the same BuildCompanionActiveDb helper used for
+                // context-menu-pre-selected companions.
+                buildActiveDbForSummary: plcSoftware != null
+                    ? new Func<DataBlockSummary, ActiveDb?>(summary =>
+                    {
+                        var initial = ResolveDataBlock(plcSoftware, summary);
+                        if (initial == null)
+                        {
+                            Log.Warning(
+                                "buildActiveDbForSummary: '{Name}' not found in project",
+                                summary.Name);
+                            return null;
+                        }
+                        return BuildCompanionActiveDb(
+                            initial, adapter, tempDir,
+                            constantResolver, udtResolver, commentResolver,
+                            displayPlcName);
+                    })
+                    : null);
 
             licenseService.StartHeartbeat();
             var dialog = new BulkChangeDialog(vm);
@@ -375,6 +487,202 @@ public class BulkChangeContextMenu : ContextMenuAddIn
         foreach (var sub in group.Groups)
             foreach (var table in EnumerateTagTablesRecursive(sub))
                 yield return table;
+    }
+
+    /// <summary>
+    /// Walks the PLC's Program blocks tree and projects every Data Block to a
+    /// <see cref="DataBlockSummary"/> for the in-dialog DB-switcher dropdown
+    /// (#59). Lazy + on-demand: only invoked when the user opens the dropdown,
+    /// then cached for the dialog session by the VM.
+    /// </summary>
+    private static IReadOnlyList<DataBlockSummary> EnumerateDataBlocks(
+        PlcSoftware plcSoftware, string plcName)
+    {
+        var list = new List<DataBlockSummary>();
+        foreach (var (db, folderPath) in EnumerateDataBlocksRecursive(plcSoftware.BlockGroup, parentPath: null))
+        {
+            bool isInstance = false;
+            try { isInstance = db.GetType().Name.IndexOf("Instance", StringComparison.OrdinalIgnoreCase) >= 0; }
+            catch { /* type-name probe is best-effort — mislabeled badge is harmless */ }
+            list.Add(new DataBlockSummary(
+                db.Name,
+                folderPath ?? "",
+                blockType: isInstance ? "InstanceDB" : "GlobalDB",
+                isInstanceDb: isInstance,
+                plcName: plcName));
+        }
+        Log.Information("DB enumeration: {Count} block(s) under PLC {Plc}", list.Count, plcName);
+        return list;
+    }
+
+    /// <summary>
+    /// Mutable holder for the live <see cref="DataBlock"/> instance backing a
+    /// companion DB (#58). TIA's <c>ImportBlock</c> disposes the old instance
+    /// on every Apply, so the per-DB OnApply closure must refresh its
+    /// reference between calls — wrapping it in a tiny class lets multiple
+    /// closures (export, import, re-resolve) share the same updatable handle.
+    /// </summary>
+    private sealed class DbHandle
+    {
+        public DataBlock Current;
+        public DbHandle(DataBlock initial) { Current = initial; }
+    }
+
+    /// <summary>
+    /// Builds an <see cref="ActiveDb"/> for a non-focused DB selected in the
+    /// project tree (#58). Mirrors the focused-DB setup: export + parse + an
+    /// OnApply closure that re-imports the modified XML and refreshes the
+    /// stale post-import handle. Returns null if export fails (e.g. user
+    /// declines the compile prompt for an inconsistent DB) — the dialog
+    /// opens without that companion.
+    /// </summary>
+    private ActiveDb? BuildCompanionActiveDb(
+        DataBlock initialSelection,
+        TiaPortalAdapter adapter,
+        string tempDir,
+        IConstantResolver? constantResolver,
+        UdtSetPointResolver udtResolver,
+        UdtCommentResolver commentResolver,
+        string plcName)
+    {
+        var handle = new DbHandle(initialSelection);
+
+        string xmlPath = null!;
+        if (!TryExportWithCompilePrompt(handle.Current, adapter,
+                () => xmlPath = adapter.ExportBlock(handle.Current, tempDir)))
+        {
+            Log.Information("Companion DB skipped (user declined compile): {DbName}",
+                initialSelection.Name);
+            return null;
+        }
+        var xml = File.ReadAllText(xmlPath);
+
+        var parser = new SimaticMLParser(constantResolver, udtResolver, commentResolver);
+        var info = parser.Parse(xml);
+
+        Log.Information("Companion DB parsed: {Name} ({Members} top-level members)",
+            info.Name, info.Members.Count);
+
+        Action<string> onApply = modifiedXml =>
+        {
+            Log.Information("Apply: writing modified XML for companion DB {DbName}", info.Name);
+
+            if (!TryExportWithCompilePrompt(handle.Current, adapter,
+                    () => adapter.BackupBlock(handle.Current, tempDir)))
+            {
+                Log.Information("Apply cancelled: user declined compile for companion {DbName}",
+                    info.Name);
+                throw new OperationCanceledException(
+                    "User declined to compile the inconsistent companion block.");
+            }
+
+            var modifiedPath = Path.Combine(tempDir,
+                $"{SafeFileName.Sanitize(info.Name)}_modified.xml");
+            File.WriteAllText(modifiedPath, modifiedXml);
+            var blockGroup = (PlcBlockGroup)adapter.GetBlockGroup(handle.Current);
+            adapter.ImportBlock(blockGroup, modifiedPath);
+
+            // Re-resolve to the post-import live instance so the next Apply
+            // does not hit a disposed reference (#19).
+            var fresh = blockGroup.Blocks.Find(info.Name) as DataBlock;
+            if (fresh != null)
+            {
+                handle.Current = fresh;
+            }
+            else
+            {
+                Log.Warning(
+                    "Could not re-resolve companion DataBlock '{DbName}' after import — next Apply may fail",
+                    info.Name);
+            }
+            Log.Information("Companion import completed for {DbName}", info.Name);
+        };
+
+        return new ActiveDb(info, xml, onApply, plcName: plcName);
+    }
+
+    private static string SafeGetPlcName(PlcSoftware plc)
+    {
+        try { return plc.Name ?? ""; }
+        catch { return ""; }
+    }
+
+    /// <summary>
+    /// Walks <paramref name="project"/>'s device tree and counts the
+    /// <see cref="PlcSoftware"/> instances. Used by the DB-switcher header
+    /// (#59 follow-up): in single-PLC projects (≈85% of users) the PLC name
+    /// would be redundant chrome, so we suppress the prefix unless the
+    /// project actually has more than one PLC.
+    /// </summary>
+    private static int CountPlcSoftwaresInProject(Project? project)
+    {
+        if (project == null) return 0;
+        int count = 0;
+        try
+        {
+            foreach (Device device in project.Devices)
+            {
+                foreach (var item in EnumerateDeviceItemsRecursive(device.DeviceItems))
+                {
+                    try
+                    {
+                        var container = item.GetService<SoftwareContainer>();
+                        if (container?.Software is PlcSoftware) count++;
+                    }
+                    catch { /* per-item failures shouldn't bring the whole walk down */ }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Warning(ex, "PLC count walk failed; suppressing PLC prefix");
+            return 1;
+        }
+        return count;
+    }
+
+    private static IEnumerable<DeviceItem> EnumerateDeviceItemsRecursive(DeviceItemComposition items)
+    {
+        foreach (DeviceItem item in items)
+        {
+            yield return item;
+            foreach (var child in EnumerateDeviceItemsRecursive(item.DeviceItems))
+                yield return child;
+        }
+    }
+
+    /// <summary>
+    /// Resolves a <see cref="DataBlockSummary"/> back to a live
+    /// <see cref="DataBlock"/> by walking the same tree the dropdown was
+    /// populated from. Folder path is part of the match so two DBs with the
+    /// same name in different folders don't collide.
+    /// </summary>
+    private static DataBlock? ResolveDataBlock(PlcSoftware plcSoftware, DataBlockSummary summary)
+    {
+        foreach (var (db, folderPath) in EnumerateDataBlocksRecursive(plcSoftware.BlockGroup, parentPath: null))
+        {
+            if (string.Equals(db.Name, summary.Name, StringComparison.Ordinal)
+                && string.Equals(folderPath ?? "", summary.FolderPath ?? "", StringComparison.Ordinal))
+            {
+                return db;
+            }
+        }
+        return null;
+    }
+
+    private static IEnumerable<(DataBlock db, string? groupPath)> EnumerateDataBlocksRecursive(
+        PlcBlockGroup group, string? parentPath)
+    {
+        foreach (var block in group.Blocks)
+        {
+            if (block is DataBlock db) yield return (db, parentPath);
+        }
+        foreach (var sub in group.Groups)
+        {
+            var subPath = parentPath == null ? sub.Name : $"{parentPath}/{sub.Name}";
+            foreach (var entry in EnumerateDataBlocksRecursive(sub, subPath))
+                yield return entry;
+        }
     }
 
     private static IEnumerable<(PlcType type, string? groupPath)> EnumerateTypesRecursive(
