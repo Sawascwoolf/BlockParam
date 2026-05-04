@@ -105,19 +105,10 @@ public partial class ConfigEditorDialog : Window
         if (sender is not Border header) return;
         if (header.DataContext is not RuleFileViewModel file) return;
 
-        // Toggle expand/collapse and select the file (without changing rule selection
-        // unless none was set yet).
         file.IsExpanded = !file.IsExpanded;
 
         if (DataContext is ConfigEditorViewModel vm)
-        {
             vm.SelectedFile = file;
-            // If no rule is selected or the selected rule belongs to another file,
-            // adopt the first rule of this file so the detail panel has something
-            // to show. Otherwise leave the existing rule selection alone.
-            if (vm.SelectedRule == null || vm.SelectedRule.ParentFile != file)
-                vm.SelectedRule = file.Rules.FirstOrDefault();
-        }
 
         Dispatcher.BeginInvoke(new Action(UpdateRollingSticky),
             System.Windows.Threading.DispatcherPriority.Loaded);

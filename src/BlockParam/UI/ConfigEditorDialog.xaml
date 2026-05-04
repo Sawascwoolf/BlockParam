@@ -193,7 +193,6 @@
                         <ItemsControl.ItemTemplate>
                             <DataTemplate DataType="{x:Type local:RuleViewModel}">
                                 <Border x:Name="RuleRow"
-                                        Background="White"
                                         BorderBrush="#E0E3E8" BorderThickness="0,0,0,1"
                                         Padding="28,4,8,4"
                                         Cursor="Hand"
@@ -201,6 +200,7 @@
                                         Tag="{Binding}">
                                     <Border.Style>
                                         <Style TargetType="Border">
+                                            <Setter Property="Background" Value="White"/>
                                             <Style.Triggers>
                                                 <DataTrigger Binding="{Binding IsDirty}" Value="True">
                                                     <Setter Property="Background" Value="#FFF8DC"/>
