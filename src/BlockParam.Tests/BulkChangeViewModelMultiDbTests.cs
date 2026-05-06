@@ -442,6 +442,343 @@ public class BulkChangeViewModelMultiDbTests
             "companion-DB selection is a distinct entry, not aliased on path");
     }
 
+    [Fact]
+    public void DropdownToggle_AddingDb_RebuildsTreeToMultiDbShape()
+    {
+        // Single-DB session with a dropdown that knows about a second DB.
+        // Toggling its row to IsActive=true must (a) add the companion to the
+        // active set and (b) rebuild RootMembers from a flat list (single-DB
+        // shape) into two synthetic group nodes (multi-DB shape).
+        var focusedXml = TestFixtures.LoadXml("flat-db.xml");
+        var companionXml = TestFixtures.LoadXml("nested-struct-db.xml");
+        var focused = new SimaticMLParser().Parse(focusedXml);
+        var companion = new SimaticMLParser().Parse(companionXml);
+
+        var configLoader = new ConfigLoader(null);
+        var bulkService = new BulkChangeService(new ChangeLogger(), configLoader);
+        var tracker = Substitute.For<IUsageTracker>();
+        tracker.GetStatus().Returns(new UsageStatus(0, 100));
+
+        var focusedSummary = new DataBlockSummary(focused.Name, "");
+        var companionSummary = new DataBlockSummary(companion.Name, "");
+        var available = new[] { focusedSummary, companionSummary };
+
+        var vm = new BulkChangeViewModel(
+            focused, focusedXml,
+            new HierarchyAnalyzer(), bulkService, tracker, configLoader,
+            enumerateDataBlocks: () => available,
+            switchToDataBlock: s => s.Name == companion.Name ? companionXml : focusedXml,
+            buildActiveDbForSummary: s => s.Name == companion.Name
+                ? new ActiveDb(companion, companionXml, onApply: null)
+                : null);
+
+        // Single-DB shape pre-toggle: top-level members are flat, no synthetic
+        // group node.
+        vm.HasMultipleActiveDbs.Should().BeFalse();
+        vm.RootMembers.Should().AllSatisfy(r =>
+            r.Datatype.Should().NotBe("DB",
+                "single-DB shape exposes leaves directly, not under a synthetic group"));
+        var preFlat = vm.FlatMembers.Count;
+
+        // Open dropdown so FilteredDataBlockItems gets populated, then toggle
+        // the companion row on.
+        vm.OpenDataBlocksDropdownCommand.Execute(null);
+        var companionRow = vm.FilteredDataBlockItems
+            .First(i => i.Name == companion.Name);
+        companionRow.IsActive = true;
+
+        vm.AllActiveDbs.Should().HaveCount(2,
+            "the dropdown toggle should add the companion DB to the active set");
+        vm.HasMultipleActiveDbs.Should().BeTrue();
+        vm.RootMembers.Should().HaveCount(2,
+            "tree must rebuild as two synthetic per-DB group nodes");
+        vm.RootMembers.Should().AllSatisfy(r =>
+            r.Datatype.Should().Be("DB",
+                "multi-DB shape wraps each DB's members in a synthetic group"));
+        vm.FlatMembers.Count.Should().BeGreaterThan(preFlat,
+            "the flat list must include nodes from the newly added companion");
+    }
+
+    [Fact]
+    public void ActiveDbChips_RebuildOnAddRemove_LastChipCannotClose()
+    {
+        // Single-DB session with a dropdown source so we can toggle a peer in.
+        var focusedXml = TestFixtures.LoadXml("flat-db.xml");
+        var companionXml = TestFixtures.LoadXml("nested-struct-db.xml");
+        var focused = new SimaticMLParser().Parse(focusedXml);
+        var companion = new SimaticMLParser().Parse(companionXml);
+
+        var configLoader = new ConfigLoader(null);
+        var bulkService = new BulkChangeService(new ChangeLogger(), configLoader);
+        var tracker = Substitute.For<IUsageTracker>();
+        tracker.GetStatus().Returns(new UsageStatus(0, 100));
+
+        var available = new[]
+        {
+            new DataBlockSummary(focused.Name, ""),
+            new DataBlockSummary(companion.Name, ""),
+        };
+
+        var vm = new BulkChangeViewModel(
+            focused, focusedXml,
+            new HierarchyAnalyzer(), bulkService, tracker, configLoader,
+            enumerateDataBlocks: () => available,
+            buildActiveDbForSummary: s => s.Name == companion.Name
+                ? new ActiveDb(companion, companionXml, onApply: null)
+                : null);
+
+        // Single-DB: one chip, × disabled (must keep ≥1 active DB).
+        vm.ActiveDbChips.Should().HaveCount(1);
+        vm.ActiveDbChips[0].DisplayName.Should().Be(focused.Name);
+        vm.ActiveDbChips[0].CanClose.Should().BeFalse(
+            "the last remaining DB cannot be removed");
+
+        // Add the companion via the dropdown checkbox path.
+        vm.OpenDataBlocksDropdownCommand.Execute(null);
+        vm.FilteredDataBlockItems.First(i => i.Name == companion.Name).IsActive = true;
+
+        // Both chips appear and × is now enabled on each.
+        vm.ActiveDbChips.Should().HaveCount(2);
+        vm.ActiveDbChips.Select(c => c.DisplayName).Should().BeEquivalentTo(
+            new[] { focused.Name, companion.Name });
+        vm.ActiveDbChips.Should().AllSatisfy(c =>
+            c.CanClose.Should().BeTrue(
+                "every chip is closeable while ≥2 DBs are active"));
+
+        // Close the companion chip → back to one chip, × disabled again.
+        vm.ActiveDbChips.First(c => c.DisplayName == companion.Name)
+            .CloseCommand.Execute(null);
+
+        vm.ActiveDbChips.Should().HaveCount(1);
+        vm.ActiveDbChips[0].DisplayName.Should().Be(focused.Name);
+        vm.ActiveDbChips[0].CanClose.Should().BeFalse();
+    }
+
+    [Fact]
+    public void ChipSolo_ReplacesActiveSetWithJustThisDb()
+    {
+        // Two active DBs from the start (no pending edits). Clicking the
+        // companion chip's body should solo it — drop the focused DB and
+        // leave only the companion active. One-click switch from the
+        // toolbar without touching the popup.
+        var (vm, _, _, _, _) = CreateMultiDbVm();
+        vm.AllActiveDbs.Should().HaveCount(2);
+        vm.ActiveDbChips.Should().HaveCount(2);
+
+        var anchorName = vm.AllActiveDbs[0].Info.Name;
+        var companionName = vm.AllActiveDbs[1].Info.Name;
+        var companionChip = vm.ActiveDbChips.First(c => c.DisplayName == companionName);
+
+        companionChip.SoloCommand.Execute(null);
+
+        vm.AllActiveDbs.Should().HaveCount(1,
+            "solo collapses the active set to a single DB");
+        vm.AllActiveDbs[0].Info.Name.Should().Be(companionName,
+            "the soloed DB stays; the others are dropped");
+        vm.ActiveDbChips.Should().HaveCount(1);
+        vm.ActiveDbChips[0].DisplayName.Should().Be(companionName);
+        vm.ActiveDbChips[0].CanClose.Should().BeFalse(
+            "back to single-DB → × disabled again");
+    }
+
+    [Fact]
+    public void ChipGroups_SplitByPlc_HeaderShownOnlyWhenMultiPlc()
+    {
+        // Build a VM with two active DBs that report different owning PLCs.
+        // This exercises the cross-PLC chip grouping introduced when the
+        // dropdown started enumerating across the whole project, not just
+        // the launch PLC.
+        var focusedXml = TestFixtures.LoadXml("flat-db.xml");
+        var companionXml = TestFixtures.LoadXml("nested-struct-db.xml");
+        var focused = new SimaticMLParser().Parse(focusedXml);
+        var companion = new SimaticMLParser().Parse(companionXml);
+
+        var configLoader = new ConfigLoader(null);
+        var bulkService = new BulkChangeService(new ChangeLogger(), configLoader);
+        var tracker = Substitute.For<IUsageTracker>();
+        tracker.GetStatus().Returns(new UsageStatus(0, 100));
+
+        // Companion declares a different PLC than the anchor.
+        var companionDb = new ActiveDb(
+            companion, companionXml, onApply: null, plcName: "PLC_Other");
+
+        var vm = new BulkChangeViewModel(
+            focused, focusedXml,
+            new HierarchyAnalyzer(), bulkService, tracker, configLoader,
+            currentPlcName: "PLC_Anchor",
+            additionalActiveDbs: new[] { companionDb });
+
+        // Two distinct PLCs → two groups, headers visible on each.
+        vm.ActiveDbChipGroups.Should().HaveCount(2);
+        vm.ActiveDbChipGroups.Select(g => g.PlcName).Should().BeEquivalentTo(
+            new[] { "PLC_Anchor", "PLC_Other" });
+        vm.ActiveDbChipGroups.Should().AllSatisfy(g =>
+            g.HasPlcHeader.Should().BeTrue(
+                "with ≥2 PLCs each group's PLC name disambiguates its chips"));
+
+        // Each group carries its own DB(s) — never bleeding across PLCs.
+        vm.ActiveDbChipGroups[0].Chips.Single().DisplayName.Should().Be(focused.Name);
+        vm.ActiveDbChipGroups[1].Chips.Single().DisplayName.Should().Be(companion.Name);
+    }
+
+    [Fact]
+    public void ChipGroups_MultiPlcProject_HeaderShownEvenWithSingleActiveDb()
+    {
+        // Multi-PLC project (host signals it by passing a non-empty
+        // currentPlcName) with only one DB active. The PLC header must
+        // still show — users want to see which PLC they're on without
+        // first adding a peer to make multiplicity visible.
+        var xml = TestFixtures.LoadXml("flat-db.xml");
+        var info = new SimaticMLParser().Parse(xml);
+        var configLoader = new ConfigLoader(null);
+        var bulkService = new BulkChangeService(new ChangeLogger(), configLoader);
+        var tracker = Substitute.For<IUsageTracker>();
+        tracker.GetStatus().Returns(new UsageStatus(0, 100));
+
+        var vm = new BulkChangeViewModel(
+            info, xml,
+            new HierarchyAnalyzer(), bulkService, tracker, configLoader,
+            currentPlcName: "PLC_Anchor");
+
+        vm.ActiveDbChipGroups.Should().HaveCount(1);
+        vm.ActiveDbChipGroups[0].HasPlcHeader.Should().BeTrue(
+            "multi-PLC project: PLC name is part of context even with one DB");
+        vm.ActiveDbChipGroups[0].PlcName.Should().Be("PLC_Anchor");
+    }
+
+    [Fact]
+    public void ChipGroups_SinglePlc_HeaderHidden()
+    {
+        // Same-PLC active set → one group, header suppressed so the row
+        // stays clean (long PLC names like CPU-LB-6-1_V26_01_13_SL_MM
+        // would otherwise eat the toolbar).
+        var (vm, _, _, _, _) = CreateMultiDbVm();
+
+        vm.ActiveDbChipGroups.Should().HaveCount(1);
+        vm.ActiveDbChipGroups[0].HasPlcHeader.Should().BeFalse(
+            "single-PLC sessions hide the group header");
+        vm.ActiveDbChipGroups[0].Chips.Should().HaveCount(2,
+            "both DBs land in the one shared-PLC group");
+    }
+
+    [Fact]
+    public void ChipBodyClick_SingleDb_OpensPicker()
+    {
+        // Single-DB session with a wired enumerator. Clicking the only
+        // chip's body has nothing to solo away, so it should fall through
+        // to opening the picker — one-click "switch DB" gesture.
+        var focusedXml = TestFixtures.LoadXml("flat-db.xml");
+        var focused = new SimaticMLParser().Parse(focusedXml);
+        var configLoader = new ConfigLoader(null);
+        var bulkService = new BulkChangeService(new ChangeLogger(), configLoader);
+        var tracker = Substitute.For<IUsageTracker>();
+        tracker.GetStatus().Returns(new UsageStatus(0, 100));
+
+        var vm = new BulkChangeViewModel(
+            focused, focusedXml,
+            new HierarchyAnalyzer(), bulkService, tracker, configLoader,
+            enumerateDataBlocks: () => new[]
+            {
+                new DataBlockSummary(focused.Name, ""),
+            },
+            switchToDataBlock: _ => focusedXml);
+
+        vm.IsDataBlocksDropdownOpen.Should().BeFalse();
+
+        vm.ActiveDbChips.Should().HaveCount(1);
+        vm.ActiveDbChips[0].SoloCommand.Execute(null);
+
+        vm.IsDataBlocksDropdownOpen.Should().BeTrue(
+            "the only chip's click falls through to opening the picker");
+    }
+
+    [Fact]
+    public void StashReactivation_ClearsStashHeader_AndSoloesToReactivatedDb()
+    {
+        // Bug repro: previously the chip-close stash path used a different
+        // key separator ('|') than RestoreStashFor ('') so the
+        // dictionary lookup missed and the inspector's "PENDING IN <DB>"
+        // section lingered after reactivation. This test locks in:
+        //   1. closing the companion chip with pending edits stashes them;
+        //   2. the inspector lists the stashed DB;
+        //   3. clicking the stash header reactivates AND restores the edits;
+        //   4. the stash entry is removed (HasStashedDbs == false);
+        //   5. the gesture also soloes — the previously-active anchor DB is
+        //      dropped, leaving only the reactivated DB in the active set.
+        var focusedXml = TestFixtures.LoadXml("flat-db.xml");
+        var companionXml = TestFixtures.LoadXml("nested-struct-db.xml");
+        var focused = new SimaticMLParser().Parse(focusedXml);
+        var companion = new SimaticMLParser().Parse(companionXml);
+
+        var configLoader = new ConfigLoader(null);
+        var bulkService = new BulkChangeService(new ChangeLogger(), configLoader);
+        var tracker = Substitute.For<IUsageTracker>();
+        tracker.GetStatus().Returns(new UsageStatus(0, 100));
+        tracker.RecordUsage(Arg.Any<int>()).Returns(true);
+
+        var mbx = new FakeMessageBox(YesNoCancelResult.No); // Keep on close prompt
+
+        var companionDb = new ActiveDb(
+            companion, companionXml, onApply: _ => { });
+
+        var vm = new BulkChangeViewModel(
+            focused, focusedXml,
+            new HierarchyAnalyzer(), bulkService, tracker, configLoader,
+            onApply: _ => { },
+            messageBox: mbx,
+            additionalActiveDbs: new[] { companionDb },
+            // Reactivation needs a factory or the companion can't be
+            // re-added after chip-close → restoring the stash would silently
+            // drop every edit because FindNodeByPath has no live tree to
+            // resolve against.
+            buildActiveDbForSummary: s =>
+                s.Name == companion.Name
+                    ? new ActiveDb(companion, companionXml, onApply: _ => { })
+                    : null);
+
+        vm.AllActiveDbs.Should().HaveCount(2);
+
+        // Stage a pending edit on the companion's tree.
+        var companionLeaf = vm.RootMembers
+            .First(r => r.Name == companion.Name)
+            .AllDescendants().First(n => n.IsLeaf);
+        var original = companionLeaf.StartValue ?? "0";
+        var pending = original == "0" ? "1" : "0";
+        companionLeaf.PendingValue = pending;
+
+        // Close the companion chip — pending edit triggers the 3-way prompt;
+        // FakeMessageBox returns "No" so the edits get stashed.
+        var companionChip = vm.ActiveDbChips.First(c => c.DisplayName == companion.Name);
+        companionChip.CloseCommand.Execute(null);
+
+        vm.AllActiveDbs.Should().HaveCount(1, "companion was removed from active set");
+        vm.HasStashedDbs.Should().BeTrue("Keep branch must stash edits for restore");
+        vm.StashedDbs.Should().ContainSingle(s => s.DbName == companion.Name);
+
+        // Reactivate via the stash header click.
+        var stash = vm.StashedDbs[0];
+        vm.SwitchToStashedDbCommand.Execute(stash);
+
+        // Stash entry was popped — header gone.
+        vm.HasStashedDbs.Should().BeFalse(
+            "RestoreStashFor must remove the entry on successful restore");
+        vm.StashedDbs.Should().BeEmpty();
+
+        // Switch-back gesture soloed: anchor DB dropped, only the
+        // reactivated DB remains active.
+        vm.AllActiveDbs.Should().HaveCount(1,
+            "switch-back from the inspector header should solo to the reactivated DB");
+        vm.AllActiveDbs[0].Info.Name.Should().Be(companion.Name);
+
+        // The pending edit landed on the live tree. After solo, the active
+        // set is single-DB so RootMembers is flat (no synthetic group root)
+        // — search the leaves directly.
+        var restoredLeaf = vm.RootMembers
+            .SelectMany(r => new[] { r }.Concat(r.AllDescendants()))
+            .First(n => n.IsLeaf && n.PendingValue == pending);
+        restoredLeaf.PendingValue.Should().Be(pending);
+    }
+
     private sealed class FakeMessageBox : IMessageBoxService
     {
         private readonly YesNoCancelResult _result;

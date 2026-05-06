@@ -50,6 +50,19 @@ public class HierarchyAnalyzer
             if (lifted != null && lifted.MatchCount > w.MatchCount)
                 crossDbScopes.Add(lifted);
         }
+
+        // Per-ancestor cross-DB scopes: for ancestors where the within-DB
+        // count is 1 (so BuildScopeLevels skipped them) but multiple DBs each
+        // contribute the same path, the user still wants a "this ancestor
+        // across all selected DBs" option. Without these, selecting a leaf
+        // whose name is unique inside its parent leaves the user without a
+        // mid-level scope — only the broadest "all DBs" option remained.
+        foreach (var ancestor in GetAncestors(selectedMember))
+        {
+            var ancestorScope = BuildAncestorCrossDbScope(activeDbs, selectedMember, ancestor);
+            if (ancestorScope != null) crossDbScopes.Add(ancestorScope);
+        }
+
         combined.AddRange(crossDbScopes);
 
         // "All selected DBs" mega-scope: every same-name + same-datatype
@@ -64,7 +77,71 @@ public class HierarchyAnalyzer
             combined.Add(megaScope);
         }
 
+        // Final dedupe by match count: a broader cross-DB ancestor whose
+        // count equals a narrower one's adds no new members and would just
+        // be UI noise (e.g. "in estopButton" == "in estopButton.estopActive"
+        // when only one estopButton child has the leaf).
+        combined = DeduplicateByMatchCount(combined);
+
         return new AnalysisResult(selectedMember, combined);
+    }
+
+    /// <summary>
+    /// For a given ancestor of the selected member, returns a cross-DB scope
+    /// covering every same-name + same-datatype descendant of that ancestor's
+    /// path across all active DBs. Returns null when the resulting count is
+    /// less than 2 (no bulk benefit) or duplicates the within-DB scope a
+    /// caller already produced.
+    /// </summary>
+    private static ScopeLevel? BuildAncestorCrossDbScope(
+        IReadOnlyList<DataBlockInfo> activeDbs,
+        MemberNode selectedMember,
+        MemberNode ancestor)
+    {
+        var name = selectedMember.Name;
+        var datatype = selectedMember.Datatype;
+        var ancestorPath = ancestor.Path;
+        var prefix = ancestorPath + ".";
+
+        var matches = new List<MemberNode>();
+        foreach (var db in activeDbs)
+        {
+            foreach (var m in db.AllMembers())
+            {
+                if (m.Name != name || m.Datatype != datatype) continue;
+                // Match descendants by path-prefix. Each DB shares the same
+                // path strings for shared-shape companions, so ancestorPath
+                // resolved within selectedDb is the right prefix to apply
+                // across every active DB.
+                if (string.Equals(m.Path, ancestorPath, StringComparison.Ordinal)
+                    || m.Path.StartsWith(prefix, StringComparison.Ordinal))
+                {
+                    matches.Add(m);
+                }
+            }
+        }
+
+        if (matches.Count < 2) return null;
+
+        return new ScopeLevel(
+            ancestorName: $"all selected DBs.{ancestorPath}",
+            ancestorPath: ancestorPath,
+            depth: -1000 + ancestor.Depth,
+            matchingMembers: matches);
+    }
+
+    private static List<ScopeLevel> DeduplicateByMatchCount(List<ScopeLevel> scopes)
+    {
+        // Order by ascending match count, keep the first scope at each count.
+        // Stable: ties go to the first occurrence (preserves the within-DB
+        // scope when its cross-DB sibling collapses to the same count).
+        var seen = new HashSet<int>();
+        var result = new List<ScopeLevel>(scopes.Count);
+        foreach (var s in scopes.OrderBy(x => x.MatchCount))
+        {
+            if (seen.Add(s.MatchCount)) result.Add(s);
+        }
+        return result;
     }
 
     private List<ScopeLevel> AnalyzeWithinDb(DataBlockInfo db, MemberNode selectedMember)

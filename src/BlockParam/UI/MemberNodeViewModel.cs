@@ -56,7 +56,21 @@ public class MemberNodeViewModel : ViewModelBase
     public string Datatype => Model.Datatype;
     public string? StartValue => Model.StartValue;
     public string Path => Model.Path;
-    public int Depth => Model.Depth;
+    /// <summary>
+    /// Visual nesting depth (0 = root, 1 = child of a root, …). Counts VM
+    /// ancestors instead of model ancestors so the synthetic per-DB group
+    /// root in multi-DB sessions adds a real indent level for its members.
+    /// In single-DB sessions this matches the underlying Model.Depth.
+    /// </summary>
+    public int Depth
+    {
+        get
+        {
+            int depth = 0;
+            for (var p = Parent; p != null; p = p.Parent) depth++;
+            return depth;
+        }
+    }
     public bool IsLeaf => Model.IsLeaf;
     public bool IsUdtInstance => Model.IsUdtInstance;
     public bool IsStruct => Model.IsStruct;

@@ -22,13 +22,15 @@ public class DataBlockSummary
         string folderPath,
         string blockType = "GlobalDB",
         bool isInstanceDb = false,
-        string plcName = "")
+        string plcName = "",
+        int? number = null)
     {
         Name = name;
         FolderPath = folderPath;
         BlockType = blockType;
         IsInstanceDb = isInstanceDb;
         PlcName = plcName;
+        Number = number;
     }
 
     /// <summary>DB name as shown in the TIA project tree (e.g. "DB_ProcessPlant_A1").</summary>
@@ -57,6 +59,15 @@ public class DataBlockSummary
     /// are only unique within a single PLC.
     /// </summary>
     public string PlcName { get; }
+
+    /// <summary>
+    /// Numeric block ID (e.g. <c>17</c> for <c>DB17</c>). Null when the host
+    /// can't read it — TIA generates a number for every block, but the
+    /// Openness API may surface it on a delay (e.g. just-imported blocks).
+    /// PLC programmers commonly reference DBs by number, so the picker shows
+    /// <c>DB{Number}</c> as a small badge and matches on it during search.
+    /// </summary>
+    public int? Number { get; }
 
     public override string ToString()
     {

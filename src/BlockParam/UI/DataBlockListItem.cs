@@ -35,6 +35,9 @@ public class DataBlockListItem : ViewModelBase
     public string FolderPath => Summary.FolderPath;
     public bool IsInstanceDb => Summary.IsInstanceDb;
     public string PlcName => Summary.PlcName;
+    public int? Number => Summary.Number;
+    public string NumberLabel => Summary.Number is int n ? $"DB{n}" : "";
+    public bool HasNumber => Summary.Number.HasValue;
 
     /// <summary>
     /// True when this DB is part of the dialog's current active set.

@@ -359,14 +359,21 @@ public class BulkChangeContextMenu : ContextMenuAddIn
                 // DB-switcher (#59). Wired only when a PlcSoftware was found —
                 // otherwise enumeration has nowhere to walk and the dropdown
                 // stays hidden.
-                enumerateDataBlocks: plcSoftware != null
-                    ? new Func<IReadOnlyList<DataBlockSummary>>(() => EnumerateDataBlocks(plcSoftware, displayPlcName))
+                enumerateDataBlocks: project != null
+                    ? new Func<IReadOnlyList<DataBlockSummary>>(() => EnumerateDataBlocks(project))
                     : null,
                 currentPlcName: displayPlcName,
                 switchToDataBlock: plcSoftware != null
                     ? new Func<DataBlockSummary, string>(summary =>
                     {
-                        var newSelection = ResolveDataBlock(plcSoftware, summary)
+                        // Resolve against the summary's owning PLC so a switch
+                        // to a DB on a different PLC works. Falls back to the
+                        // launch PLC when the project lookup fails (e.g. PLC
+                        // got renamed mid-session).
+                        var sourcePlc = (project != null
+                            ? FindPlcSoftwareByName(project, summary.PlcName)
+                            : null) ?? plcSoftware;
+                        var newSelection = ResolveDataBlock(sourcePlc, summary)
                             ?? throw new InvalidOperationException(
                                 $"DB '{summary.Name}' not found in project");
 
@@ -415,7 +422,13 @@ public class BulkChangeContextMenu : ContextMenuAddIn
                 buildActiveDbForSummary: plcSoftware != null
                     ? new Func<DataBlockSummary, ActiveDb?>(summary =>
                     {
-                        var initial = ResolveDataBlock(plcSoftware, summary);
+                        // Cross-PLC: resolve against the summary's owning PLC,
+                        // not the dialog's launch PLC. Each chip then carries
+                        // the right PLC name for its group header.
+                        var sourcePlc = (project != null
+                            ? FindPlcSoftwareByName(project, summary.PlcName)
+                            : null) ?? plcSoftware;
+                        var initial = ResolveDataBlock(sourcePlc, summary);
                         if (initial == null)
                         {
                             Log.Warning(
@@ -426,7 +439,7 @@ public class BulkChangeContextMenu : ContextMenuAddIn
                         return BuildCompanionActiveDb(
                             initial, adapter, tempDir,
                             constantResolver, udtResolver, commentResolver,
-                            displayPlcName);
+                            summary.PlcName);
                     })
                     : null);
 
@@ -490,42 +503,67 @@ public class BulkChangeContextMenu : ContextMenuAddIn
     }
 
     /// <summary>
-    /// Walks the PLC's Program blocks tree and projects every Data Block to a
-    /// <see cref="DataBlockSummary"/> for the in-dialog DB-switcher dropdown
-    /// (#59). Lazy + on-demand: only invoked when the user opens the dropdown,
-    /// then cached for the dialog session by the VM.
+    /// Walks every PLC's Program blocks tree in the project and projects every
+    /// Data Block to a <see cref="DataBlockSummary"/> for the in-dialog
+    /// DB-switcher dropdown. Lazy + on-demand: only invoked when the user
+    /// opens the dropdown, then cached for the dialog session by the VM.
+    /// Each summary carries its own <see cref="DataBlockSummary.PlcName"/> so
+    /// the picker can group rows per PLC and chips can show the right owner.
     /// </summary>
-    private static IReadOnlyList<DataBlockSummary> EnumerateDataBlocks(
-        PlcSoftware plcSoftware, string plcName)
+    private static IReadOnlyList<DataBlockSummary> EnumerateDataBlocks(Project? project)
     {
         var list = new List<DataBlockSummary>();
-        foreach (var (db, folderPath) in EnumerateDataBlocksRecursive(plcSoftware.BlockGroup, parentPath: null))
+        if (project == null) return list;
+        foreach (var (plc, plcName) in EnumerateAllPlcSoftwares(project))
         {
-            bool isInstance = false;
-            try { isInstance = db.GetType().Name.IndexOf("Instance", StringComparison.OrdinalIgnoreCase) >= 0; }
-            catch { /* type-name probe is best-effort — mislabeled badge is harmless */ }
-            list.Add(new DataBlockSummary(
-                db.Name,
-                folderPath ?? "",
-                blockType: isInstance ? "InstanceDB" : "GlobalDB",
-                isInstanceDb: isInstance,
-                plcName: plcName));
+            foreach (var (db, folderPath) in EnumerateDataBlocksRecursive(plc.BlockGroup, parentPath: null))
+            {
+                bool isInstance = false;
+                try { isInstance = db.GetType().Name.IndexOf("Instance", StringComparison.OrdinalIgnoreCase) >= 0; }
+                catch { /* type-name probe is best-effort — mislabeled badge is harmless */ }
+                int? dbNumber = null;
+                try { dbNumber = db.Number; }
+                catch { /* freshly-created blocks may not have a number assigned yet */ }
+                list.Add(new DataBlockSummary(
+                    db.Name,
+                    folderPath ?? "",
+                    blockType: isInstance ? "InstanceDB" : "GlobalDB",
+                    isInstanceDb: isInstance,
+                    plcName: plcName,
+                    number: dbNumber));
+            }
         }
-        Log.Information("DB enumeration: {Count} block(s) under PLC {Plc}", list.Count, plcName);
+        Log.Information("DB enumeration: {Count} block(s) across project", list.Count);
         return list;
     }
 
     /// <summary>
-    /// Mutable holder for the live <see cref="DataBlock"/> instance backing a
-    /// companion DB (#58). TIA's <c>ImportBlock</c> disposes the old instance
-    /// on every Apply, so the per-DB OnApply closure must refresh its
-    /// reference between calls — wrapping it in a tiny class lets multiple
-    /// closures (export, import, re-resolve) share the same updatable handle.
+    /// Yields every (PlcSoftware, displayName) pair in the project. Same walk
+    /// pattern as <see cref="CountPlcSoftwaresInProject"/> (device tree →
+    /// device items → SoftwareContainer); per-item failures are swallowed so
+    /// one mis-configured device cannot hide the rest of the project.
     /// </summary>
-    private sealed class DbHandle
+    private static IEnumerable<(PlcSoftware plc, string name)> EnumerateAllPlcSoftwares(Project project)
     {
-        public DataBlock Current;
-        public DbHandle(DataBlock initial) { Current = initial; }
+        foreach (Device device in project.Devices)
+        {
+            foreach (var item in EnumerateDeviceItemsRecursive(device.DeviceItems))
+            {
+                PlcSoftware? plc = null;
+                try { plc = item.GetService<SoftwareContainer>()?.Software as PlcSoftware; }
+                catch { /* skip silently; next device item may still yield a PLC */ }
+                if (plc != null) yield return (plc, SafeGetPlcName(plc));
+            }
+        }
+    }
+
+    private static PlcSoftware? FindPlcSoftwareByName(Project project, string plcName)
+    {
+        foreach (var (plc, name) in EnumerateAllPlcSoftwares(project))
+        {
+            if (string.Equals(name, plcName, StringComparison.Ordinal)) return plc;
+        }
+        return null;
     }
 
     /// <summary>
@@ -545,11 +583,15 @@ public class BulkChangeContextMenu : ContextMenuAddIn
         UdtCommentResolver commentResolver,
         string plcName)
     {
-        var handle = new DbHandle(initialSelection);
+        // TIA's ImportBlock disposes the previous DataBlock reference on every
+        // Apply, so we re-resolve after each import (line below). The captured
+        // local is shared across both lambdas via the compiler-generated
+        // closure, so the re-assignment is visible on the next Apply.
+        DataBlock liveDb = initialSelection;
 
         string xmlPath = null!;
-        if (!TryExportWithCompilePrompt(handle.Current, adapter,
-                () => xmlPath = adapter.ExportBlock(handle.Current, tempDir)))
+        if (!TryExportWithCompilePrompt(liveDb, adapter,
+                () => xmlPath = adapter.ExportBlock(liveDb, tempDir)))
         {
             Log.Information("Companion DB skipped (user declined compile): {DbName}",
                 initialSelection.Name);
@@ -567,8 +609,8 @@ public class BulkChangeContextMenu : ContextMenuAddIn
         {
             Log.Information("Apply: writing modified XML for companion DB {DbName}", info.Name);
 
-            if (!TryExportWithCompilePrompt(handle.Current, adapter,
-                    () => adapter.BackupBlock(handle.Current, tempDir)))
+            if (!TryExportWithCompilePrompt(liveDb, adapter,
+                    () => adapter.BackupBlock(liveDb, tempDir)))
             {
                 Log.Information("Apply cancelled: user declined compile for companion {DbName}",
                     info.Name);
@@ -579,7 +621,7 @@ public class BulkChangeContextMenu : ContextMenuAddIn
             var modifiedPath = Path.Combine(tempDir,
                 $"{SafeFileName.Sanitize(info.Name)}_modified.xml");
             File.WriteAllText(modifiedPath, modifiedXml);
-            var blockGroup = (PlcBlockGroup)adapter.GetBlockGroup(handle.Current);
+            var blockGroup = (PlcBlockGroup)adapter.GetBlockGroup(liveDb);
             adapter.ImportBlock(blockGroup, modifiedPath);
 
             // Re-resolve to the post-import live instance so the next Apply
@@ -587,7 +629,7 @@ public class BulkChangeContextMenu : ContextMenuAddIn
             var fresh = blockGroup.Blocks.Find(info.Name) as DataBlock;
             if (fresh != null)
             {
-                handle.Current = fresh;
+                liveDb = fresh;
             }
             else
             {

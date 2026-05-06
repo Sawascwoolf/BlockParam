@@ -163,4 +163,94 @@ public class HierarchyAnalyzerMultiDbTests
                     "noop cross-DB sibling must be suppressed when the lift adds no matches");
         }
     }
+
+    [Fact]
+    public void AnalyzeMulti_PerAncestorCrossDbScope_EmittedAndDeduped()
+    {
+        // Real-world structure the analyzer used to miss:
+        //   DBn:
+        //     estopButton.estopActive.resetZone
+        //     resetButton.buttonDefect.resetZone
+        // With three DBs, six leaves total. Selecting DB1's
+        // estopButton.estopActive.resetZone, the user expects:
+        //   - 2 within DB1 (the two resetZones in DB1)
+        //   - 3 cross-DB at estopButton.estopActive
+        //   - 3 cross-DB at estopButton (collapses with the previous because
+        //     only one estopButton child carries a resetZone)
+        //   - 6 across all selected DBs (mega-scope)
+        // After dedup by match count: counts {2, 3, 6}.
+        var dbs = new[] { BuildResetZoneDb("DB1"), BuildResetZoneDb("DB2"), BuildResetZoneDb("DB3") };
+        var selected = FindLeaf(dbs[0], "estopButton.estopActive.resetZone");
+
+        var result = _analyzer.AnalyzeMulti(dbs, dbs[0], selected);
+
+        result.Scopes.Select(s => s.MatchCount).OrderBy(n => n).Should().Equal(2, 3, 6);
+
+        // The 3-count scope is the new per-ancestor cross-DB at
+        // estopButton.estopActive (or estopButton — they collapse to the
+        // same count).
+        result.Scopes.Should().Contain(s => s.MatchCount == 3,
+            "ancestor cross-DB scope is the missing-mid-level option");
+    }
+
+    private static DataBlockInfo BuildResetZoneDb(string name)
+    {
+        // estopButton (Struct)
+        //   estopActive (Struct)
+        //     resetZone (Int)
+        var estopActiveChildren = new List<MemberNode>();
+        var estopActive = new MemberNode(
+            "estopActive", "Struct", null, "estopButton.estopActive", null, estopActiveChildren);
+        estopActiveChildren.Add(new MemberNode(
+            "resetZone", "Int", "0",
+            "estopButton.estopActive.resetZone",
+            estopActive, Array.Empty<MemberNode>()));
+
+        var estopButtonChildren = new List<MemberNode> { estopActive };
+        var estopButton = new MemberNode(
+            "estopButton", "Struct", null, "estopButton", null, estopButtonChildren);
+        SetParent(estopActive, estopButton);
+
+        // resetButton.buttonDefect.resetZone
+        var buttonDefectChildren = new List<MemberNode>();
+        var buttonDefect = new MemberNode(
+            "buttonDefect", "Struct", null, "resetButton.buttonDefect", null, buttonDefectChildren);
+        buttonDefectChildren.Add(new MemberNode(
+            "resetZone", "Int", "0",
+            "resetButton.buttonDefect.resetZone",
+            buttonDefect, Array.Empty<MemberNode>()));
+
+        var resetButtonChildren = new List<MemberNode> { buttonDefect };
+        var resetButton = new MemberNode(
+            "resetButton", "Struct", null, "resetButton", null, resetButtonChildren);
+        SetParent(buttonDefect, resetButton);
+
+        return new DataBlockInfo(
+            name: name, number: 0, memoryLayout: "Optimized", blockType: "GlobalDB",
+            members: new[] { estopButton, resetButton });
+    }
+
+    /// <summary>
+    /// MemberNode.Parent has only a getter — the parser builds children with
+    /// parent already known, so out-of-order tree construction in tests
+    /// requires reaching the backing field via reflection. Acceptable in a
+    /// test-only helper; production code never needs this.
+    /// </summary>
+    private static void SetParent(MemberNode node, MemberNode parent)
+    {
+        var prop = typeof(MemberNode).GetProperty("Parent")!;
+        var backing = typeof(MemberNode).GetField(
+            "<Parent>k__BackingField",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+        backing!.SetValue(node, parent);
+    }
+
+    private static MemberNode FindLeaf(DataBlockInfo db, string path)
+    {
+        foreach (var m in db.AllMembers())
+        {
+            if (m.Path == path) return m;
+        }
+        throw new InvalidOperationException($"Leaf '{path}' not found in {db.Name}");
+    }
 }

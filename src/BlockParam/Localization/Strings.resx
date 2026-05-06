@@ -814,6 +814,15 @@ Closing the dialog will discard them. Close anyway?</value>
   <data name="Dialog_ActiveDbsSummary_Tooltip" xml:space="preserve">
     <value>All data blocks currently active in this dialog. Open the picker (left) to add or remove.</value>
   </data>
+  <!-- Tooltip on each active-DB chip's × close button. The button is
+       disabled when the chip is the last remaining DB (the dialog must
+       always have at least one). -->
+  <data name="Dialog_ActiveDbChip_Close_Tooltip" xml:space="preserve">
+    <value>Remove this Data Block from the dialog</value>
+  </data>
+  <data name="Dialog_ActiveDbChip_Solo_Tooltip" xml:space="preserve">
+    <value>Switch to only this Data Block (close the others)</value>
+  </data>
   <data name="Dialog_SwitchDb_DiscardConfirm_Title" xml:space="preserve">
     <value>Discard staged changes?</value>
   </data>

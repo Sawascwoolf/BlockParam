@@ -1,6 +1,7 @@
 using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Data;
 using System.Windows.Input;
 using System.Windows.Media;
 using BlockParam.Diagnostics;
@@ -1090,8 +1091,47 @@ public partial class BulkChangeDialog : Window
             vm.IsDataBlocksDropdownOpen = false;
             return;
         }
+        // Two "+" triggers exist (far-left + trailing). Anchor the popup to
+        // whichever was clicked so it opens under the user's mouse instead of
+        // jumping across the toolbar.
+        if (sender is UIElement target)
+            DbSwitcherPopup.PlacementTarget = target;
         if (vm.OpenDataBlocksDropdownCommand.CanExecute(null))
             vm.OpenDataBlocksDropdownCommand.Execute(null);
+    }
+
+    /// <summary>
+    /// Restores a PLC-group Expander's IsExpanded from the VM's collapsed-set
+    /// memory. The popup tears down and rebuilds its visual tree on every
+    /// open, so without this handler the user's collapse choice would reset
+    /// every time. Paired with <see cref="OnPlcGroupExpanderToggled"/> which
+    /// pushes new state back into the VM.
+    /// </summary>
+    private void OnPlcGroupExpanderLoaded(object sender, RoutedEventArgs e)
+    {
+        if (sender is Expander ex
+            && DataContext is BulkChangeViewModel vm
+            && ex.DataContext is CollectionViewGroup group
+            && group.Name is string plc)
+        {
+            ex.IsExpanded = vm.IsPlcGroupExpanded(plc);
+        }
+    }
+
+    /// <summary>
+    /// Single handler bound to both Expanded and Collapsed: pushes the new
+    /// state into the VM's collapsed-set so it survives popup close +
+    /// reopen and active-set mutations.
+    /// </summary>
+    private void OnPlcGroupExpanderToggled(object sender, RoutedEventArgs e)
+    {
+        if (sender is Expander ex
+            && DataContext is BulkChangeViewModel vm
+            && ex.DataContext is CollectionViewGroup group
+            && group.Name is string plc)
+        {
+            vm.SetPlcGroupExpanded(plc, ex.IsExpanded);
+        }
     }
 
     /// <summary>Focus the search box and clear it whenever the popup opens.</summary>

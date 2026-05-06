@@ -31,6 +31,30 @@
             </Style.Triggers>
         </Style>
 
+        <!-- Chromeless button used inside the active-DB chips. Default WPF
+             ButtonChrome paints a faint background + border on its own that
+             clashes with the Border the chip uses for its pill outline. The
+             override strips the chrome so the chip's Border is the only
+             visual element. -->
+        <Style x:Key="ChipBodyButton" TargetType="Button">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Padding" Value="0"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Focusable" Value="False"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Background="{TemplateBinding Background}">
+                            <ContentPresenter HorizontalAlignment="Stretch"
+                                              VerticalAlignment="Center"
+                                              RecognizesAccessKey="True"/>
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
         <!-- Inspector section icons (Material 24x24) -->
         <!-- Pencil = Bulk edit (input) -->
         <Geometry x:Key="IconEdit">M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zm17.71-10.21c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z</Geometry>
@@ -143,50 +167,114 @@
 
             <!-- Left: Toolbar + banner + legend + Member Table (stacked) -->
             <DockPanel Grid.Column="0" LastChildFill="True">
-                <!-- DB-switcher dropdown (#59): combo button shows the active DB
-                     name; popup lazy-enumerates project DBs on first open and
-                     caches the result. Hidden when no enumeration callback was
-                     wired (DevLauncher / unit tests). -->
+                <!-- Active-DB chip row (#58 peer-mode): every entry in the
+                     active set is a removable chip; "+" at the right opens
+                     the same multi-select popup used for switching/adding.
+                     Hidden when no enumeration callback was wired (DevLauncher
+                     / unit tests). -->
                 <DockPanel DockPanel.Dock="Top" Margin="0,0,0,6"
                            Visibility="{Binding HasDataBlockSwitcher, Converter={StaticResource BoolToVis}}">
-                    <Button x:Name="DbSwitcherButton"
+                    <!-- Far-left "+" — anchors the popup at the start of the
+                         chip row. Same handler as the trailing "+"; the
+                         handler retargets the popup to whichever button was
+                         clicked so the popup always opens directly under the
+                         user's mouse. -->
+                    <Button x:Name="DbSwitcherButtonLeft" DockPanel.Dock="Left"
                             Click="OnDbSwitcherButtonClick"
                             ToolTip="{loc:Loc Dialog_SwitchDb_Tooltip}"
                             Background="White" BorderBrush="#CCC" BorderThickness="1"
-                            Padding="8,3,8,3"
-                            HorizontalAlignment="Left" MinWidth="240"
-                            HorizontalContentAlignment="Stretch" Cursor="Hand">
-                        <DockPanel LastChildFill="True">
-                            <Path DockPanel.Dock="Right" Data="M 0,0 L 8,0 L 4,6 Z"
-                                  Fill="#666" Width="8" Height="6"
-                                  VerticalAlignment="Center" Margin="8,0,0,0"/>
-                            <!-- Owning PLC: dim prefix so single-PLC users
-                                 see no extra noise (collapsed when empty)
-                                 and multi-PLC users always know which PLC
-                                 they're operating on (#59 follow-up). -->
-                            <TextBlock DockPanel.Dock="Left"
-                                       Foreground="#888" FontWeight="Normal"
-                                       VerticalAlignment="Center"
-                                       Visibility="{Binding HasCurrentPlcName, Converter={StaticResource BoolToVis}}">
-                                <Run Text="{Binding CurrentPlcName, Mode=OneWay}"/>
-                                <Run Text=" / "/>
-                            </TextBlock>
-                            <TextBlock Text="{Binding CurrentDataBlockName}"
-                                       FontWeight="SemiBold" VerticalAlignment="Center"/>
-                        </DockPanel>
+                            Padding="6,2" Margin="0,0,6,0"
+                            VerticalAlignment="Center"
+                            Cursor="Hand">
+                        <TextBlock Text="+" FontSize="14" FontWeight="SemiBold"
+                                   Foreground="#444" VerticalAlignment="Center"
+                                   Margin="2,0"/>
                     </Button>
-                    <!-- Active-DB summary (#58 peer-mode): comma-joined list of every
-                         active DB, shown only when 2+ are active so single-DB users
-                         keep a clean header. Truncates past 4 with "+N more" so
-                         large active sets don't push the toolbar layout. -->
-                    <TextBlock DockPanel.Dock="Left"
-                               Text="{Binding ActiveDbsSummary}"
-                               VerticalAlignment="Center"
-                               Margin="12,0,0,0"
-                               Foreground="#666" FontSize="11"
-                               TextTrimming="CharacterEllipsis"
-                               ToolTip="{loc:Loc Dialog_ActiveDbsSummary_Tooltip}"
-                               Visibility="{Binding HasMultipleActiveDbs, Converter={StaticResource BoolToVis}}"/>
+                    <!-- Chip groups + trailing "+". Outer ItemsControl iterates
+                         per-PLC groups so a long PLC name renders once as a
+                         dim header instead of repeating on every chip. Inner
+                         ItemsControl is the chips for that group. The header
+                         is suppressed when only one PLC is active so
+                         single-PLC sessions stay clean. -->
+                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                        <ItemsControl ItemsSource="{Binding ActiveDbChipGroups}"
+                                      VerticalAlignment="Center">
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                    <StackPanel Orientation="Horizontal"/>
+                                </ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <StackPanel Orientation="Horizontal"
+                                                VerticalAlignment="Center"
+                                                Margin="0,0,8,0">
+                                        <TextBlock Text="{Binding PlcName}"
+                                                   FontSize="11" Foreground="#888"
+                                                   VerticalAlignment="Center"
+                                                   Margin="0,0,6,0"
+                                                   Visibility="{Binding HasPlcHeader, Converter={StaticResource BoolToVis}}"/>
+                                        <ItemsControl ItemsSource="{Binding Chips}"
+                                                      VerticalAlignment="Center">
+                                            <ItemsControl.ItemsPanel>
+                                                <ItemsPanelTemplate>
+                                                    <StackPanel Orientation="Horizontal"/>
+                                                </ItemsPanelTemplate>
+                                            </ItemsControl.ItemsPanel>
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate>
+                                                    <Border Background="#EEF3FB" BorderBrush="#B6C8E2"
+                                                            BorderThickness="1" CornerRadius="9"
+                                                            Padding="0" Margin="0,2,4,2">
+                                                        <StackPanel Orientation="Horizontal"
+                                                                    VerticalAlignment="Center">
+                                                            <!-- Chip body click = solo (switch to only this DB).
+                                                                 Single-DB session: opens the picker instead so the
+                                                                 click is never wasted. -->
+                                                            <Button Style="{StaticResource ChipBodyButton}"
+                                                                    Command="{Binding SoloCommand}"
+                                                                    ToolTip="{loc:Loc Dialog_ActiveDbChip_Solo_Tooltip}">
+                                                                <StackPanel Orientation="Horizontal"
+                                                                            VerticalAlignment="Center">
+                                                                    <TextBlock Text="{Binding NumberLabel}"
+                                                                               FontSize="11" Foreground="#577097"
+                                                                               VerticalAlignment="Center"
+                                                                               Margin="8,2,0,2"
+                                                                               Visibility="{Binding HasNumber, Converter={StaticResource BoolToVis}}"/>
+                                                                    <TextBlock Text="{Binding DisplayName}"
+                                                                               FontWeight="SemiBold" Foreground="#243B5E"
+                                                                               VerticalAlignment="Center"
+                                                                               Margin="6,2,4,2"/>
+                                                                </StackPanel>
+                                                            </Button>
+                                                            <Button Style="{StaticResource ChipBodyButton}"
+                                                                    Command="{Binding CloseCommand}"
+                                                                    ToolTip="{loc:Loc Dialog_ActiveDbChip_Close_Tooltip}"
+                                                                    Padding="4,0" Margin="0,0,2,0"
+                                                                    Foreground="#577097"
+                                                                    FontSize="12" FontWeight="Bold"
+                                                                    Content="×"/>
+                                                        </StackPanel>
+                                                    </Border>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                    </StackPanel>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                        <Button x:Name="DbSwitcherButton"
+                                Click="OnDbSwitcherButtonClick"
+                                ToolTip="{loc:Loc Dialog_SwitchDb_Tooltip}"
+                                Background="White" BorderBrush="#CCC" BorderThickness="1"
+                                Padding="6,2" Margin="2,0,0,0"
+                                VerticalAlignment="Center"
+                                Cursor="Hand">
+                            <TextBlock Text="+" FontSize="14" FontWeight="SemiBold"
+                                       Foreground="#444" VerticalAlignment="Center"
+                                       Margin="2,0"/>
+                        </Button>
+                    </StackPanel>
                     <Popup x:Name="DbSwitcherPopup"
                            IsOpen="{Binding IsDataBlocksDropdownOpen, Mode=TwoWay}"
                            PlacementTarget="{Binding ElementName=DbSwitcherButton}"
@@ -195,6 +283,20 @@
                            Opened="OnDbSwitcherPopupOpened">
                         <Border Background="White" BorderBrush="#888" BorderThickness="1"
                                 MinWidth="320" MaxWidth="520">
+                            <Border.Resources>
+                                <!-- Group the picker rows by owning PLC. The
+                                     CollectionViewSource re-resolves whenever
+                                     FilteredDataBlockItems is replaced (the VM
+                                     swaps in a new list rather than mutating)
+                                     so the grouping stays in sync with the
+                                     filter without extra plumbing. -->
+                                <CollectionViewSource x:Key="DbPickerView"
+                                                      Source="{Binding FilteredDataBlockItems}">
+                                    <CollectionViewSource.GroupDescriptions>
+                                        <PropertyGroupDescription PropertyName="PlcName"/>
+                                    </CollectionViewSource.GroupDescriptions>
+                                </CollectionViewSource>
+                            </Border.Resources>
                             <DockPanel LastChildFill="True" Margin="6">
                                 <DockPanel DockPanel.Dock="Top" Margin="0,0,0,4">
                                     <Button DockPanel.Dock="Right"
@@ -226,11 +328,50 @@
                                      the dialog's active set. Item identity → keep this row's checkbox
                                      state in sync with the VM via DataBlockListItem.SyncFrom. -->
                                 <ListBox x:Name="DbSwitcherList"
-                                         ItemsSource="{Binding FilteredDataBlockItems}"
+                                         ItemsSource="{Binding Source={StaticResource DbPickerView}}"
                                          BorderThickness="0" MaxHeight="320"
                                          VirtualizingStackPanel.IsVirtualizing="True"
+                                         VirtualizingPanel.IsVirtualizingWhenGrouping="True"
                                          SelectionMode="Single"
                                          KeyDown="OnDbSwitcherListKeyDown">
+                                    <ListBox.GroupStyle>
+                                        <GroupStyle>
+                                            <!-- ContainerStyle: wrap each PLC group in an
+                                                 Expander so users with many PLCs can collapse
+                                                 the ones they don't care about. Expanded by
+                                                 default so first-time users don't think the
+                                                 picker is empty. -->
+                                            <GroupStyle.ContainerStyle>
+                                                <Style TargetType="GroupItem">
+                                                    <Setter Property="Template">
+                                                        <Setter.Value>
+                                                            <ControlTemplate TargetType="GroupItem">
+                                                                <Expander Loaded="OnPlcGroupExpanderLoaded"
+                                                                          Expanded="OnPlcGroupExpanderToggled"
+                                                                          Collapsed="OnPlcGroupExpanderToggled"
+                                                                          Background="Transparent"
+                                                                          BorderThickness="0"
+                                                                          Padding="0">
+                                                                    <Expander.Header>
+                                                                        <StackPanel Orientation="Horizontal">
+                                                                            <TextBlock Text="{Binding Name}"
+                                                                                       FontSize="10" FontWeight="SemiBold"
+                                                                                       Foreground="#666"
+                                                                                       VerticalAlignment="Center"/>
+                                                                            <TextBlock Text="{Binding ItemCount, StringFormat=' ({0})'}"
+                                                                                       FontSize="10" Foreground="#999"
+                                                                                       VerticalAlignment="Center"/>
+                                                                        </StackPanel>
+                                                                    </Expander.Header>
+                                                                    <ItemsPresenter/>
+                                                                </Expander>
+                                                            </ControlTemplate>
+                                                        </Setter.Value>
+                                                    </Setter>
+                                                </Style>
+                                            </GroupStyle.ContainerStyle>
+                                        </GroupStyle>
+                                    </ListBox.GroupStyle>
                                     <ListBox.ItemContainerStyle>
                                         <Style TargetType="ListBoxItem">
                                             <Setter Property="Padding" Value="6,3"/>
@@ -268,9 +409,17 @@
                                                                    VerticalAlignment="Center"
                                                                    DockPanel.Dock="Right"
                                                                    Visibility="{Binding FolderPath, Converter={StaticResource StringToVis}}"/>
-                                                        <TextBlock Text="{Binding Name}" FontWeight="SemiBold"
-                                                                   VerticalAlignment="Center"
-                                                                   HorizontalAlignment="Left"/>
+                                                        <StackPanel Orientation="Horizontal"
+                                                                    VerticalAlignment="Center">
+                                                            <TextBlock Text="{Binding NumberLabel}"
+                                                                       FontSize="10" Foreground="#888"
+                                                                       VerticalAlignment="Center"
+                                                                       Margin="0,0,6,0"
+                                                                       Visibility="{Binding HasNumber, Converter={StaticResource BoolToVis}}"/>
+                                                            <TextBlock Text="{Binding Name}" FontWeight="SemiBold"
+                                                                       VerticalAlignment="Center"
+                                                                       HorizontalAlignment="Left"/>
+                                                        </StackPanel>
                                                     </DockPanel>
                                                 </Button>
                                             </DockPanel>

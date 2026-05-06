@@ -228,6 +228,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         RootMembers = new ObservableCollection<MemberNodeViewModel>();
         BuildRootMembersFromActiveDbs();
         RefreshRuleHints();
+        RebuildActiveDbChips();
 
         AvailableScopes = new ObservableCollection<ScopeLevel>();
 
@@ -797,15 +798,29 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         // real top-level members, reused by reference — Path strings stay
         // unchanged, so existing rule patterns / scope-detection on member
         // paths still match across DBs.
-        foreach (var db in _activeDbs)
-            AddDbGroupRoot(db);
+        // Cross-PLC name collision: two PLCs can each host a DB called
+        // "DB_Foo". Tag any colliding synthetic root with its PLC prefix so
+        // the user can tell them apart in the tree.
+        var nameCounts = _activeDbs
+            .GroupBy(d => d.Info.Name, StringComparer.Ordinal)
+            .ToDictionary(g => g.Key, g => g.Count(), StringComparer.Ordinal);
+        for (int i = 0; i < _activeDbs.Count; i++)
+        {
+            var db = _activeDbs[i];
+            var plc = i == 0 ? _currentPlcName : db.PlcName;
+            bool collides = nameCounts.TryGetValue(db.Info.Name, out var c) && c > 1;
+            var displayName = collides && !string.IsNullOrEmpty(plc)
+                ? $"{plc} / {db.Info.Name}"
+                : db.Info.Name;
+            AddDbGroupRoot(db, displayName);
+        }
     }
 
-    private void AddDbGroupRoot(ActiveDb db)
+    private void AddDbGroupRoot(ActiveDb db, string displayName)
     {
         var info = db.Info;
         var synthetic = new MemberNode(
-            name: info.Name,
+            name: displayName,
             datatype: "DB",
             startValue: null,
             path: info.Name,
@@ -879,11 +894,10 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     public bool HasMultipleActiveDbs => _activeDbs.Count > 1;
 
     /// <summary>
-    /// Comma-joined list of all active DB names, shown in the toolbar so
-    /// the user can read the full active set at a glance without opening
-    /// the dropdown. Empty when only one DB is active (the dropdown button
-    /// already shows it). Truncates past four names with "+N more" so
-    /// large active sets don't push the toolbar layout.
+    /// Comma-joined list of all active DB names, kept for tooltip /
+    /// accessibility surfaces that want the full set as plain text. The
+    /// toolbar UI itself renders <see cref="ActiveDbChips"/> instead so
+    /// each DB has its own × close affordance.
     /// </summary>
     public string ActiveDbsSummary
     {
@@ -896,6 +910,120 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
                 return string.Join(", ", names);
             return $"{string.Join(", ", names.Take(maxShown))} +{names.Count - maxShown} more";
         }
+    }
+
+    /// <summary>
+    /// Flat list of chips, one per active DB. Useful for tests and any code
+    /// that needs to enumerate every chip without descending into groups.
+    /// Use <see cref="ActiveDbChipGroups"/> for the toolbar UI — it bundles
+    /// chips by PLC so long PLC names render once as a group header instead
+    /// of repeating on every chip.
+    /// </summary>
+    public ObservableCollection<ActiveDbChipViewModel> ActiveDbChips { get; }
+        = new ObservableCollection<ActiveDbChipViewModel>();
+
+    /// <summary>
+    /// Chips bundled per owning PLC. The toolbar binds here so the long PLC
+    /// name appears once as a group header rather than on every chip. In
+    /// single-PLC sessions <see cref="ActiveDbChipGroupViewModel.HasPlcHeader"/>
+    /// is false on the only group, so the row reduces to bare DB chips.
+    /// </summary>
+    public ObservableCollection<ActiveDbChipGroupViewModel> ActiveDbChipGroups { get; }
+        = new ObservableCollection<ActiveDbChipGroupViewModel>();
+
+    /// <summary>
+    /// Per-PLC collapsed-group memory for the dropdown picker. The popup is
+    /// reinstantiated on every open so Expander.IsExpanded would otherwise
+    /// reset every time. The dialog wires Expander.Loaded /
+    /// Expander.Collapsed back to <see cref="IsPlcGroupExpanded"/> /
+    /// <see cref="SetPlcGroupExpanded"/> so a user's collapse choice
+    /// survives popup close + reopen and chip-set changes.
+    /// </summary>
+    private readonly HashSet<string> _collapsedPlcGroups =
+        new HashSet<string>(StringComparer.Ordinal);
+
+    public bool IsPlcGroupExpanded(string plcName) => !_collapsedPlcGroups.Contains(plcName);
+
+    public void SetPlcGroupExpanded(string plcName, bool expanded)
+    {
+        if (expanded) _collapsedPlcGroups.Remove(plcName);
+        else _collapsedPlcGroups.Add(plcName);
+    }
+
+    private void RebuildActiveDbChips()
+    {
+        ActiveDbChips.Clear();
+        ActiveDbChipGroups.Clear();
+        bool canClose = _activeDbs.Count > 1;
+
+        // Build chips first; group second. Preserve _activeDbs order both
+        // within a group (chips appear in active-set order) and across groups
+        // (the first PLC seen anchors the leftmost group, matching the
+        // anchor's owner). Stable order keeps the layout from jumping when
+        // companions on the same PLC are added/removed.
+        var orderedPlcs = new List<string>();
+        var perPlc = new Dictionary<string, List<ActiveDbChipViewModel>>(
+            StringComparer.Ordinal);
+
+        for (int i = 0; i < _activeDbs.Count; i++)
+        {
+            var db = _activeDbs[i];
+            // Anchor (index 0) reads PLC name from _currentPlcName, peers
+            // carry their own — mirrors the rule used elsewhere (FindActiveDb,
+            // IsSameSummary). Cross-PLC adds via dropdown carry the right
+            // summary.PlcName, so multi-PLC projects produce one group per
+            // distinct owner.
+            var plc = (i == 0 ? _currentPlcName : db.PlcName) ?? "";
+            var chip = new ActiveDbChipViewModel(
+                displayName: db.Info.Name,
+                plcPrefix: "", // group header carries the PLC name now
+                canClose: canClose,
+                onClose: () => RequestRemoveActiveDb(db),
+                onSolo: () => SoloActiveDbByReference(db),
+                number: db.Info.Number);
+            ActiveDbChips.Add(chip);
+
+            if (!perPlc.TryGetValue(plc, out var list))
+            {
+                list = new List<ActiveDbChipViewModel>();
+                perPlc[plc] = list;
+                orderedPlcs.Add(plc);
+            }
+            list.Add(chip);
+        }
+
+        // Show the group header whenever the project itself is multi-PLC,
+        // not just when the active set spans multiple PLCs. The host signals
+        // multi-PLC by setting _currentPlcName non-empty (single-PLC projects
+        // get an empty PLC display name to suppress redundant chrome).
+        // Showing the header even when only one PLC's DBs are currently
+        // active gives the user immediate visibility into which machine they
+        // are on, instead of having to guess until they add a peer.
+        bool showHeader = !string.IsNullOrEmpty(_currentPlcName);
+        foreach (var plc in orderedPlcs)
+        {
+            ActiveDbChipGroups.Add(new ActiveDbChipGroupViewModel(
+                plc, perPlc[plc], showHeader));
+        }
+    }
+
+    /// <summary>
+    /// Chip × handler. Refuses the last-DB removal (matches the dropdown
+    /// last-uncheck rule) and routes everything else through the existing
+    /// <see cref="RemoveActiveDb"/> path so the stash / Apply prompt fires
+    /// for DBs with pending edits.
+    /// </summary>
+    private void RequestRemoveActiveDb(ActiveDb db)
+    {
+        if (_activeDbs.Count <= 1)
+        {
+            Log.Information(
+                "Refusing chip-close on {Name} — at least one DB must stay active",
+                db.Info.Name);
+            return;
+        }
+        if (RemoveActiveDb(db))
+            RebuildAfterActiveSetChanged();
     }
 
     /// <summary>
@@ -1085,6 +1213,45 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         RebuildAfterActiveSetChanged();
     }
 
+    /// <summary>
+    /// Reference-based variant of <see cref="SoloActiveDb"/> used by the
+    /// chip-body click. Avoids the summary round-trip (chip already holds
+    /// the live <see cref="ActiveDb"/>). Same prompts on every dropped DB
+    /// with pending edits; if the user cancels mid-solo, the remaining
+    /// drops are skipped and the active set is whatever survived.
+    /// </summary>
+    public void SoloActiveDbByReference(ActiveDb target)
+    {
+        if (_activeDbs.Count <= 1)
+        {
+            // Already the only active DB — there's nothing to solo away. Use
+            // the click as a one-step "open the picker so I can switch" so
+            // single-DB users don't have to reach for the + button.
+            if (_enumerateDataBlocks != null
+                && OpenDataBlocksDropdownCommand.CanExecute(null))
+            {
+                OpenDataBlocksDropdownCommand.Execute(null);
+            }
+            return;
+        }
+
+        var others = _activeDbs
+            .Where(db => !ReferenceEquals(db, target))
+            .ToList();
+
+        foreach (var db in others)
+        {
+            if (!RemoveActiveDb(db))
+            {
+                Log.Information(
+                    "Solo cancelled at {Name} — leaving partial set",
+                    db.Info.Name);
+                break;
+            }
+        }
+        RebuildAfterActiveSetChanged();
+    }
+
     private bool IsSameSummary(ActiveDb db, DataBlockSummary summary)
     {
         // Mirror FindActiveDb's anchor PLC handling: index 0 reads
@@ -1108,20 +1275,20 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
 
         // No-op if it's already active (defensive — the stash entry only
         // exists for inactive DBs, but the click could double-fire).
-        if (FindActiveDb(summary) != null)
-        {
-            Log.Information(
-                "ReactivateStashedDb: {Name} already active — restoring stash only",
-                summary.Name);
-        }
-        else
-        {
+        if (FindActiveDb(summary) == null)
             AddCompanionFromSummary(summary);
-        }
 
-        RebuildAfterActiveSetChanged();
+        // "Switch back" UX: clicking the stash header is a navigation
+        // gesture, not an "add a peer" gesture. Solo to the reactivated DB
+        // so the user lands on it as the only active DB. Solo runs first
+        // so the live tree settles to its final shape *before* we splat
+        // pending values onto its leaves — otherwise the post-solo rebuild
+        // would create fresh VMs and discard the just-restored state.
+        var target = FindActiveDb(summary);
+        if (target != null) SoloActiveDbByReference(target);
+        else RebuildAfterActiveSetChanged(); // already-active fallback path
 
-        // Now that the DB's nodes are in the live tree, replay the stash.
+        // Replay the stash onto the now-final tree.
         // RestoreStashFor pops the stash entry on success.
         var (restored, dropped) = RestoreStashFor(summary);
         if (restored > 0 || dropped > 0)
@@ -1159,6 +1326,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         BuildRootMembersFromActiveDbs();
         ApplyAllFilters();
         RefreshFlatList();
+        RebuildActiveDbChips();
         OnPropertyChanged(nameof(HasMultipleActiveDbs));
         OnPropertyChanged(nameof(ActiveDbsSummary));
         OnPropertyChanged(nameof(SelectedFlatMember));
@@ -1388,8 +1556,11 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             blockType: db.Info.BlockType,
             isInstanceDb: string.Equals(db.Info.BlockType, "InstanceDB", StringComparison.Ordinal),
             plcName: _currentPlcName);
-        var key = $"{summary.PlcName}|{summary.FolderPath}|{summary.Name}";
-        _stashedDbs[key] = new StashedDbState(summary, entries);
+        // Use the shared StashKey() — earlier this path used a different
+        // separator ('|' vs ''), which kept RestoreStashFor from
+        // finding the entry, so the stash header lingered after a chip
+        // close → reactivation flow.
+        _stashedDbs[StashKey(summary)] = new StashedDbState(summary, entries);
         SyncStashedDbsCollection();
     }
 
