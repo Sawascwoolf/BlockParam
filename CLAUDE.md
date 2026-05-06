@@ -206,8 +206,9 @@ from the constructor, and bind through it.
 - No new `if (x.Contains(filter, StringComparison.OrdinalIgnoreCase) || y.Contains(...) || z.Contains(...))`
   block — that lives in `MemberSearchService` / the planned `StringMatcher`.
 - No new copy of the `if (_field != value) { _field = value; OnPropertyChanged(...) }`
-  shape unless `SetField<T>` truly doesn't fit — and if it doesn't, say why
-  in the PR description.
+  shape unless `ViewModelBase.SetProperty<T>` truly doesn't fit — and if it
+  doesn't, say why in the PR description. The helper already exists and is
+  used by every VM except `BulkChangeViewModel` (#87).
 - No new `List<T>` field that is mutated from more than one method without
   a snapshot/setter cascade (#78 / #79).
 
