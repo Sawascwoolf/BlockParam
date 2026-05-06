@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using BlockParam.Diagnostics;
+using BlockParam.Services;
 
 namespace BlockParam.Licensing;
 
@@ -13,6 +14,20 @@ namespace BlockParam.Licensing;
 /// License service that validates Pro licenses via periodic heartbeats to a remote server.
 /// Tracks concurrent sessions to prevent license sharing across VMs.
 /// Falls back gracefully: cached license (48h) → free tier.
+///
+/// Sync model (single source of truth — see #11 audit on branch
+/// claude/review-code-architecture-lxZvn):
+///   - <c>_lock</c> guards the mutable state bundle: <c>_licenseData</c>,
+///     <c>_cache</c>, <c>_proActive</c>, <c>_retryCount</c>. Every read/write
+///     of those four fields runs inside <c>lock (_lock)</c>.
+///   - <c>volatile</c> is reserved for the lifecycle flag <c>_disposed</c> and
+///     the read-mostly mirror <c>_proActive</c> (read from binding threads
+///     without the lock; the lock provides happens-before for writes).
+///   - <c>_heartbeatTimer</c> is owned via <c>Interlocked.Exchange</c> so a
+///     racing <c>Dispose</c> always wins and never leaks a live timer.
+///   - HTTP calls (<c>PostAsync</c>) MUST run outside the lock — otherwise a
+///     slow server freezes every license read. Lock only the JSON-to-state
+///     copy after the response arrives.
 /// </summary>
 public class OnlineLicenseService : ILicenseService
 {
@@ -34,7 +49,7 @@ public class OnlineLicenseService : ILicenseService
     private CachedLicenseResponse? _cache;
     private volatile bool _proActive;
     private volatile bool _disposed;
-    private volatile bool _isManagedKey;
+    private bool _isManagedKey;
     private int _retryCount;
 
     /// <summary>
@@ -43,9 +58,7 @@ public class OnlineLicenseService : ILicenseService
     /// every seat on the machine adopts it on next start. UNC / network
     /// paths are explicitly out of scope — only this local path is read.
     /// </summary>
-    public static string DefaultSharedLicenseFilePath => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
-        "BlockParam", "license.key");
+    public static string DefaultSharedLicenseFilePath => AppDirectories.SharedLicenseFile;
 
     public OnlineLicenseService(
         string storagePath,
@@ -188,13 +201,26 @@ public class OnlineLicenseService : ILicenseService
         if (_disposed || _licenseData == null || string.IsNullOrWhiteSpace(_serverBaseUrl))
             return;
 
-        StopHeartbeat();
-        _retryCount = 0;
-        _heartbeatTimer = new Timer(
+        lock (_lock) { _retryCount = 0; }
+
+        var fresh = new Timer(
             _ => _ = SendHeartbeatAsync(),
             null,
             TimeSpan.Zero,  // First heartbeat immediately
             Timeout.InfiniteTimeSpan);  // One-shot; re-scheduled after each beat
+
+        // Atomic swap so a concurrent StopHeartbeat / Dispose can't leak the
+        // previous timer (or this one — see post-swap _disposed check below).
+        var previous = Interlocked.Exchange(ref _heartbeatTimer, fresh);
+        previous?.Dispose();
+
+        // Lost the race against Dispose: the timer we just installed will
+        // never be reaped by Dispose's Exchange because Dispose already ran.
+        if (_disposed)
+        {
+            var leaked = Interlocked.Exchange(ref _heartbeatTimer, null);
+            leaked?.Dispose();
+        }
     }
 
     private void ScheduleNextHeartbeat(TimeSpan delay)
@@ -260,7 +286,7 @@ public class OnlineLicenseService : ILicenseService
                     EvaluateTier();
                 }
 
-                _retryCount = 0; // Success — reset retry counter
+                lock (_lock) { _retryCount = 0; } // Success — reset retry counter
                 ScheduleNextHeartbeat(HeartbeatInterval);
                 RaiseLicenseStateChanged();
                 return;
@@ -274,34 +300,38 @@ public class OnlineLicenseService : ILicenseService
                     if (_cache != null)
                         _cache.ErrorMessage = "License rejected by server";
                     _proActive = false;
+                    _retryCount = 0; // Server responded clearly — no retry
                 }
-                _retryCount = 0; // Server responded clearly — no retry
                 ScheduleNextHeartbeat(HeartbeatInterval);
                 RaiseLicenseStateChanged();
             }
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
         {
-            Log.Warning(ex, "Heartbeat failed — using cached license (retry {Retry}/{Max})",
-                _retryCount + 1, MaxRetryAttempts);
+            // Read+update _retryCount under the lock so a rapid Stop/Start
+            // cycle (which leaves an in-flight callback) can't race a fresh
+            // heartbeat resetting the counter.
+            int attempt;
+            TimeSpan delay;
             lock (_lock)
             {
                 EvaluateTier(); // Re-evaluate with cache
+                attempt = _retryCount + 1;
+                if (_retryCount < MaxRetryAttempts)
+                {
+                    // Exponential backoff: 30s, 60s, 120s, 240s, then back to 2h
+                    delay = TimeSpan.FromSeconds(30 * Math.Pow(2, _retryCount));
+                    _retryCount++;
+                }
+                else
+                {
+                    delay = HeartbeatInterval;
+                    _retryCount = 0;
+                }
             }
-
-            // Exponential backoff: 30s, 60s, 120s, 240s, then back to 2h
-            if (_retryCount < MaxRetryAttempts)
-            {
-                var delay = TimeSpan.FromSeconds(30 * Math.Pow(2, _retryCount));
-                _retryCount++;
-                ScheduleNextHeartbeat(delay);
-            }
-            else
-            {
-                _retryCount = 0;
-                ScheduleNextHeartbeat(HeartbeatInterval);
-            }
-
+            Log.Warning(ex, "Heartbeat failed — using cached license (retry {Retry}/{Max})",
+                attempt, MaxRetryAttempts);
+            ScheduleNextHeartbeat(delay);
             RaiseLicenseStateChanged();
         }
     }

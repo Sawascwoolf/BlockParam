@@ -7,6 +7,7 @@ using System.Windows.Threading;
 using BlockParam.Diagnostics;
 using BlockParam.Config;
 using BlockParam.Localization;
+using BlockParam.Services;
 
 namespace BlockParam.UI;
 
@@ -149,20 +150,16 @@ public class ConfigEditorViewModel : ViewModelBase
         if (string.IsNullOrWhiteSpace(_filterText)) return true;
         if (obj is not RuleFileViewModel file) return false;
 
-        if (file.FileName.IndexOf(_filterText, StringComparison.OrdinalIgnoreCase) >= 0)
+        if (StringMatcher.MatchesAny(_filterText, file.FileName))
             return true;
 
         return file.Rules.Any(RuleMatchesFilter);
     }
 
     private bool RuleMatchesFilter(RuleViewModel r) =>
-        r.PathPattern.IndexOf(_filterText, StringComparison.OrdinalIgnoreCase) >= 0
-        || r.TagTableName.IndexOf(_filterText, StringComparison.OrdinalIgnoreCase) >= 0
-        || r.CommentTemplate.IndexOf(_filterText, StringComparison.OrdinalIgnoreCase) >= 0
-        || r.Datatype.IndexOf(_filterText, StringComparison.OrdinalIgnoreCase) >= 0
-        || r.AllowedValues.IndexOf(_filterText, StringComparison.OrdinalIgnoreCase) >= 0
-        || r.Min.IndexOf(_filterText, StringComparison.OrdinalIgnoreCase) >= 0
-        || r.Max.IndexOf(_filterText, StringComparison.OrdinalIgnoreCase) >= 0;
+        StringMatcher.MatchesAny(_filterText,
+            r.PathPattern, r.TagTableName, r.CommentTemplate,
+            r.Datatype, r.AllowedValues, r.Min, r.Max);
 
     private void AutoExpandMatches()
     {
@@ -396,6 +393,47 @@ public class ConfigEditorViewModel : ViewModelBase
         return $"{baseName}-{Guid.NewGuid():N}.json";
     }
 
+    /// <summary>
+    /// Lazily seeds a per-directory claim set with the on-disk file names
+    /// already living there. Used by SaveAll to detect collisions between
+    /// auto-derived names, user-typed names, and existing files. Missing
+    /// directory is fine — the claim set just stays seeded with whatever
+    /// in-memory files have already been pre-claimed.
+    /// </summary>
+    private static HashSet<string> ClaimsFor(
+        Dictionary<string, HashSet<string>> cache, string dir)
+    {
+        if (cache.TryGetValue(dir, out var set)) return set;
+        set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        try
+        {
+            if (Directory.Exists(dir))
+                foreach (var p in Directory.EnumerateFiles(dir, "*.json"))
+                    set.Add(Path.GetFileName(p));
+        }
+        catch { /* unreadable dir → empty seed; SaveRuleFile will fail later with a clearer error */ }
+        cache[dir] = set;
+        return set;
+    }
+
+    /// <summary>
+    /// Returns <paramref name="baseName"/> if free, otherwise appends -2, -3, …
+    /// before the .json extension until a free name is found. Falls back to a
+    /// guid suffix as the absolute last resort.
+    /// </summary>
+    private static string ResolveUniqueFileName(string baseName, HashSet<string> claimed)
+    {
+        if (!claimed.Contains(baseName)) return baseName;
+        var stem = Path.GetFileNameWithoutExtension(baseName);
+        var ext = Path.GetExtension(baseName);
+        for (int i = 2; i < 1000; i++)
+        {
+            var candidate = $"{stem}-{i}{ext}";
+            if (!claimed.Contains(candidate)) return candidate;
+        }
+        return $"{stem}-{Guid.NewGuid():N}{ext}";
+    }
+
     private RuleSource GetDefaultNewFileSource()
     {
         var projectDir = _configLoader.GetTiaProjectRulesDirectory();
@@ -572,17 +610,37 @@ public class ConfigEditorViewModel : ViewModelBase
         // anything else, IsAutoNamed flips to false and we keep their name —
         // so a file the user explicitly named "my-rules.json" never gets
         // silently renamed to a pattern-derived name on save.
+        //
+        // Per-target-dir claim sets prevent two new files with the same
+        // first-rule pattern from both grabbing the same derived name and
+        // silently overwriting each other on save (#72). Pre-claim every
+        // fixed name (user-typed or already-existing on-disk) so auto-names
+        // can only land on free slots; resolution appends -2, -3, … on hit.
+        var claimsByDir = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var file in RuleFiles)
+        {
+            if (file.IsNew && file.IsAutoNamed) continue;
+            var dir = GetDirectoryForSource(file.SaveDestination);
+            if (dir != null)
+                ClaimsFor(claimsByDir, dir).Add(file.FileName);
+        }
+
         foreach (var file in RuleFiles)
         {
             if (file.IsNew && file.IsAutoNamed)
             {
-                var derived = file.DeriveFileNameFromFirstRule();
-                if (!string.Equals(file.FileName, derived, StringComparison.OrdinalIgnoreCase))
+                var dir = GetDirectoryForSource(file.SaveDestination);
+                if (dir != null)
                 {
-                    file.FileName = derived;
-                    var dir = Path.GetDirectoryName(file.FilePath);
-                    if (!string.IsNullOrEmpty(dir))
-                        file.FilePath = Path.Combine(dir, derived);
+                    var derived = file.DeriveFileNameFromFirstRule();
+                    var unique = ResolveUniqueFileName(derived, ClaimsFor(claimsByDir, dir));
+                    ClaimsFor(claimsByDir, dir).Add(unique);
+
+                    if (!string.Equals(file.FileName, unique, StringComparison.OrdinalIgnoreCase))
+                    {
+                        file.FileName = unique;
+                        file.FilePath = Path.Combine(dir, unique);
+                    }
                 }
             }
 
