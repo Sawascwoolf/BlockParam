@@ -6,7 +6,7 @@ the daily quota and funds further development.
 | Tier | Daily limit | Price |
 |---|---|---|
 | **Free** | 200 value changes per calendar day | € 0 |
-| **Pro** | Unlimited | 15 € / year (net) |
+| **Pro** | Unlimited | 50 € / year (net) |
 
 The daily counter resets at **local midnight**.
 
