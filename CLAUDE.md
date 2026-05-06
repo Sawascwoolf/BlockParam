@@ -136,6 +136,88 @@ For rebuilding the narrated workflow MP4 (`assets/screenshots/workflow/workflow_
   issues stay open after merge, then use
   `gh issue close <N> -c "Resolved by #<PR>"` to catch up.
 
+## Architecture Guardrails
+
+These rules exist to stop the codebase from drifting further toward the
+maintainability/DRY problems already filed as issues (#78, #79, #80, #81, #82).
+They apply to **new and modified code**. Do not retrofit old code in
+unrelated PRs — fix it under the issue that owns the cleanup.
+
+### Hard rules (must follow in every change)
+
+- **No new file I/O outside a storage layer.** `File.*`, `Directory.*`,
+  `Path.GetTempPath()`, `Environment.GetFolderPath(...)` are 55+ scattered
+  calls today. Do not add a 56th. New code that needs to read/write goes
+  through the existing path-helper or, if none fits, introduce one — don't
+  copy-paste another `Directory.CreateDirectory(...) + try/catch` pair.
+- **No new path string literals.** Anything matching `BlockParam/...`,
+  `%APPDATA%\BlockParam`, `%TEMP%\BlockParam`, or `UserFiles\BlockParam`
+  must reference a single named constant. If the constant doesn't exist
+  yet, add it in one place; don't introduce a sixth duplicate.
+- **No new `_activeDbs` / `_stashedDbs` mutation sites.** Per #78, all
+  active-set changes go through the snapshot setter once it lands. Until
+  then, route any new mutation through the existing `RemoveActiveDb` /
+  `SoloActiveDbByReference` / `ReactivateStashedDb` helpers — do not add a
+  seventh entry path.
+- **No path-string identity for members across DBs.** Per #82, member
+  identity is `(ActiveDb, MemberNode)`. New code that needs to look up a
+  member by path must take the owning `ActiveDb` as a parameter; never
+  scan all roots.
+- **No business logic in code-behind (`*.xaml.cs`).** Selection state,
+  filtering, validation, persistence — these belong in the ViewModel.
+  Code-behind is for: focus, scroll, attached-property bridging, and
+  `InitializeComponent`. If you need shared visual behavior (column sizing,
+  drag-select), write an attached behavior, not another `OnXyzChanged`
+  handler.
+- **No new sync primitives in `OnlineLicenseService` without auditing the
+  existing ones.** The class currently mixes `lock`, `volatile`, and
+  `Interlocked` over overlapping state. Any change touching `_licenseData`,
+  `_cache`, `_proActive`, or `_heartbeatTimer` must pick one model and
+  remove the conflicts within the touched scope. Never call HTTP / I/O
+  inside `lock (_lock)`.
+- **No new user-facing strings inline.** Every string the user sees goes
+  through `Res.Get` / `Res.Format` against `Strings.resx`. Same key for
+  the same concept across files — don't add a near-duplicate key when one
+  exists.
+
+### Default to extracting, not extending, when touching hotspots
+
+If your change adds non-trivial logic to any of the following, prefer
+extracting a small focused class for the new logic (kept in the same
+folder) over enlarging the host:
+
+| Hotspot | Current LOC | Owning issue |
+|---|---:|---|
+| `UI/BulkChangeViewModel.cs` | 4,563 | #80 |
+| `AddIn/BulkChangeContextMenu.cs` | 981 | #81 |
+| `UI/BulkChangeDialog.xaml.cs` | 1,033 | (no issue yet) |
+| `Licensing/OnlineLicenseService.cs` | 565 | (no issue yet) |
+| `Services/TiaDataTypeValidator.cs` | 556 | (no issue yet) |
+
+Adding 50 lines of new feature logic to a 4,500-line ViewModel is not
+"a small change" — it cements the god class. Add a sibling class, wire it
+from the constructor, and bind through it.
+
+### DRY checklist before merging
+
+- Searched for the verb you just wrote (`Filter`, `Match`, `Save`, `Load`,
+  `Export`, `Build`, `Resolve`) in nearby files — used the existing one if
+  it covers your case.
+- No new `if (x.Contains(filter, StringComparison.OrdinalIgnoreCase) || y.Contains(...) || z.Contains(...))`
+  block — that lives in `MemberSearchService` / the planned `StringMatcher`.
+- No new copy of the `if (_field != value) { _field = value; OnPropertyChanged(...) }`
+  shape unless `SetField<T>` truly doesn't fit — and if it doesn't, say why
+  in the PR description.
+- No new `List<T>` field that is mutated from more than one method without
+  a snapshot/setter cascade (#78 / #79).
+
+### When in doubt
+
+File a new issue rather than inflating the host file. Reference the
+relevant existing refactor issue (#78–#82) so reviewers can see the
+seams you're not crossing. The cost of a small new file is much lower
+than the cost of another method on a god class.
+
 ## Project Structure
 
 ```
