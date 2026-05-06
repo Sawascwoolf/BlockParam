@@ -19,8 +19,42 @@ using BlockParam.Updates;
 namespace BlockParam.UI;
 
 /// <summary>
-/// Main ViewModel for the BulkChange dialog.
-/// Uses a flat list (via FlatTreeManager) for proper column alignment in ListView/GridView.
+/// Main ViewModel for the BulkChange dialog. Uses a flat list (via
+/// <see cref="FlatTreeManager"/>) for proper column alignment in
+/// ListView/GridView.
+///
+/// <para>
+/// <b>Active-set state model (#78).</b> The dialog's active DBs +
+/// per-DB pending-edit stashes + anchor PLC name are bundled into a
+/// single immutable <see cref="ActiveSetState"/> snapshot exposed via
+/// <see cref="State"/>. The setter is the one place that runs
+/// <c>RebuildAfterActiveSetChanged</c>, <c>SyncStashedDbsCollection</c>
+/// and the anchor-PLC display refresh — every mutation gesture funnels
+/// through it, so forgetting to refresh after a change is structurally
+/// impossible.
+/// </para>
+///
+/// <para>
+/// Mutators compute a new snapshot in locals and assign once.
+/// Single-step gestures (chip ×, dropdown toggle) call helpers like
+/// <see cref="TryComputeRemove"/> and assign the returned snapshot;
+/// compound gestures (Solo, Reactivate stash, legacy
+/// <see cref="SwitchToDataBlock"/>) compose the new snapshot across
+/// multiple steps and assign once at the end → exactly one cascade per
+/// user gesture, regardless of how many DBs were swapped in or out.
+/// Cancellation = don't assign; the dialog stays on the previous
+/// snapshot.
+/// </para>
+///
+/// <para>
+/// The legacy backing fields (<c>_activeDbs</c>, <c>_stashedDbs</c>,
+/// <c>_currentPlcName</c>) remain as the storage indexed by the ~50
+/// reader sites in this file; the State setter overwrites them from
+/// the new snapshot to keep the two views in lock-step. <b>Lint
+/// invariant:</b> any direct write to those fields outside the State
+/// setter or the constructor seed is a bug — the snapshot will drift
+/// out of sync with what the cascade can see.
+/// </para>
 /// </summary>
 public class BulkChangeViewModel : ViewModelBase, IDisposable
 {
@@ -1106,15 +1140,14 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     /// the user guessing which PLC the dialog is operating on. Empty when
     /// the host couldn't supply it (DevLauncher, single-PLC stand-ins).
     /// </summary>
-    public string CurrentPlcName
-    {
-        get => _currentPlcName;
-        private set
-        {
-            if (SetProperty(ref _currentPlcName, value))
-                OnPropertyChanged(nameof(HasCurrentPlcName));
-        }
-    }
+    /// <summary>
+    /// Anchor PLC display, derived from <see cref="State"/>'s
+    /// <c>AnchorPlcName</c>. Get-only — the State setter is the single
+    /// path that updates the underlying field and raises the
+    /// <see cref="System.ComponentModel.INotifyPropertyChanged"/> events
+    /// for both this property and <see cref="HasCurrentPlcName"/>.
+    /// </summary>
+    public string CurrentPlcName => _currentPlcName;
 
     /// <summary>True when <see cref="CurrentPlcName"/> is non-empty.</summary>
     public bool HasCurrentPlcName => !string.IsNullOrEmpty(_currentPlcName);
