@@ -7,6 +7,7 @@ using System.Windows.Threading;
 using BlockParam.Diagnostics;
 using BlockParam.Config;
 using BlockParam.Localization;
+using BlockParam.Services;
 
 namespace BlockParam.UI;
 
@@ -149,20 +150,16 @@ public class ConfigEditorViewModel : ViewModelBase
         if (string.IsNullOrWhiteSpace(_filterText)) return true;
         if (obj is not RuleFileViewModel file) return false;
 
-        if (file.FileName.IndexOf(_filterText, StringComparison.OrdinalIgnoreCase) >= 0)
+        if (StringMatcher.MatchesAny(_filterText, file.FileName))
             return true;
 
         return file.Rules.Any(RuleMatchesFilter);
     }
 
     private bool RuleMatchesFilter(RuleViewModel r) =>
-        r.PathPattern.IndexOf(_filterText, StringComparison.OrdinalIgnoreCase) >= 0
-        || r.TagTableName.IndexOf(_filterText, StringComparison.OrdinalIgnoreCase) >= 0
-        || r.CommentTemplate.IndexOf(_filterText, StringComparison.OrdinalIgnoreCase) >= 0
-        || r.Datatype.IndexOf(_filterText, StringComparison.OrdinalIgnoreCase) >= 0
-        || r.AllowedValues.IndexOf(_filterText, StringComparison.OrdinalIgnoreCase) >= 0
-        || r.Min.IndexOf(_filterText, StringComparison.OrdinalIgnoreCase) >= 0
-        || r.Max.IndexOf(_filterText, StringComparison.OrdinalIgnoreCase) >= 0;
+        StringMatcher.MatchesAny(_filterText,
+            r.PathPattern, r.TagTableName, r.CommentTemplate,
+            r.Datatype, r.AllowedValues, r.Min, r.Max);
 
     private void AutoExpandMatches()
     {

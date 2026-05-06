@@ -28,16 +28,9 @@ public class MemberSearchService
         return new SearchResult(query, matches);
     }
 
-    private static bool IsMatch(MemberNode member, string term)
-    {
-        // Use IndexOf instead of Contains(string, StringComparison) to avoid
-        // dependency on System.Runtime.CompilerServices.Unsafe which is missing
-        // in the TIA Portal host process.
-        return member.Name.IndexOf(term, StringComparison.OrdinalIgnoreCase) >= 0
-            || member.Datatype.IndexOf(term, StringComparison.OrdinalIgnoreCase) >= 0
-            || (member.StartValue?.IndexOf(term, StringComparison.OrdinalIgnoreCase) >= 0)
-            || member.Path.IndexOf(term, StringComparison.OrdinalIgnoreCase) >= 0;
-    }
+    private static bool IsMatch(MemberNode member, string term) =>
+        StringMatcher.MatchesAny(term,
+            member.Name, member.Datatype, member.StartValue, member.Path);
 }
 
 public class SearchResult
