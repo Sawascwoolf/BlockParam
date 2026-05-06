@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using BlockParam.Diagnostics;
+using BlockParam.Services;
 
 namespace BlockParam.Licensing;
 
@@ -57,9 +58,7 @@ public class OnlineLicenseService : ILicenseService
     /// every seat on the machine adopts it on next start. UNC / network
     /// paths are explicitly out of scope — only this local path is read.
     /// </summary>
-    public static string DefaultSharedLicenseFilePath => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
-        "BlockParam", "license.key");
+    public static string DefaultSharedLicenseFilePath => AppDirectories.SharedLicenseFile;
 
     public OnlineLicenseService(
         string storagePath,

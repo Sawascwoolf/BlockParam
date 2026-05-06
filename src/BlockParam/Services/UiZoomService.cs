@@ -58,9 +58,7 @@ public class UiZoomService
 
     private bool PersistenceEnabled => !string.IsNullOrEmpty(_settingsPath);
 
-    public static string DefaultSettingsPath() => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-        "BlockParam", "ui-settings.json");
+    public static string DefaultSettingsPath() => AppDirectories.UiSettingsFile;
 
     public double ZoomFactor
     {
