@@ -233,30 +233,31 @@ public class BulkChangeViewModelInvariantTests
         AssertInvariants(env.Vm);
     }
 
-    [Fact]
-    public void Reactivate_StashHeader_OtherActiveHasEdits_CurrentBehavior_SilentlyDropsAnchorEdits()
+    [Fact(Skip =
+        "Pending #78 Phase 1: in single-DB mode _dbToSynthetic stays empty, " +
+        "so RemoveActiveDb's pending-edit count returns 0 and the 3-way prompt " +
+        "is bypassed during the reactivate-then-solo walk — anchor's edits " +
+        "are silently dropped. The snapshot-cascade refactor will rebuild " +
+        "before the solo walk and surface the prompt; remove this Skip as " +
+        "the last step of Phase 1 and the test should pass as-is.")]
+    public void Reactivate_StashHeader_OtherActiveHasEdits_PromptStash_TwoStashEntries()
     {
-        // Row 9 — locks in the EXISTING bug that motivates #78's refactor.
+        // Row 9 — asserts the EXPECTED post-refactor behavior of #78's
+        // matrix. Kept skipped (not deleted, not green-on-bug) so the
+        // CI skip count nags until Phase 1 ships.
         //
-        // After the chip-close stash sequence the dialog is in single-DB mode,
-        // and BuildRootMembersFromActiveDbs takes the flat path that does NOT
-        // populate _dbToSynthetic for the anchor. The reactivate gesture
-        // (a) appends the stashed DB, then (b) calls SoloActiveDbByReference
-        // — but never rebuilds in between, so when solo invokes
-        // RemoveActiveDb on the still-anchored FlatDB,
-        // <c>CountPendingEditsForDb</c> looks the anchor up in the empty
-        // _dbToSynthetic dictionary, gets 0, skips the 3-way prompt, and
-        // silently drops the anchor's pending edit on the floor.
-        //
-        // Issue #78 Phase 1's snapshot refactor will cause the rebuild to
-        // happen before the solo walk and surface the prompt, at which point
-        // this test should be flipped to assert the post-refactor matrix
-        // outcome ("reactivated alone, two stash entries").
+        // Scenario: stash A exists; while reactivating A, the still-active
+        // anchor has edits. The reactivate gesture's solo step prompts and
+        // the user picks Stash (No). End state: only A active, exactly one
+        // stash entry — A's stash popped on restore, anchor's was just
+        // created.
         var env = new ActiveSetTestBuilder()
             .WithAnchor("flat-db.xml", plc: "PLC_A")
             .WithCompanion("nested-struct-db.xml", plc: "PLC_A")
             .WithPendingEditsOn("NestedStructDB", count: 1)
-            .WithPromptResults(YesNoCancelResult.No)   // stash on chip-close only
+            .WithPromptResults(
+                YesNoCancelResult.No,   // stash NestedStructDB on chip-close
+                YesNoCancelResult.No)   // stash FlatDB during reactivate's solo
             .Build();
 
         // Setup: stash NestedStructDB.
@@ -265,8 +266,8 @@ public class BulkChangeViewModelInvariantTests
         env.Vm.HasStashedDbs.Should().BeTrue();
         env.Vm.StashedDbs.Should().ContainSingle(s => s.DbName == "NestedStructDB");
 
-        // Stage a pending edit on FlatDB (the still-active anchor) AFTER the
-        // companion was dropped, i.e. while we're back in single-DB shape.
+        // Stage a pending edit on FlatDB (the still-active anchor) after the
+        // companion drop, i.e. while we're in single-DB shape.
         var anchorLeaf = env.Vm.RootMembers.SelectMany(r => new[] { r }.Concat(r.AllDescendants()))
             .First(n => n.IsLeaf && !string.IsNullOrEmpty(n.StartValue));
         anchorLeaf.PendingValue = anchorLeaf.StartValue == "0" ? "1" : "0";
@@ -276,15 +277,13 @@ public class BulkChangeViewModelInvariantTests
         var stash = env.Vm.StashedDbs.Single();
         env.Vm.SwitchToStashedDbCommand.Execute(stash);
 
-        // CURRENT (buggy) behavior we lock in here:
         env.Vm.AllActiveDbs.Should().HaveCount(1);
         env.Vm.AllActiveDbs[0].Info.Name.Should().Be("NestedStructDB");
-        env.Vm.HasStashedDbs.Should().BeFalse(
-            "current bug: anchor's edits are NOT prompted-for and NOT stashed");
-        env.Vm.StashedDbs.Should().BeEmpty(
-            "current bug: NestedStructDB's stash popped, FlatDB's never created");
-        (env.Mbx.AskYesNoCancelCallCount - promptsBefore).Should().Be(0,
-            "current bug: reactivate's solo step bypasses the prompt because _dbToSynthetic is empty in single-DB mode");
+        env.Vm.HasStashedDbs.Should().BeTrue("anchor's edits stashed during reactivate");
+        env.Vm.StashedDbs.Should().ContainSingle(s => s.DbName == "FlatDB",
+            "exactly one stash remains — NestedStructDB's popped on restore, FlatDB's was just created");
+        (env.Mbx.AskYesNoCancelCallCount - promptsBefore).Should().Be(1,
+            "reactivate's solo step must prompt for the anchor's pending edits");
         AssertInvariants(env.Vm);
     }
 
