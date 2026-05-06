@@ -1874,9 +1874,11 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     public bool SwitchToDataBlock(DataBlockSummary summary)
     {
         if (_switchToDataBlock == null) return false;
-        if (string.Equals(summary.Name, _active.Info.Name, StringComparison.Ordinal)
+        var current = State;
+        var anchor = current.Dbs[0];
+        if (string.Equals(summary.Name, anchor.Info.Name, StringComparison.Ordinal)
             && string.Equals(summary.FolderPath, GetCurrentFolderPath(), StringComparison.Ordinal)
-            && string.Equals(summary.PlcName, _currentPlcName, StringComparison.Ordinal))
+            && string.Equals(summary.PlcName, current.AnchorPlcName, StringComparison.Ordinal))
         {
             // Already on the target DB — just close the dropdown. PLC is part
             // of identity because two PLCs can share a DB name (a project with
@@ -1888,11 +1890,12 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         // Snapshot any active pending edits so we can either commit them, stash
         // them, or (on Cancel) leave them untouched on the live tree.
         var pendingSnapshot = SnapshotPendingEdits();
+        IReadOnlyDictionary<string, StashedDbState> nextStashes = current.Stashes;
 
         if (pendingSnapshot.Count > 0)
         {
             var message = Res.Format("Dialog_SwitchDb_KeepConfirm_Text",
-                pendingSnapshot.Count, _active.Info.Name, summary.Name);
+                pendingSnapshot.Count, anchor.Info.Name, summary.Name);
             var choice = _messageBox.AskYesNoCancel(
                 message, Res.Get("Dialog_SwitchDb_KeepConfirm_Title"));
 
@@ -1902,19 +1905,32 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
                     return false;
                 case YesNoCancelResult.Yes:
                     // Apply path: commit staged edits to TIA before leaving the
-                    // current DB. CommitChanges returns false if the user
-                    // cancels the inconsistent-block compile prompt — abort
-                    // the switch so their work isn't silently dropped.
+                    // current DB. ExecuteApplyForSwitch returns false if the
+                    // user cancels the inconsistent-block compile prompt —
+                    // abort the switch so their work isn't silently dropped.
                     if (!ExecuteApplyForSwitch())
                         return false;
-                    // After Apply succeeds the tree's PendingValue fields are
-                    // cleared by RefreshTree, so nothing to stash.
+                    // After Apply succeeds RefreshTree clears PendingValue,
+                    // so nothing to stash.
                     break;
                 case YesNoCancelResult.No:
-                    // Stash path: capture the snapshot under the current DB's
-                    // identity. Replaces any prior stash for this DB so the
-                    // newest edits win.
-                    StashCurrentDb(pendingSnapshot);
+                    // Stash path (#78 Phase 3): compose the new entry into a
+                    // local dict instead of writing _stashedDbs directly. The
+                    // single State assignment after RefreshTree fires the
+                    // SyncStashedDbsCollection cascade once.
+                    var captureSummary = new DataBlockSummary(
+                        anchor.Info.Name,
+                        GetCurrentFolderPath(),
+                        blockType: anchor.Info.BlockType,
+                        isInstanceDb: string.Equals(anchor.Info.BlockType, "InstanceDB", StringComparison.Ordinal),
+                        plcName: current.AnchorPlcName);
+                    var capturedStash = new StashedDbState(captureSummary, pendingSnapshot);
+                    var addDict = current.Stashes.ToDictionary(kv => kv.Key, kv => kv.Value);
+                    addDict[StashKey(captureSummary)] = capturedStash;
+                    nextStashes = addDict;
+                    Log.Information("Stashed {Count} pending edit(s) for DB {Db} (PLC {Plc})",
+                        pendingSnapshot.Count, captureSummary.Name,
+                        string.IsNullOrEmpty(captureSummary.PlcName) ? "<unset>" : captureSummary.PlcName);
                     DiscardPendingSilent();
                     break;
             }
@@ -1925,7 +1941,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         try
         {
             var newXml = _switchToDataBlock(summary);
-            _active.Xml = newXml;
+            anchor.Xml = newXml;
             // Reset selection / scope before RefreshTree — the path / scope
             // we'd try to restore belong to a different DB and would log a
             // warning every switch.
@@ -1941,11 +1957,30 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             _suppressSuggestions = false;
             AvailableScopes.Clear();
 
-            // Pull the new PLC name off the summary the host gave us — it
-            // already carries the right value from enumeration.
-            CurrentPlcName = summary.PlcName ?? "";
+            // Pop any prior stash for the new DB so we can replay its edits.
+            // Pop happens inside the same snapshot as the stash-add (above)
+            // and the anchor PLC change → exactly one cascade per switch.
+            var newAnchorPlc = summary.PlcName ?? "";
+            StashedDbState? toRestore = null;
+            var stashKey = StashKey(summary);
+            if (nextStashes.TryGetValue(stashKey, out var existing))
+            {
+                toRestore = existing;
+                var popDict = nextStashes.ToDictionary(kv => kv.Key, kv => kv.Value);
+                popDict.Remove(stashKey);
+                nextStashes = popDict;
+            }
+
+            // Snapshot's Dbs is unchanged (same anchor instance — only its
+            // Info/Xml were swapped in place), so the cascade skips the
+            // RootMembers rebuild RefreshTree just did. Stashes / anchor
+            // PLC are the only diffs.
+            State = current.With(
+                stashes: ReferenceEquals(nextStashes, current.Stashes) ? null : nextStashes,
+                anchorPlcName: newAnchorPlc);
+
             var version = typeof(BulkChangeViewModel).Assembly.GetName().Version;
-            Title = BuildTitle(version, _currentPlcName, _active.Info.Name);
+            Title = BuildTitle(version, newAnchorPlc, anchor.Info.Name);
             OnPropertyChanged(nameof(CurrentDataBlockName));
             OnPropertyChanged(nameof(SelectedFlatMember));
             OnPropertyChanged(nameof(SelectedScope));
@@ -1954,21 +1989,20 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             OnPropertyChanged(nameof(NewValue));
             OnPropertyChanged(nameof(SelectedMemberDisplay));
 
-            // Restore any prior stash for this DB. Removes the stash entry on
-            // success — once edits are back on the live tree they're tracked
-            // there, not in the stash.
-            var (restored, dropped) = RestoreStashFor(summary);
+            int restored = 0, dropped = 0;
+            if (toRestore != null)
+                (restored, dropped) = RestoreStashOntoLive(toRestore);
 
             if (restored > 0 || dropped > 0)
             {
                 StatusText = dropped == 0
-                    ? Res.Format("Status_DbSwitched_StashRestored", _active.Info.Name, restored)
+                    ? Res.Format("Status_DbSwitched_StashRestored", anchor.Info.Name, restored)
                     : Res.Format("Status_DbSwitched_StashPartial",
-                        _active.Info.Name, restored, dropped);
+                        anchor.Info.Name, restored, dropped);
             }
             else
             {
-                StatusText = Res.Format("Status_DbSwitched", _active.Info.Name);
+                StatusText = Res.Format("Status_DbSwitched", anchor.Info.Name);
             }
             return true;
         }
@@ -2024,22 +2058,6 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     private static string StashKey(DataBlockSummary summary) =>
         $"{summary.PlcName}\u0001{summary.FolderPath}\u0001{summary.Name}";
 
-    private void StashCurrentDb(IReadOnlyList<StashedEditEntry> edits)
-    {
-        var summary = new DataBlockSummary(
-            _active.Info.Name,
-            GetCurrentFolderPath(),
-            blockType: _active.Info.BlockType,
-            isInstanceDb: string.Equals(_active.Info.BlockType, "InstanceDB", StringComparison.Ordinal),
-            plcName: _currentPlcName);
-        var key = StashKey(summary);
-        var state = new StashedDbState(summary, edits);
-        _stashedDbs[key] = state;
-        SyncStashedDbsCollection();
-        Log.Information("Stashed {Count} pending edit(s) for DB {Db} (PLC {Plc})",
-            edits.Count, summary.Name,
-            string.IsNullOrEmpty(summary.PlcName) ? "<unset>" : summary.PlcName);
-    }
 
     /// <summary>
     /// Builds the dialog window title — adds a "<c>{PLC} / </c>" prefix to the
@@ -2100,24 +2118,6 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         Log.Information("Restored {Restored} stashed edit(s) for {Db} ({Dropped} dropped)",
             restored, state.Summary.Name, dropped);
         return (restored, dropped);
-    }
-
-    /// <summary>
-    /// Legacy <see cref="SwitchToDataBlock"/>'s stash-restore helper —
-    /// looks up the entry, replays it, then pops it directly from
-    /// <c>_stashedDbs</c>. The direct dictionary mutation here is the
-    /// last out-of-band write to the stash dict; it lives on until
-    /// #78 Phase 3 absorbs <c>SwitchToDataBlock</c> into the snapshot
-    /// model.
-    /// </summary>
-    private (int restored, int dropped) RestoreStashFor(DataBlockSummary summary)
-    {
-        var key = StashKey(summary);
-        if (!_stashedDbs.TryGetValue(key, out var state)) return (0, 0);
-        var result = RestoreStashOntoLive(state);
-        _stashedDbs.Remove(key);
-        SyncStashedDbsCollection();
-        return result;
     }
 
     /// <summary>Mirrors the dictionary into the bound <see cref="StashedDbs"/> collection.</summary>
