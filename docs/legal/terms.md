@@ -31,7 +31,7 @@ tiers:
 | Tier | What you get | Price |
 |---|---|---|
 | Free | Full feature set, capped at **200 value changes per calendar day** | € 0 |
-| Pro | Full feature set, **unlimited** value changes | **15 € / year (net)** |
+| Pro | Full feature set, **unlimited** value changes | **50 € / year (net)** |
 
 A "value change" is one individual start-value write to a DB; staging edits in
 the dialog is free; comment writes do not consume the quota. See
