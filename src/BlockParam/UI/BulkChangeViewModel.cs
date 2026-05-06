@@ -94,6 +94,20 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     // CountPendingEditsForDb, ...) by reference instead of by Info.Name +
     // PlcName comparisons that would still collide across PLC boundaries.
     private readonly Dictionary<ActiveDb, MemberNodeViewModel> _dbToSynthetic = new();
+
+    // #78 snapshot: single immutable view of the active set + stashes +
+    // anchor PLC. The State setter is the one place that runs the cascade
+    // (RebuildAfterActiveSetChanged / SyncStashedDbsCollection / anchor
+    // PLC display) so every mutation gesture goes through one funnel.
+    // The legacy backing fields (_activeDbs / _stashedDbs / _currentPlcName)
+    // are kept as the storage of last resort — many call sites still index
+    // _activeDbs[i] etc. — and the setter overwrites them from the new
+    // snapshot to keep the two views in lock-step.
+    private ActiveSetState _state =
+        new ActiveSetState(
+            new List<ActiveDb>(),
+            new Dictionary<string, StashedDbState>(),
+            "");
     private MemberNodeViewModel? _selectedFlatMember;
     private ScopeLevel? _selectedScope;
     private string _newValue = "";
@@ -194,6 +208,16 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         _switchToDataBlock = switchToDataBlock;
         _buildActiveDbForSummary = buildActiveDbForSummary;
         _currentPlcName = currentPlcName ?? "";
+        // Seed the snapshot from the populated backing fields. Direct
+        // assignment (not via the setter) — RootMembers / StashedDbs
+        // collections aren't constructed yet, so the cascade isn't
+        // safe to fire here. The constructor's explicit
+        // BuildRootMembersFromActiveDbs / RebuildActiveDbChips calls
+        // below take the place of the cascade for the initial build.
+        _state = new ActiveSetState(
+            _activeDbs.ToList(),
+            new Dictionary<string, StashedDbState>(),
+            _currentPlcName);
         _autocompleteProvider = tagTableCache != null
             ? new AutocompleteProvider(configLoader, tagTableCache)
             : null;
@@ -291,6 +315,57 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     }
 
     // --- Properties ---
+
+    /// <summary>
+    /// Current snapshot of the active-DB set + interlocked state (#78).
+    /// Every mutation goes through the setter, which is the single point
+    /// that runs <see cref="RebuildAfterActiveSetChanged"/> /
+    /// <see cref="SyncStashedDbsCollection"/> / anchor-display refresh.
+    /// </summary>
+    public ActiveSetState State
+    {
+        get => _state;
+        private set
+        {
+            if (ReferenceEquals(_state, value)) return;
+            var old = _state;
+            _state = value;
+
+            // Sync the legacy backing fields so the ~50 read sites that
+            // index _activeDbs[i] / _stashedDbs[k] / _currentPlcName
+            // continue to see the same authoritative values.
+            _activeDbs.Clear();
+            _activeDbs.AddRange(value.Dbs);
+            _stashedDbs.Clear();
+            foreach (var kv in value.Stashes) _stashedDbs[kv.Key] = kv.Value;
+            bool anchorChanged = !string.Equals(_currentPlcName, value.AnchorPlcName, StringComparison.Ordinal);
+            if (anchorChanged)
+            {
+                _currentPlcName = value.AnchorPlcName;
+                OnPropertyChanged(nameof(CurrentPlcName));
+                OnPropertyChanged(nameof(HasCurrentPlcName));
+            }
+
+            OnActiveSetChanged(old, value);
+        }
+    }
+
+    /// <summary>
+    /// Diff old vs new snapshot and run only the cascade slices that
+    /// actually changed. Reference equality on Dbs / Stashes works because
+    /// every mutator constructs fresh List / Dictionary instances —
+    /// "same instance" implies "no change."
+    /// </summary>
+    private void OnActiveSetChanged(ActiveSetState old, ActiveSetState now)
+    {
+        bool dbsChanged = !ReferenceEquals(old.Dbs, now.Dbs);
+        bool stashesChanged = !ReferenceEquals(old.Stashes, now.Stashes);
+
+        if (dbsChanged) RebuildAfterActiveSetChanged();
+        if (stashesChanged) SyncStashedDbsCollection();
+        OnPropertyChanged(nameof(HasMultipleActiveDbs));
+        OnPropertyChanged(nameof(ActiveDbsSummary));
+    }
 
     public string Title
     {
@@ -1015,15 +1090,14 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     /// </summary>
     private void RequestRemoveActiveDb(ActiveDb db)
     {
-        if (_activeDbs.Count <= 1)
+        if (State.Dbs.Count <= 1)
         {
             Log.Information(
                 "Refusing chip-close on {Name} — at least one DB must stay active",
                 db.Info.Name);
             return;
         }
-        if (RemoveActiveDb(db))
-            RebuildAfterActiveSetChanged();
+        RemoveActiveDb(db);
     }
 
     /// <summary>
@@ -1144,34 +1218,33 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         // model: checked → add to active set; unchecked → remove from active
         // set, with the same Apply / Stash / Cancel prompt regardless of
         // whether the row is the current anchor. The active set must keep
-        // at least one DB — refuse the last uncheck.
+        // at least one DB — refuse the last uncheck. Both branches funnel
+        // through State, so the cascade fires exactly once per toggle (#78).
         var (wasActive, _) = GetActiveStatusFor(item.Summary);
         bool wantActive = item.IsActive;
 
-        try
+        if (wantActive && !wasActive)
         {
-            if (wantActive && !wasActive)
-            {
-                AddCompanionFromSummary(item.Summary);
-            }
-            else if (!wantActive && wasActive)
-            {
-                if (_activeDbs.Count <= 1)
-                {
-                    Log.Information(
-                        "Refusing to remove {Name} — at least one DB must stay active",
-                        item.Name);
-                }
-                else
-                {
-                    var match = FindActiveDb(item.Summary);
-                    if (match != null) RemoveActiveDb(match);
-                }
-            }
+            AddCompanionFromSummary(item.Summary);
         }
-        finally
+        else if (!wantActive && wasActive)
         {
-            RebuildAfterActiveSetChanged();
+            if (State.Dbs.Count <= 1)
+            {
+                Log.Information(
+                    "Refusing to remove {Name} — at least one DB must stay active",
+                    item.Name);
+                // Snap the row checkbox back into sync with the unchanged
+                // active set — the cascade only fires when State actually
+                // changes, so we have to nudge the dropdown rows here.
+                RefreshFilteredDataBlockItemsActiveState();
+            }
+            else
+            {
+                var match = FindActiveDb(item.Summary);
+                if (match != null) RemoveActiveDb(match);
+                else RefreshFilteredDataBlockItemsActiveState();
+            }
         }
     }
 
@@ -1180,37 +1253,30 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     /// target DB. Each dropped DB runs through the same Apply / Stash /
     /// Cancel prompt RemoveActiveDb uses; if the user cancels on any one,
     /// the remaining drops are aborted (the set ends up partially soloed).
+    /// Compound op (#78): builds the next snapshot in a local and commits
+    /// once at the end → exactly one cascade per gesture.
     /// </summary>
     public void SoloActiveDb(DataBlockSummary target)
     {
-        // Make sure the target is in the active set first — if the user
-        // soloed a row that wasn't checked, we add it before pruning the
-        // others so the "leave only this one" invariant always holds.
-        if (FindActiveDb(target) == null)
-            AddCompanionFromSummary(target);
-
-        // Take a snapshot up front: removing entries while iterating shifts
-        // indices and we'd skip neighbors. Reference identity is what
-        // RemoveActiveDb matches on.
-        var others = _activeDbs
-            .Where(db => !IsSameSummary(db, target))
-            .ToList();
-
-        foreach (var db in others)
+        var current = State;
+        var targetDb = FindActiveDb(target);
+        if (targetDb == null)
         {
-            if (!RemoveActiveDb(db))
+            // The user soloed a row that wasn't already checked — append it
+            // to the snapshot before pruning so the "leave only this one"
+            // invariant always holds.
+            var built = BuildCompanionFromSummary(target);
+            if (built == null)
             {
-                // User cancelled mid-solo — stop pruning. The set is now
-                // {target, db, ...still-not-pruned}; user can retry.
-                Log.Information(
-                    "SoloActiveDb cancelled at {Name} — leaving partial set",
-                    db.Info.Name);
-                break;
+                IsDataBlocksDropdownOpen = false;
+                return;
             }
+            current = current.With(dbs: current.Dbs.Concat(new[] { built }).ToList());
+            targetDb = built;
         }
 
+        State = ComposeRemoveOthers(current, targetDb);
         IsDataBlocksDropdownOpen = false;
-        RebuildAfterActiveSetChanged();
     }
 
     /// <summary>
@@ -1222,7 +1288,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     /// </summary>
     public void SoloActiveDbByReference(ActiveDb target)
     {
-        if (_activeDbs.Count <= 1)
+        if (State.Dbs.Count <= 1)
         {
             // Already the only active DB — there's nothing to solo away. Use
             // the click as a one-step "open the picker so I can switch" so
@@ -1235,21 +1301,32 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             return;
         }
 
-        var others = _activeDbs
-            .Where(db => !ReferenceEquals(db, target))
-            .ToList();
+        State = ComposeRemoveOthers(State, target);
+    }
 
-        foreach (var db in others)
+    /// <summary>
+    /// Composes the snapshot that results from removing every DB in
+    /// <paramref name="current"/> except <paramref name="target"/>. Walks
+    /// the others in storage order, calling <see cref="TryComputeRemove"/>
+    /// for each (which prompts on pending edits). If the user cancels mid-
+    /// loop, returns the partial composition so the active set ends up as
+    /// whatever survived. Caller assigns the result to <see cref="State"/>.
+    /// </summary>
+    private ActiveSetState ComposeRemoveOthers(ActiveSetState current, ActiveDb target)
+    {
+        var next = current;
+        foreach (var db in current.Dbs.Where(d => !ReferenceEquals(d, target)).ToList())
         {
-            if (!RemoveActiveDb(db))
+            var step = TryComputeRemove(next, db);
+            if (step == null)
             {
                 Log.Information(
-                    "Solo cancelled at {Name} — leaving partial set",
-                    db.Info.Name);
+                    "Solo cancelled at {Name} — leaving partial set", db.Info.Name);
                 break;
             }
+            next = step;
         }
-        RebuildAfterActiveSetChanged();
+        return next;
     }
 
     private bool IsSameSummary(ActiveDb db, DataBlockSummary summary)
@@ -1264,33 +1341,48 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
 
     /// <summary>
     /// Inspector path: re-add a previously-stashed DB back into the active
-    /// set and restore its stash edits onto the live tree. Symmetric with
-    /// the dropdown re-check flow — same Add helper, same rebuild — so the
-    /// inspector header click and re-checking the dropdown row produce the
-    /// same end state. Existing active DBs are preserved.
+    /// set, drop the others (with the same Apply / Stash / Cancel prompt
+    /// every remove uses), pop the stash entry, and replay its edits onto
+    /// the live tree. One snapshot is composed across all of these and
+    /// committed once → exactly one cascade. The pending-value replay
+    /// runs after the State assignment so it lands on the freshly-built
+    /// tree, not on VMs the cascade is about to discard.
     /// </summary>
     private void ReactivateStashedDb(StashedDbState stash)
     {
         var summary = stash.Summary;
-
-        // No-op if it's already active (defensive — the stash entry only
-        // exists for inactive DBs, but the click could double-fire).
-        if (FindActiveDb(summary) == null)
-            AddCompanionFromSummary(summary);
-
-        // "Switch back" UX: clicking the stash header is a navigation
-        // gesture, not an "add a peer" gesture. Solo to the reactivated DB
-        // so the user lands on it as the only active DB. Solo runs first
-        // so the live tree settles to its final shape *before* we splat
-        // pending values onto its leaves — otherwise the post-solo rebuild
-        // would create fresh VMs and discard the just-restored state.
+        var current = State;
         var target = FindActiveDb(summary);
-        if (target != null) SoloActiveDbByReference(target);
-        else RebuildAfterActiveSetChanged(); // already-active fallback path
 
-        // Replay the stash onto the now-final tree.
-        // RestoreStashFor pops the stash entry on success.
-        var (restored, dropped) = RestoreStashFor(summary);
+        if (target == null)
+        {
+            var built = BuildCompanionFromSummary(summary);
+            if (built == null) return;
+            current = current.With(dbs: current.Dbs.Concat(new[] { built }).ToList());
+            target = built;
+        }
+
+        var next = ComposeRemoveOthers(current, target);
+
+        // Pop the stash entry inside the same snapshot so the cascade
+        // sees stashes-changed once. Other DBs that got stashed during
+        // ComposeRemoveOthers (peer with pending edits, user picked Stash)
+        // stay in next.Stashes — only the reactivated DB's entry is popped.
+        var stashKey = StashKey(summary);
+        if (next.Stashes.ContainsKey(stashKey))
+        {
+            var stashesNew = next.Stashes.ToDictionary(kv => kv.Key, kv => kv.Value);
+            stashesNew.Remove(stashKey);
+            next = next.With(stashes: stashesNew);
+        }
+
+        State = next;
+
+        // Replay the stash edits onto the now-final live tree. Runs after
+        // State assignment so the cascade has already rebuilt RootMembers
+        // — otherwise the new PendingValue assignments would land on VMs
+        // the rebuild is about to discard.
+        var (restored, dropped) = RestoreStashOntoLive(stash);
         if (restored > 0 || dropped > 0)
         {
             StatusText = dropped == 0
@@ -1339,13 +1431,14 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
-    /// Loads + parses a DB picked from the dropdown and appends it to
-    /// <see cref="_activeDbs"/> (#58). Reuses the host's
-    /// <see cref="_switchToDataBlock"/> callback for export — it already
-    /// handles the compile-prompt for inconsistent DBs and re-parses with
-    /// the same resolvers as the focused DB.
+    /// Pure builder (#78): produces a fully-wired <see cref="ActiveDb"/>
+    /// for a dropdown-picked DB without touching <see cref="State"/>.
+    /// Compound mutations (Solo, Reactivate) call this directly and
+    /// fold the result into their composed snapshot; the simple
+    /// "checkbox checked" path goes through
+    /// <see cref="AddCompanionFromSummary"/>, which builds + assigns.
     /// </summary>
-    private void AddCompanionFromSummary(DataBlockSummary summary)
+    private ActiveDb? BuildCompanionFromSummary(DataBlockSummary summary)
     {
         try
         {
@@ -1358,14 +1451,8 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             {
                 var built = _buildActiveDbForSummary(summary);
                 if (built == null)
-                {
                     Log.Information("Companion build returned null for {Name}", summary.Name);
-                    return;
-                }
-                _activeDbs.Add(built);
-                Log.Information("DB enabled via dropdown (writable): {Name}",
-                    built.Info.Name);
-                return;
+                return built;
             }
 
             // Fallback (DevLauncher / tests): no host factory wired. Use
@@ -1380,7 +1467,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             {
                 Log.Information(
                     "DB enable ignored: neither buildActiveDbForSummary nor switchToDataBlock wired");
-                return;
+                return null;
             }
             var xml = _switchToDataBlock(summary);
             var constantResolver = _tagTableCache != null
@@ -1391,15 +1478,28 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             // PlcName from _currentPlcName: the dropdown only enumerates DBs
             // from the anchor's PLC, so any read-only-fallback addition is
             // implicitly on the same PLC as the anchor.
-            _activeDbs.Add(new ActiveDb(info, xml, onApply: null, plcName: _currentPlcName));
-            Log.Information("DB enabled via dropdown (read-only fallback): {Name}",
-                info.Name);
+            return new ActiveDb(info, xml, onApply: null, plcName: _currentPlcName);
         }
         catch (Exception ex)
         {
-            Log.Warning(ex, "Failed to enable companion DB {Name}", summary.Name);
+            Log.Warning(ex, "Failed to build companion DB {Name}", summary.Name);
             StatusText = Res.Format("Status_DbSwitchFailed", summary.Name, ex.Message);
+            return null;
         }
+    }
+
+    /// <summary>
+    /// Single-step add (dropdown checkbox-on). Builds the companion and
+    /// commits to <see cref="State"/> in one shot — the cascade fires
+    /// once on the resulting snapshot. Compound paths build directly via
+    /// <see cref="BuildCompanionFromSummary"/> and skip this wrapper.
+    /// </summary>
+    private void AddCompanionFromSummary(DataBlockSummary summary)
+    {
+        var built = BuildCompanionFromSummary(summary);
+        if (built == null) return;
+        State = State.With(dbs: State.Dbs.Concat(new[] { built }).ToList());
+        Log.Information("DB enabled via dropdown: {Name}", built.Info.Name);
     }
 
     /// <summary>
@@ -1423,146 +1523,210 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
-    /// Removes a DB from the active set (#58). Peer model — works on any
-    /// active DB, not just non-anchor ones. When pending edits exist, runs
-    /// the same 3-way Apply / Stash / Cancel prompt the #59 single-switch
-    /// uses; on Cancel the row stays checked. The active set must always
-    /// hold at least one DB; caller is expected to enforce that before
-    /// calling.
-    ///
-    /// When the removed DB was the anchor (index 0), the next remaining
-    /// entry shifts into position automatically via List.Remove. The UI's
-    /// CurrentPlcName / Title / CurrentDataBlockName re-derive off the new
-    /// anchor before we return.
+    /// User's choice in response to the "this DB has pending edits" prompt
+    /// raised when removing a DB from the active set (#78). Centralised so
+    /// every remove path maps the underlying <see cref="YesNoCancelResult"/>
+    /// the same way: Yes→Apply, No→Stash, Cancel→Cancel. <c>NoEdits</c> is
+    /// the no-prompt fast path.
     /// </summary>
-    /// <returns>true if removed; false if the user cancelled.</returns>
-    private bool RemoveActiveDb(ActiveDb db)
+    private enum PendingDecision { NoEdits, Apply, Stash, Cancel }
+
+    /// <summary>
+    /// Single source of truth for the 3-way prompt that fires whenever a
+    /// DB with pending inline edits is about to be dropped from the active
+    /// set (#78). Returns <see cref="PendingDecision.NoEdits"/> immediately
+    /// if there's nothing pending — caller proceeds with the removal
+    /// without showing a dialog.
+    /// </summary>
+    private PendingDecision PromptForPendingEditsOnRemove(ActiveDb db)
     {
         var pendingCount = CountPendingEditsForDb(db);
-        if (pendingCount > 0)
+        if (pendingCount == 0) return PendingDecision.NoEdits;
+        var result = _messageBox.AskYesNoCancel(
+            Res.Format("Dialog_SwitchDb_KeepConfirm_Text",
+                pendingCount, db.Info.Name),
+            Res.Get("Dialog_SwitchDb_KeepConfirm_Title"));
+        return result switch
         {
-            var result = _messageBox.AskYesNoCancel(
-                Res.Format("Dialog_SwitchDb_KeepConfirm_Text",
-                    pendingCount, db.Info.Name),
-                Res.Get("Dialog_SwitchDb_KeepConfirm_Title"));
-
-            if (result == YesNoCancelResult.Cancel)
-            {
-                Log.Information("DB remove cancelled by user: {Name}", db.Info.Name);
-                return false;
-            }
-            if (result == YesNoCancelResult.Yes)
-            {
-                // Apply this DB's edits before removing. TryApplyCompanionInPlace
-                // is a misnomer — the helper works for any ActiveDb, not just
-                // companions; rename pending. Aborts (cap hit / null OnApply)
-                // leave the DB in place.
-                if (!TryApplyCompanionInPlace(db))
-                {
-                    Log.Information(
-                        "DB remove aborted: pending Apply did not succeed for {Name}",
-                        db.Info.Name);
-                    return false;
-                }
-            }
-            else
-            {
-                // No: stash the pending edits keyed by DB identity so
-                // re-checking the row in the same dialog session restores
-                // them.
-                StashPendingEditsForDb(db);
-            }
-        }
-
-        bool wasAnchor = ReferenceEquals(db, _activeDbs[0]);
-        _activeDbs.Remove(db);
-
-        if (wasAnchor)
-        {
-            // The new anchor is whichever DB shifted into _activeDbs[0].
-            // Refresh display state derived from the anchor.
-            var newAnchor = _activeDbs[0];
-            CurrentPlcName = newAnchor.PlcName;
-            var version = typeof(BulkChangeViewModel).Assembly.GetName().Version;
-            Title = BuildTitle(version, _currentPlcName, newAnchor.Info.Name);
-            OnPropertyChanged(nameof(CurrentDataBlockName));
-            Log.Information(
-                "Anchor shifted after removal: now {NewName} (was: {OldName})",
-                newAnchor.Info.Name, db.Info.Name);
-        }
-        else
-        {
-            Log.Information("DB disabled via dropdown: {Name}", db.Info.Name);
-        }
-        return true;
+            YesNoCancelResult.Yes => PendingDecision.Apply,
+            YesNoCancelResult.No => PendingDecision.Stash,
+            _ => PendingDecision.Cancel,
+        };
     }
 
     /// <summary>
-    /// Clears pending inline edits inside a specific DB's synthetic subtree
-    /// (#58). Used by multi-DB Apply's partial-commit branch: when DB#1
-    /// committed but DB#2 cancelled, DB#1's tree must drop its pending
-    /// flags (the values are now in TIA) while DB#2's pending values stay
-    /// for retry.
+    /// Snapshots pending inline edits inside a DB's live subtree into an
+    /// inert <see cref="StashedDbState"/> ready to be added to a new
+    /// <see cref="ActiveSetState"/>. Returns null when the DB has no
+    /// pending edits to capture. Pure read of the live tree — does NOT
+    /// mutate <c>_stashedDbs</c> (the snapshot setter does).
     /// </summary>
-    private void ClearPendingValuesForDb(ActiveDb db)
-    {
-        // Multi-PLC safe (#58 review must-fix #4): _dbToSynthetic is keyed
-        // by ActiveDb reference, so two PLCs' DB_Common map to two separate
-        // synthetic VMs and never alias.
-        if (!_dbToSynthetic.TryGetValue(db, out var root)) return;
-        foreach (var node in root.AllDescendants())
-        {
-            if (node.IsPendingInlineEdit) node.ClearPending();
-        }
-    }
-
-    /// <summary>
-    /// Counts pending inline edits inside a companion's synthetic subtree.
-    /// Used by the remove-with-stash-prompt flow (#58).
-    /// </summary>
-    private int CountPendingEditsForDb(ActiveDb db)
-    {
-        return _dbToSynthetic.TryGetValue(db, out var root)
-            ? CountPendingInlineEdits(root.Children)
-            : 0;
-    }
-
-    /// <summary>
-    /// Stashes a companion's pending edits in <see cref="_stashedDbs"/> so
-    /// re-adding the DB in the same session restores them. The stash is
-    /// in-memory only — closing the dialog drops it.
-    /// </summary>
-    private void StashPendingEditsForDb(ActiveDb db)
+    private StashedDbState? CaptureStashForDb(ActiveDb db)
     {
         var entries = new List<StashedEditEntry>();
-        if (_dbToSynthetic.TryGetValue(db, out var root))
+        foreach (var node in WalkDbAllNodes(db))
         {
-            foreach (var node in root.AllDescendants())
+            if (node.IsPendingInlineEdit && node.PendingValue != null)
             {
-                if (node.IsPendingInlineEdit && node.PendingValue != null)
-                {
-                    entries.Add(new StashedEditEntry(
-                        node.Path,
-                        node.StartValue ?? "",
-                        node.PendingValue));
-                }
+                entries.Add(new StashedEditEntry(
+                    node.Path,
+                    node.StartValue ?? "",
+                    node.PendingValue));
             }
         }
-        if (entries.Count == 0) return;
-
+        if (entries.Count == 0) return null;
         var summary = new DataBlockSummary(
             db.Info.Name,
             "",
             blockType: db.Info.BlockType,
             isInstanceDb: string.Equals(db.Info.BlockType, "InstanceDB", StringComparison.Ordinal),
             plcName: _currentPlcName);
-        // Use the shared StashKey() — earlier this path used a different
-        // separator ('|' vs ''), which kept RestoreStashFor from
-        // finding the entry, so the stash header lingered after a chip
-        // close → reactivation flow.
-        _stashedDbs[StashKey(summary)] = new StashedDbState(summary, entries);
-        SyncStashedDbsCollection();
+        return new StashedDbState(summary, entries);
     }
+
+    /// <summary>
+    /// Computes the next snapshot after removing <paramref name="db"/>
+    /// from <paramref name="current"/>. Side-effects (the user-visible
+    /// prompt + Apply branch's per-DB OnApply + usage-counter charge)
+    /// run here because they MUST occur against the live (pre-cascade)
+    /// tree. Returns null if the user cancelled or the Apply branch
+    /// failed (cap hit / read-only OnApply); caller treats null as
+    /// "abort this remove."
+    /// </summary>
+    private ActiveSetState? TryComputeRemove(ActiveSetState current, ActiveDb db)
+    {
+        var decision = PromptForPendingEditsOnRemove(db);
+        if (decision == PendingDecision.Cancel)
+        {
+            Log.Information("DB remove cancelled by user: {Name}", db.Info.Name);
+            return null;
+        }
+        if (decision == PendingDecision.Apply)
+        {
+            if (!TryApplyCompanionInPlace(db))
+            {
+                Log.Information(
+                    "DB remove aborted: pending Apply did not succeed for {Name}",
+                    db.Info.Name);
+                return null;
+            }
+        }
+
+        IReadOnlyDictionary<string, StashedDbState> nextStashes = current.Stashes;
+        if (decision == PendingDecision.Stash)
+        {
+            var captured = CaptureStashForDb(db);
+            if (captured != null)
+            {
+                var dict = current.Stashes.ToDictionary(kv => kv.Key, kv => kv.Value);
+                dict[StashKey(captured.Summary)] = captured;
+                nextStashes = dict;
+            }
+        }
+
+        var nextDbs = current.Dbs.Where(d => !ReferenceEquals(d, db)).ToList();
+        // Anchor handoff: only when the removed DB was the anchor; the
+        // new anchor is whatever moved into nextDbs[0]. Same rule as the
+        // legacy RemoveActiveDb.
+        var nextAnchor = current.AnchorPlcName;
+        if (current.Dbs.Count > 0 && ReferenceEquals(db, current.Dbs[0]))
+        {
+            nextAnchor = nextDbs.Count > 0 ? (nextDbs[0].PlcName ?? "") : "";
+        }
+
+        Log.Information(
+            ReferenceEquals(db, current.Dbs[0])
+                ? "Anchor removed: now {NewName} (was: {OldName})"
+                : "DB disabled: {OldName}",
+            nextDbs.Count > 0 ? nextDbs[0].Info.Name : "<empty>",
+            db.Info.Name);
+
+        return new ActiveSetState(nextDbs, nextStashes, nextAnchor);
+    }
+
+    /// <summary>
+    /// Single-step remove (chip × / dropdown uncheck). Compound paths
+    /// (solo, reactivate) call <see cref="TryComputeRemove"/> directly
+    /// to compose multiple removes into one snapshot before assigning.
+    /// </summary>
+    /// <returns>true if removed; false if the user cancelled.</returns>
+    private bool RemoveActiveDb(ActiveDb db)
+    {
+        bool wasAnchor = State.Dbs.Count > 0 && ReferenceEquals(db, State.Dbs[0]);
+        var next = TryComputeRemove(State, db);
+        if (next == null) return false;
+        State = next;
+        if (wasAnchor && next.Dbs.Count > 0)
+        {
+            // Cascade only refreshes RootMembers / chips / stash list;
+            // title + CurrentDataBlockName key off the anchor name and
+            // need an explicit update.
+            var version = typeof(BulkChangeViewModel).Assembly.GetName().Version;
+            Title = BuildTitle(version, next.AnchorPlcName, next.Dbs[0].Info.Name);
+            OnPropertyChanged(nameof(CurrentDataBlockName));
+        }
+        return true;
+    }
+
+    /// <summary>
+    /// Top-level VMs of the named DB, regardless of single-DB (flat) or
+    /// multi-DB (synthetic-wrapped) tree shape. Empty when the DB's tree
+    /// isn't currently rendered. The flat-tree branch matters for #78
+    /// reactivate-with-anchor-edits: between the AddCompanionFromSummary
+    /// step and the SoloActiveDbByReference walk, the live tree is still
+    /// in single-DB shape with _activeDbs[0] as the displayed DB, so
+    /// _dbToSynthetic is empty — every helper that gates pending-edit work
+    /// behind that dictionary used to silently no-op for the anchor and
+    /// drop edits without prompting.
+    /// </summary>
+    private IEnumerable<MemberNodeViewModel> WalkDbTopLevels(ActiveDb db)
+    {
+        bool flatTree = RootMembers.Count > 0 && RootMembers[0].Datatype != "DB";
+        if (flatTree && _activeDbs.Count > 0 && ReferenceEquals(db, _activeDbs[0]))
+        {
+            return RootMembers;
+        }
+        return _dbToSynthetic.TryGetValue(db, out var root)
+            ? (IEnumerable<MemberNodeViewModel>)root.Children
+            : Enumerable.Empty<MemberNodeViewModel>();
+    }
+
+    /// <summary>
+    /// Top-levels + all their descendants for the named DB. Mirrors
+    /// <c>synthetic.AllDescendants()</c> in multi-DB shape; in single-DB
+    /// shape it walks <see cref="RootMembers"/> plus each top-level's
+    /// descendants.
+    /// </summary>
+    private IEnumerable<MemberNodeViewModel> WalkDbAllNodes(ActiveDb db)
+    {
+        foreach (var top in WalkDbTopLevels(db))
+        {
+            yield return top;
+            foreach (var node in top.AllDescendants())
+                yield return node;
+        }
+    }
+
+    /// <summary>
+    /// Clears pending inline edits inside a specific DB's subtree (#58).
+    /// Used by multi-DB Apply's partial-commit branch: when DB#1 committed
+    /// but DB#2 cancelled, DB#1's tree must drop its pending flags (the
+    /// values are now in TIA) while DB#2's pending values stay for retry.
+    /// </summary>
+    private void ClearPendingValuesForDb(ActiveDb db)
+    {
+        foreach (var node in WalkDbAllNodes(db))
+        {
+            if (node.IsPendingInlineEdit) node.ClearPending();
+        }
+    }
+
+    /// <summary>
+    /// Counts pending inline edits inside a DB's subtree. Used by the
+    /// remove-with-stash-prompt flow (#58, #78).
+    /// </summary>
+    private int CountPendingEditsForDb(ActiveDb db)
+        => CountPendingInlineEdits(WalkDbTopLevels(db));
 
     /// <summary>
     /// Best-effort "apply this companion's edits before we remove it"
@@ -1582,12 +1746,11 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             return false;
         }
 
-        // Multi-PLC safe (#58 review must-fix #4): index by ActiveDb
-        // reference rather than DB name, so two PLCs hosting DB_Common
-        // are not aliased.
-        var pendingEdits = _dbToSynthetic.TryGetValue(db, out var root)
-            ? CollectPendingInlineEdits(root.Children)
-            : new List<(MemberNode Member, string Value)>();
+        // Multi-PLC safe (#58 review must-fix #4): WalkDbTopLevels keys
+        // by ActiveDb reference, so two PLCs hosting DB_Common are not
+        // aliased. Single-DB-shape safe (#78): falls back to RootMembers
+        // when this DB is the displayed one but _dbToSynthetic is empty.
+        var pendingEdits = CollectPendingInlineEdits(WalkDbTopLevels(db));
         if (pendingEdits.Count == 0) return true;
 
         var status = _usageTracker.GetStatus();
@@ -1891,15 +2054,14 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
-    /// Re-applies a stash to the freshly loaded tree. Returns (restored, dropped)
-    /// so the caller can surface a status line when paths no longer resolve
-    /// (DB was edited externally between stash and restore).
+    /// Replays a stash's edits onto the live tree (#78). Pure write — does
+    /// NOT pop the stash entry from <see cref="_stashedDbs"/>. Callers
+    /// that need the entry popped do that separately, ideally as part of
+    /// composing the next <see cref="ActiveSetState"/> so the cascade
+    /// fires once.
     /// </summary>
-    private (int restored, int dropped) RestoreStashFor(DataBlockSummary summary)
+    private (int restored, int dropped) RestoreStashOntoLive(StashedDbState state)
     {
-        var key = StashKey(summary);
-        if (!_stashedDbs.TryGetValue(key, out var state)) return (0, 0);
-
         int restored = 0;
         int dropped = 0;
         var validator = BuildValidator();
@@ -1926,9 +2088,6 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
                 Log.Information("Stashed edit dropped (path no longer exists): {Path}", edit.Path);
             }
         }
-
-        _stashedDbs.Remove(key);
-        SyncStashedDbsCollection();
         // OnSingleValueEdited normally drives these refreshes; we bypassed it
         // for the no-quota path so the aggregated views (PendingEdits list,
         // BulkPreview, sidebar badges) need an explicit nudge.
@@ -1939,8 +2098,26 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             RaiseInvalidPendingChanged();
         }
         Log.Information("Restored {Restored} stashed edit(s) for {Db} ({Dropped} dropped)",
-            restored, summary.Name, dropped);
+            restored, state.Summary.Name, dropped);
         return (restored, dropped);
+    }
+
+    /// <summary>
+    /// Legacy <see cref="SwitchToDataBlock"/>'s stash-restore helper —
+    /// looks up the entry, replays it, then pops it directly from
+    /// <c>_stashedDbs</c>. The direct dictionary mutation here is the
+    /// last out-of-band write to the stash dict; it lives on until
+    /// #78 Phase 3 absorbs <c>SwitchToDataBlock</c> into the snapshot
+    /// model.
+    /// </summary>
+    private (int restored, int dropped) RestoreStashFor(DataBlockSummary summary)
+    {
+        var key = StashKey(summary);
+        if (!_stashedDbs.TryGetValue(key, out var state)) return (0, 0);
+        var result = RestoreStashOntoLive(state);
+        _stashedDbs.Remove(key);
+        SyncStashedDbsCollection();
+        return result;
     }
 
     /// <summary>Mirrors the dictionary into the bound <see cref="StashedDbs"/> collection.</summary>

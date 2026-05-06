@@ -233,18 +233,15 @@ public class BulkChangeViewModelInvariantTests
         AssertInvariants(env.Vm);
     }
 
-    [Fact(Skip =
-        "Pending #78 Phase 1: in single-DB mode _dbToSynthetic stays empty, " +
-        "so RemoveActiveDb's pending-edit count returns 0 and the 3-way prompt " +
-        "is bypassed during the reactivate-then-solo walk — anchor's edits " +
-        "are silently dropped. The snapshot-cascade refactor will rebuild " +
-        "before the solo walk and surface the prompt; remove this Skip as " +
-        "the last step of Phase 1 and the test should pass as-is.")]
+    [Fact]
     public void Reactivate_StashHeader_OtherActiveHasEdits_PromptStash_TwoStashEntries()
     {
-        // Row 9 — asserts the EXPECTED post-refactor behavior of #78's
-        // matrix. Kept skipped (not deleted, not green-on-bug) so the
-        // CI skip count nags until Phase 1 ships.
+        // Row 9 — verifies #78 Phase 1's WalkDbTopLevels fix: the helpers
+        // that gate the 3-way prompt (CountPendingEditsForDb) and stash
+        // capture (StashPendingEditsForDb) now fall back to RootMembers
+        // when the live tree is in single-DB shape, so the reactivate-then-
+        // solo walk correctly prompts on the still-anchored DB's pending
+        // edits instead of silently dropping them.
         //
         // Scenario: stash A exists; while reactivating A, the still-active
         // anchor has edits. The reactivate gesture's solo step prompts and
