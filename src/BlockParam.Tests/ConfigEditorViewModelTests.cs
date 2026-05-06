@@ -239,6 +239,51 @@ public class ConfigEditorViewModelTests : IDisposable
     }
 
     [Fact]
+    public void NewFile_TwoNewFilesWithSameAutoName_BothPersisted()
+    {
+        // #72: two "+ File" entries with identical first-rule PathPattern used
+        // to derive the same filename and the second silently overwrote the
+        // first. SaveAll must now suffix the second to keep both on disk.
+        var loader = CreateLoader();
+        var vm = new ConfigEditorViewModel(loader);
+
+        vm.NewFileCommand.Execute(null);
+        var first = vm.RuleFiles[0];
+        first.Rules[0].PathPattern = @".*\.Speed$";
+
+        vm.NewFileCommand.Execute(null);
+        var second = vm.RuleFiles[1];
+        second.Rules[0].PathPattern = @".*\.Speed$";
+
+        vm.SaveCommand.Execute(null);
+
+        File.Exists(Path.Combine(_rulesDir, "_any_.Speed.json")).Should().BeTrue();
+        File.Exists(Path.Combine(_rulesDir, "_any_.Speed-2.json")).Should().BeTrue();
+        vm.RuleFiles.Should().HaveCount(2);
+    }
+
+    [Fact]
+    public void NewFile_AutoNameCollidesWithExistingOnDisk_Suffixed()
+    {
+        // #72 sibling case: an on-disk file that loaded as a fixed-name entry
+        // already claims the auto-derived name. The newly added file must
+        // suffix rather than overwrite.
+        WriteRuleFile("_any_.Speed.json",
+            @"{ ""version"": ""1.0"", ""rules"": [{ ""pathPattern"": "".*\\.Speed$"" }] }");
+
+        var loader = CreateLoader();
+        var vm = new ConfigEditorViewModel(loader);
+
+        vm.NewFileCommand.Execute(null);
+        vm.RuleFiles.Last().Rules[0].PathPattern = @".*\.Speed$";
+
+        vm.SaveCommand.Execute(null);
+
+        File.Exists(Path.Combine(_rulesDir, "_any_.Speed.json")).Should().BeTrue();
+        File.Exists(Path.Combine(_rulesDir, "_any_.Speed-2.json")).Should().BeTrue();
+    }
+
+    [Fact]
     public void DeleteSelected_RemovesRuleAndFileWhenLast()
     {
         WriteRuleFile("toDelete.json",
