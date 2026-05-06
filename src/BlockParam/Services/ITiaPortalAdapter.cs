@@ -50,4 +50,10 @@ public interface ITiaPortalAdapter
     /// Gets the block group (parent folder) of a Data Block.
     /// </summary>
     object GetBlockGroup(object dataBlock);
+
+    /// <summary>
+    /// Compiles a single Data Block, used as the retry step when the export
+    /// path hits TIA's "inconsistent block" error (#19).
+    /// </summary>
+    void CompileBlock(object dataBlock);
 }
