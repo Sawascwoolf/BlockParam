@@ -1,6 +1,6 @@
 # Terms and Conditions
 
-_Last updated: **[YYYY-MM-DD — fill in before publishing]**_
+_Last updated: **2026-05-06**_
 
 These Terms govern your use of the **BlockParam** TIA Portal Add-In ("the Add-In")
 and the related Pro license service. By installing the Add-In or activating a
@@ -12,7 +12,7 @@ If you don't agree, don't install or activate the Add-In.
 
 | Role | Entity |
 |---|---|
-| Provider / publisher of the Add-In | **[LEGAL ENTITY NAME]**, [REGISTERED ADDRESS], [COUNTRY]. VAT-ID: [VAT-ID]. Contact: [support@lautimweb.de](mailto:support@lautimweb.de). Hereafter "we" / "us". |
+| Provider / publisher of the Add-In | **Tobias Laubscher** (Einzelunternehmer, trading as *lautimweb*), Enkenbacher Str. 55, 67691 Hochspeyer, Germany. VAT-ID: DE313892898. Phone: +49 176 21156188. Email: [support@lautimweb.de](mailto:support@lautimweb.de). Hereafter "we" / "us". |
 | Merchant of Record (seller of the Pro license to the buyer) | **Lemon Squeezy LLC** ("Lemon Squeezy"). See [Lemon Squeezy Buyer Terms](https://www.lemonsqueezy.com/buyer-terms). |
 | You | The natural or legal person installing the Add-In or buying a Pro license. |
 
@@ -151,7 +151,7 @@ caused by us, and under the German Product Liability Act
 | Channel | Scope | Response target |
 |---|---|---|
 | [GitHub Issues](https://github.com/Sawascwoolf/BlockParam/issues) | Bugs, feature requests (Free + Pro) | Best effort |
-| [support@lautimweb.de](mailto:support@lautimweb.de) | Billing, license, Pro support | Best effort, business days, [TIMEZONE] |
+| [support@lautimweb.de](mailto:support@lautimweb.de) | Billing, license, Pro support | Best effort, business days, Europe/Berlin |
 
 We do **not** offer a contractual SLA for Free or Pro at the standard price.
 Custom SLAs are available on request for multi-seat customers.
@@ -179,13 +179,13 @@ authoritative changelog.
 
 ## 12. Governing law and jurisdiction
 
-These Terms are governed by the laws of **[GOVERNING LAW — e.g. Federal Republic
-of Germany]**, excluding the UN Convention on Contracts for the International
-Sale of Goods (CISG).
+These Terms are governed by the laws of the **Federal Republic of Germany**,
+excluding the UN Convention on Contracts for the International Sale of Goods
+(CISG).
 
 Place of jurisdiction for disputes with merchants, legal persons under public
-law, or special funds under public law is **[COURT — e.g. the courts competent
-for our registered seat]**.
+law, or special funds under public law is **the court competent for our
+registered seat in Rheinland-Pfalz, Germany**.
 
 EU consumers may also bring proceedings under the consumer-protection laws of
 their country of residence and may use the EU
@@ -202,9 +202,11 @@ provisions remain in full force.
 
 | | |
 |---|---|
-| Provider | **[LEGAL ENTITY]** |
-| Address | [REGISTERED ADDRESS] |
+| Provider | **Tobias Laubscher** (Einzelunternehmer, trading as *lautimweb*) |
+| Address | Enkenbacher Str. 55, 67691 Hochspeyer, Germany |
+| Phone | +49 176 21156188 |
 | Email | [support@lautimweb.de](mailto:support@lautimweb.de) |
 | Web | [https://blockparam.lautimweb.de](https://blockparam.lautimweb.de) |
-| VAT-ID | [VAT-ID] |
-| Commercial register | [HRB ... — if applicable] |
+| VAT-ID | DE313892898 (USt-IdNr. gem. § 27 a UStG) |
+| Commercial register | _Not applicable — Einzelunternehmer_ |
+| Editorially responsible (§ 18 Abs. 2 MStV) | Tobias Laubscher (address as above) |

@@ -1,6 +1,6 @@
 # Privacy Policy
 
-_Last updated: **[YYYY-MM-DD — fill in before publishing]**_
+_Last updated: **2026-05-06**_
 
 This Privacy Policy explains what personal data the **BlockParam** TIA Portal
 Add-In and the related Pro license service collect, why, and what your rights
@@ -10,14 +10,19 @@ are. We aim to collect as little as possible.
 
 The controller for the data processing described here is:
 
-> **[LEGAL ENTITY NAME]**
-> [REGISTERED ADDRESS]
-> [COUNTRY]
+> **Tobias Laubscher** (Einzelunternehmer, trading as *lautimweb*)
+> Enkenbacher Str. 55
+> 67691 Hochspeyer
+> Germany
+> Phone: +49 176 21156188
 > Email: [support@lautimweb.de](mailto:support@lautimweb.de)
+> VAT-ID: DE313892898
 
-A statutory Data Protection Officer (*Datenschutzbeauftragter*) is **[appointed
-/ not appointed — fill in]**. For data-protection requests, write to the address
-above with the subject "Privacy".
+A statutory Data Protection Officer (*Datenschutzbeauftragter*) is **not
+appointed** — the controller is an Einzelunternehmer below the §38 BDSG
+threshold of 20 persons regularly engaged in automated processing of personal
+data. For data-protection requests, write to the address above with the subject
+"Privacy".
 
 ## 2. TL;DR — what BlockParam sends and stores
 
@@ -50,7 +55,7 @@ the following to our license server over HTTPS:
 | `osLanguage` (optional) | `de-DE` | Localised error messages |
 
 The server also logs the **request timestamp and source IP** at the
-infrastructure level (standard web-server logs), retained for **[N] days** for
+infrastructure level (standard web-server logs), retained for **30 days** for
 abuse-prevention and debugging.
 
 **Legal basis (GDPR):**
@@ -66,13 +71,13 @@ abuse-prevention and debugging.
 - License records and invoice records are then retained for the
   statutory tax-law period (**up to 10 years** under German *Abgabenordnung*
   / equivalent local rules).
-- Web-server access logs: **[N] days**, then deleted.
+- Web-server access logs: **30 days**, then deleted.
 
 **Recipients / sub-processors for the license server:**
 
 | Provider | Role | Location | Safeguard |
 |---|---|---|---|
-| [HOSTING PROVIDER — e.g. Hetzner Online GmbH] | Server hosting | [Germany / EU] | Data-Processing Agreement (Art. 28 GDPR), EU-based |
+| ALL-INKL.COM — Neue Medien Münnich, Inh. René Münnich | Server hosting | Germany | Data-Processing Agreement (Art. 28 GDPR), EU-based |
 
 ## 4. Detail: payment via Lemon Squeezy
 
@@ -116,15 +121,16 @@ a fresh check on next start.
 
 ## 6. Marketing website
 
-If you visit our website at **[https://blockparam.lautimweb.de]** the hosting
-provider stores standard access logs (URL, IP, user-agent, referrer, timestamp).
+If you visit our website at **https://blockparam.lautimweb.de** the hosting
+provider (ALL-INKL.COM) stores standard access logs (URL, IP, user-agent,
+referrer, timestamp), retained for 30 days.
 
 | | |
 |---|---|
-| Cookies | **[None / list strictly necessary cookies]** |
-| Analytics | **[None / list provider — e.g. Plausible, EU, no cookies]** |
-| Embedded fonts | **[Self-hosted / Google Fonts — fill in]** |
-| Embedded videos | **[None / YouTube nocookie / self-hosted MP4]** |
+| Cookies | None set by us. A self-hosted Matomo session cookie is set only if you have not opted out via the Matomo opt-out toggle on the site. |
+| Analytics | **Self-hosted Matomo** on the same ALL-INKL.COM server. IPs are anonymised before storage; no third-party processor receives the data. |
+| Embedded fonts | Self-hosted (no third-party CDN call). |
+| Embedded videos | Self-hosted MP4 (no YouTube / Vimeo embed). |
 
 Legal basis: **Art. 6(1)(f) GDPR** (legitimate interest in operating a website),
 or your consent under **Art. 6(1)(a) GDPR** where required (e.g. non-essential
@@ -153,8 +159,10 @@ You can exercise the following rights at any time, free of charge, by emailing
   where processing is based on consent.
 
 You also have the right to **lodge a complaint with a supervisory authority**
-(Art. 77). For us, the competent authority is **[SUPERVISORY AUTHORITY — e.g.
-Der Bayerische Landesbeauftragte für den Datenschutz]**.
+(Art. 77). For us, the competent authority is **Der Landesbeauftragte für den
+Datenschutz und die Informationsfreiheit Rheinland-Pfalz (LfDI RLP),
+Hintere Bleiche 34, 55116 Mainz, Germany —
+[https://www.datenschutz.rlp.de](https://www.datenschutz.rlp.de)**.
 
 ## 9. Children
 
@@ -165,8 +173,8 @@ not knowingly process personal data of persons under 16.
 
 - All client–server traffic uses TLS (HTTPS).
 - The license cache is signed so it can't be silently extended past 48 h.
-- Server-side license records are stored in [DATABASE — e.g. PostgreSQL on the
-  EU-hosted infrastructure listed above].
+- Server-side license records are stored in a relational database on the
+  EU-hosted infrastructure listed above (ALL-INKL.COM, Germany).
 - Access to the license server is restricted to the operator and is logged.
 
 ## 11. Changes to this policy
@@ -180,7 +188,9 @@ authoritative changelog.
 
 | | |
 |---|---|
-| Controller | **[LEGAL ENTITY]** |
-| Address | [REGISTERED ADDRESS] |
+| Controller | **Tobias Laubscher** (Einzelunternehmer, trading as *lautimweb*) |
+| Address | Enkenbacher Str. 55, 67691 Hochspeyer, Germany |
+| Phone | +49 176 21156188 |
 | Email | [support@lautimweb.de](mailto:support@lautimweb.de) |
+| VAT-ID | DE313892898 |
 | Subject line | "Privacy" |
