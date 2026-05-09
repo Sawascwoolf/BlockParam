@@ -499,64 +499,6 @@ public class BulkChangeViewModelInvariantTests
         AssertInvariants(env.Vm);
     }
 
-    [Fact]
-    public void Switch_LegacyApi_OneActiveWithEdits_PromptStash_OriginalStashedRestoredOnReturn()
-    {
-        // Row 10: legacy SwitchToDataBlock — single-DB session, target = a
-        // different DB. The current DB has pending edits. User picks Stash
-        // (No). Switch lands on target; the original is in the stash. Switch
-        // back to the original: stash pops and edits are restored onto the
-        // re-loaded tree.
-        var flatXml = TestFixtures.LoadXml("flat-db.xml");
-        var nestedXml = TestFixtures.LoadXml("nested-struct-db.xml");
-        var flat = new SimaticMLParser().Parse(flatXml);
-        var nested = new SimaticMLParser().Parse(nestedXml);
-
-        var env = new ActiveSetTestBuilder()
-            .WithAnchor("flat-db.xml")
-            .WithDropdownPeer("nested-struct-db.xml")
-            .WithPromptResults(
-                YesNoCancelResult.No,   // stash FlatDB before switch
-                YesNoCancelResult.No)   // stash NestedStructDB on switch back
-            .Build();
-
-        // Stage one edit on FlatDB.
-        var flatLeaf = env.Vm.RootMembers.SelectMany(r => new[] { r }.Concat(r.AllDescendants()))
-            .First(n => n.IsLeaf && !string.IsNullOrEmpty(n.StartValue));
-        var pendingValue = flatLeaf.StartValue == "0" ? "1" : "0";
-        flatLeaf.PendingValue = pendingValue;
-        var pendingPath = flatLeaf.Path;
-
-        // Switch away to NestedStructDB.
-        var nestedSummary = new DataBlockSummary("NestedStructDB", "");
-        env.Vm.SwitchToDataBlock(nestedSummary).Should().BeTrue();
-
-        env.Vm.AllActiveDbs[0].Info.Name.Should().Be("NestedStructDB");
-        env.Vm.HasStashedDbs.Should().BeTrue("FlatDB stashed on switch out");
-        env.Vm.StashedDbs.Should().ContainSingle(s => s.DbName == "FlatDB");
-
-        // Stage an unrelated edit on NestedStructDB so the return-switch also
-        // exercises the stash branch (verifies the legacy path's symmetry).
-        var nestedLeaf = env.Vm.RootMembers.SelectMany(r => new[] { r }.Concat(r.AllDescendants()))
-            .First(n => n.IsLeaf && !string.IsNullOrEmpty(n.StartValue));
-        nestedLeaf.PendingValue = nestedLeaf.StartValue == "0" ? "1" : "0";
-
-        // Switch back to FlatDB.
-        var flatSummary = new DataBlockSummary("FlatDB", "");
-        env.Vm.SwitchToDataBlock(flatSummary).Should().BeTrue();
-
-        env.Vm.AllActiveDbs[0].Info.Name.Should().Be("FlatDB");
-        env.Vm.HasStashedDbs.Should().BeTrue("NestedStructDB now stashed");
-        env.Vm.StashedDbs.Should().ContainSingle(s => s.DbName == "NestedStructDB");
-
-        // Verify the original FlatDB edit was restored.
-        var restored = env.Vm.RootMembers.SelectMany(r => new[] { r }.Concat(r.AllDescendants()))
-            .FirstOrDefault(n => n.IsLeaf && n.Path == pendingPath);
-        restored.Should().NotBeNull();
-        restored!.PendingValue.Should().Be(pendingValue);
-        AssertInvariants(env.Vm);
-    }
-
     // ───────────────────────── invariant assertion ─────────────────────────
 
     /// <summary>

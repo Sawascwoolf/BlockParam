@@ -167,234 +167,63 @@ public class BulkChangeViewModelDbSwitcherTests
     }
 
     [Fact]
-    public void SwitchToDataBlock_NoStagedChanges_SwitchesWithoutPrompt()
-    {
-        var h = CreateVm();
-        h.Vm.OpenDataBlocksDropdownCommand.Execute(null);
-
-        var target = h.Vm.FilteredDataBlocks.First(b => b.Name != h.Vm.CurrentDataBlockName);
-        var ok = h.Vm.SwitchToDataBlock(target);
-
-        ok.Should().BeTrue();
-        h.SwitchCallCount().Should().Be(1);
-        h.LastSwitchedTo().Should().Be(target.Name);
-        h.Vm.CurrentDataBlockName.Should().Be(target.Name);
-        h.Vm.IsDataBlocksDropdownOpen.Should().BeFalse();
-        h.Mbx.AskYesNoCancelCallCount.Should().Be(0,
-            "no staged changes means no prompt");
-    }
-
-    [Fact]
-    public void SwitchToDataBlock_SameDb_NoOp()
-    {
-        var h = CreateVm();
-        h.Vm.OpenDataBlocksDropdownCommand.Execute(null);
-
-        var current = h.Vm.FilteredDataBlocks.First(b => b.Name == h.Vm.CurrentDataBlockName);
-        var ok = h.Vm.SwitchToDataBlock(current);
-
-        ok.Should().BeFalse("clicking the already-active DB just closes the dropdown");
-        h.SwitchCallCount().Should().Be(0);
-        h.Vm.IsDataBlocksDropdownOpen.Should().BeFalse();
-    }
-
-    [Fact]
-    public void SwitchWithStagedEdits_CancelChoice_StaysOnCurrentDb()
-    {
-        var h = CreateVm(promptResult: YesNoCancelResult.Cancel);
-
-        var leaf = h.Vm.RootMembers.First(m => m.IsLeaf);
-        leaf.EditableStartValue = "999";
-        var pendingBefore = h.Vm.PendingInlineEditCount;
-        pendingBefore.Should().BeGreaterThan(0);
-        var originalDb = h.Vm.CurrentDataBlockName;
-
-        h.Vm.OpenDataBlocksDropdownCommand.Execute(null);
-        var target = h.Vm.FilteredDataBlocks.First(b => b.Name != originalDb);
-        var ok = h.Vm.SwitchToDataBlock(target);
-
-        ok.Should().BeFalse();
-        h.Mbx.AskYesNoCancelCallCount.Should().Be(1);
-        h.SwitchCallCount().Should().Be(0, "Cancel must not invoke the host switch callback");
-        h.Vm.PendingInlineEditCount.Should().Be(pendingBefore,
-            "staged edits survive a Cancel");
-        h.Vm.CurrentDataBlockName.Should().Be(originalDb);
-        h.Vm.HasStashedDbs.Should().BeFalse("Cancel must not stash");
-    }
-
-    [Fact]
-    public void SwitchWithStagedEdits_KeepChoice_StashesAndSwitches()
-    {
-        var h = CreateVm(promptResult: YesNoCancelResult.No);
-
-        var leaf = h.Vm.RootMembers.First(m => m.IsLeaf);
-        var leafPath = leaf.Path;
-        var originalValue = leaf.StartValue ?? "";
-        leaf.EditableStartValue = "999";
-        var originalDb = h.Vm.CurrentDataBlockName;
-
-        h.Vm.OpenDataBlocksDropdownCommand.Execute(null);
-        var target = h.Vm.FilteredDataBlocks.First(b => b.Name != originalDb);
-        var ok = h.Vm.SwitchToDataBlock(target);
-
-        ok.Should().BeTrue();
-        h.SwitchCallCount().Should().Be(1);
-        h.Vm.CurrentDataBlockName.Should().Be(target.Name);
-        h.Vm.PendingInlineEditCount.Should().Be(0,
-            "active tree is the new DB — its pending count starts at 0");
-
-        h.Vm.HasStashedDbs.Should().BeTrue();
-        h.Vm.StashedDbs.Should().HaveCount(1);
-        var stash = h.Vm.StashedDbs[0];
-        stash.DbName.Should().Be(originalDb);
-        stash.Edits.Should().HaveCount(1);
-        stash.Edits[0].Path.Should().Be(leafPath);
-        stash.Edits[0].PendingValue.Should().Be("999");
-        stash.Edits[0].OriginalValue.Should().Be(originalValue);
-    }
-
-    [Fact]
-    public void SwitchBack_RestoresStashedEdits_AndClearsTheStashEntry()
-    {
-        var h = CreateVm(promptResult: YesNoCancelResult.No);
-
-        // Stage an edit, switch away (Keep choice), then switch back.
-        var leaf = h.Vm.RootMembers.First(m => m.IsLeaf);
-        var originalDb = h.Vm.CurrentDataBlockName;
-        leaf.EditableStartValue = "999";
-
-        h.Vm.OpenDataBlocksDropdownCommand.Execute(null);
-        var target = h.Vm.FilteredDataBlocks.First(b => b.Name != originalDb);
-        h.Vm.SwitchToDataBlock(target).Should().BeTrue();
-        h.Vm.HasStashedDbs.Should().BeTrue();
-
-        // Switch back. The current DB (target) has no staged edits, so no
-        // prompt fires; the stash for originalDb gets re-applied.
-        var back = h.Vm.FilteredDataBlocks.First(b => b.Name == originalDb);
-        h.Vm.SwitchToDataBlock(back).Should().BeTrue();
-
-        h.Vm.CurrentDataBlockName.Should().Be(originalDb);
-        h.Vm.PendingInlineEditCount.Should().Be(1,
-            "the stashed edit must be restored as a live pending edit");
-        h.Vm.HasStashedDbs.Should().BeFalse(
-            "stash entry for the now-active DB must be consumed on restore");
-    }
-
-    [Fact]
-    public void SwitchWithStagedEdits_ApplyChoice_CommitsAndSwitchesWithoutStashing()
-    {
-        // Tracks whether the host's onApply callback ran — that's the proxy
-        // for "committed to TIA" in tests. With no callback wired, ExecuteApply
-        // still writes to in-memory XML and clears pending state; we assert
-        // both invariants survive through the switch.
-        int applyCount = 0;
-        var primary = TestFixtures.LoadXml("flat-db.xml");
-        var secondary = TestFixtures.LoadXml("nested-struct-db.xml");
-        var parser = new SimaticMLParser();
-        var primaryInfo = parser.Parse(primary);
-
-        var enumerated = new[]
-        {
-            new DataBlockSummary(primaryInfo.Name, ""),
-            new DataBlockSummary(parser.Parse(secondary).Name, "Recipe"),
-        };
-
-        var configLoader = new ConfigLoader(null);
-        var bulkService = new BulkChangeService(new ChangeLogger(), configLoader);
-        var usageTracker = Substitute.For<IUsageTracker>();
-        usageTracker.GetStatus().Returns(new UsageStatus(0, 3));
-        usageTracker.RecordUsage(Arg.Any<int>()).Returns(true);
-
-        var mbx = new FakeMessageBox(YesNoCancelResult.Yes);
-        var vm = new BulkChangeViewModel(
-            primaryInfo, primary,
-            new HierarchyAnalyzer(), bulkService, usageTracker, configLoader,
-            onApply: _ => applyCount++,
-            messageBox: mbx,
-            enumerateDataBlocks: () => enumerated,
-            switchToDataBlock: s =>
-                string.Equals(s.Name, primaryInfo.Name, StringComparison.Ordinal)
-                    ? primary
-                    : secondary);
-
-        vm.RootMembers.First(m => m.IsLeaf).EditableStartValue = "555";
-        vm.OpenDataBlocksDropdownCommand.Execute(null);
-        var target = vm.FilteredDataBlocks.First(b => b.Name != primaryInfo.Name);
-
-        var ok = vm.SwitchToDataBlock(target);
-
-        ok.Should().BeTrue();
-        applyCount.Should().Be(1, "Apply choice must invoke the host commit path before switching");
-        vm.HasStashedDbs.Should().BeFalse("Apply commits — nothing to stash");
-        vm.CurrentDataBlockName.Should().Be(target.Name);
-    }
-
-    [Fact]
     public void StashKey_IncludesPlcName_SoSameDbNameAcrossPlcsDoesNotCollide()
     {
-        // Regression: DB names + numbers are unique within a software unit,
-        // not across the project. A multi-PLC project can have two
-        // DB_SharedName entries — they must stash to separate slots.
-        // We model this by enumerating two summaries with the same name +
-        // folder but different PlcName, then verify the stash key separates
-        // them by inspecting the StashedDbs collection identity.
-        var primary = TestFixtures.LoadXml("flat-db.xml");
-        var secondary = TestFixtures.LoadXml("nested-struct-db.xml");
+        // Regression: a multi-PLC project can have two DBs that share the
+        // same name + folder but live on different PLCs. The stash key must
+        // separate them so closing one doesn't overwrite the other's stash.
+        // Driven via the live chip-close + Keep gesture.
+        var aXml = TestFixtures.LoadXml("flat-db.xml");
+        var bXml = TestFixtures.LoadXml("nested-struct-db.xml");
         var parser = new SimaticMLParser();
-        var primaryInfo = parser.Parse(primary);
-
-        // Two summaries that would alias under a (folder, name)-only key.
-        var enumerated = new[]
-        {
-            new DataBlockSummary(primaryInfo.Name, "", plcName: "PLC_Line1"),
-            new DataBlockSummary(parser.Parse(secondary).Name, "", plcName: "PLC_Line2"),
-        };
+        var aInfo = parser.Parse(aXml);
+        var bInfo = parser.Parse(bXml);
 
         var configLoader = new ConfigLoader(null);
         var bulkService = new BulkChangeService(new ChangeLogger(), configLoader);
         var usageTracker = Substitute.For<IUsageTracker>();
         usageTracker.GetStatus().Returns(new UsageStatus(0, 3));
         usageTracker.RecordUsage(Arg.Any<int>()).Returns(true);
-        var mbx = new FakeMessageBox(YesNoCancelResult.No);
+        var mbx = new FakeMessageBox(YesNoCancelResult.No);   // Keep on chip-close
+
+        // Anchor on PLC_Line1 + companion on PLC_Line2 from the start so the
+        // chip-close gesture has a peer to fall back on.
+        var companion = new ActiveDb(bInfo, bXml, onApply: null, plcName: "PLC_Line2");
 
         var vm = new BulkChangeViewModel(
-            primaryInfo, primary,
+            aInfo, aXml,
             new HierarchyAnalyzer(), bulkService, usageTracker, configLoader,
             messageBox: mbx,
-            enumerateDataBlocks: () => enumerated,
-            switchToDataBlock: s =>
-                string.Equals(s.Name, primaryInfo.Name, StringComparison.Ordinal)
-                    ? primary
-                    : secondary,
-            currentPlcName: "PLC_Line1");
+            currentPlcName: "PLC_Line1",
+            additionalActiveDbs: new[] { companion });
 
-        // Stage on primary (PLC_Line1) and switch (Keep) → 1 stash.
-        vm.RootMembers.First(m => m.IsLeaf).EditableStartValue = "111";
-        vm.OpenDataBlocksDropdownCommand.Execute(null);
-        var second = vm.FilteredDataBlocks.First(b => b.Name != primaryInfo.Name);
-        vm.SwitchToDataBlock(second).Should().BeTrue();
+        // Stage on the anchor (PLC_Line1).
+        var anchorRoot = vm.RootMembers.First(r => r.Name == aInfo.Name);
+        anchorRoot.AllDescendants().First(n => n.IsLeaf).PendingValue = "111";
+
+        // Chip-× anchor → Keep (stash).
+        vm.ActiveDbChips.First(c => c.DisplayName == aInfo.Name)
+            .CloseCommand.Execute(null);
 
         vm.StashedDbs.Should().HaveCount(1);
         vm.StashedDbs[0].Summary.PlcName.Should().Be("PLC_Line1",
-            "stash must record which PLC the edits came from");
+            "stash must record which PLC the edits came from — without the PlcName " +
+            "in the StashKey, two DBs with identical (name, folder) on different PLCs " +
+            "would collide.");
     }
 
     [Fact]
     public void StashKeyedByNameAndFolder_TwoDbsSameNameDifferentFolders_StashIndependently()
     {
-        // Two stashes both nominally "DB_X" but in different folders should
-        // not collide. We stand in primary as "DB_X" in folder "" and target
-        // as "DB_X" in folder "Recipe" — both physically the secondary fixture.
-        var primary = TestFixtures.LoadXml("flat-db.xml");
-        var secondary = TestFixtures.LoadXml("nested-struct-db.xml");
+        // Stash key includes folder path so two DBs with the same name in
+        // different folders don't alias. Driven via chip-close + Keep on a
+        // 2-DB session where the anchor lives at "" and the companion at
+        // "Recipe".
+        var aXml = TestFixtures.LoadXml("flat-db.xml");
+        var bXml = TestFixtures.LoadXml("nested-struct-db.xml");
         var parser = new SimaticMLParser();
-        var primaryInfo = parser.Parse(primary);
-
-        var enumerated = new[]
-        {
-            new DataBlockSummary(primaryInfo.Name, ""),
-            new DataBlockSummary(parser.Parse(secondary).Name, "Recipe"),
-        };
+        var aInfo = parser.Parse(aXml);
+        var bInfo = parser.Parse(bXml);
 
         var configLoader = new ConfigLoader(null);
         var bulkService = new BulkChangeService(new ChangeLogger(), configLoader);
@@ -402,60 +231,43 @@ public class BulkChangeViewModelDbSwitcherTests
         usageTracker.GetStatus().Returns(new UsageStatus(0, 3));
         usageTracker.RecordUsage(Arg.Any<int>()).Returns(true);
 
-        var mbx = new FakeMessageBox(YesNoCancelResult.No);
+        var mbx = new FakeMessageBox(YesNoCancelResult.No);   // Keep on chip-close
+        var companion = new ActiveDb(bInfo, bXml, onApply: null, plcName: "");
+
         var vm = new BulkChangeViewModel(
-            primaryInfo, primary,
+            aInfo, aXml,
             new HierarchyAnalyzer(), bulkService, usageTracker, configLoader,
             messageBox: mbx,
-            enumerateDataBlocks: () => enumerated,
-            switchToDataBlock: s =>
-                string.Equals(s.Name, primaryInfo.Name, StringComparison.Ordinal)
-                    ? primary
-                    : secondary);
+            additionalActiveDbs: new[] { companion });
 
-        // Stage on primary, switch (Keep) → 1 stash.
-        vm.RootMembers.First(m => m.IsLeaf).EditableStartValue = "777";
-        vm.OpenDataBlocksDropdownCommand.Execute(null);
-        var second = vm.FilteredDataBlocks.First(b => b.Name != primaryInfo.Name);
-        vm.SwitchToDataBlock(second).Should().BeTrue();
+        // Stage on the anchor.
+        var anchorRoot = vm.RootMembers.First(r => r.Name == aInfo.Name);
+        anchorRoot.AllDescendants().First(n => n.IsLeaf).PendingValue = "777";
+
+        // Chip-× anchor → Keep (stash).
+        vm.ActiveDbChips.First(c => c.DisplayName == aInfo.Name)
+            .CloseCommand.Execute(null);
+
         vm.StashedDbs.Should().HaveCount(1);
-        vm.StashedDbs[0].DbName.Should().Be(primaryInfo.Name);
-        vm.StashedDbs[0].FolderPath.Should().Be("");
+        vm.StashedDbs[0].DbName.Should().Be(aInfo.Name);
+        vm.StashedDbs[0].FolderPath.Should().Be("",
+            "FolderPath is part of the stash key — without it, same-named DBs in " +
+            "different folders would collide.");
     }
 
-    // Removed: RestoreStashedEdits_DoesNotConsumeInlineEditQuota — superseded by the
-    // unified Apply-based counter (#62), which has no inline-edit charge to bypass.
-
     [Fact]
-    public void StashOnA_KeepToB_ApplyToC_PreservesAStash()
+    public void Stash_SurvivesApplyOnRemainingActiveDb()
     {
         // Regression for the mid-cycle Apply path (#59 review): user stages
-        // on A, picks Keep when switching to B (A enters the stash), then
-        // commits B and switches to C. A's stash must survive B's Apply —
-        // ExecuteApply only refreshes the active tree; the stash dictionary
-        // is independent and must stay untouched.
+        // on A, chip-×'s A with Keep (A enters the stash), then stages on
+        // the new anchor B and Applies. A's stash must survive B's Apply —
+        // CommitChanges only iterates active DBs; the stash dictionary is
+        // independent and must stay untouched.
         var aXml = TestFixtures.LoadXml("flat-db.xml");
         var bXml = TestFixtures.LoadXml("nested-struct-db.xml");
-        var cXml = TestFixtures.LoadXml("mixed-types-db.xml");
         var parser = new SimaticMLParser();
         var aInfo = parser.Parse(aXml);
         var bInfo = parser.Parse(bXml);
-        var cInfo = parser.Parse(cXml);
-
-        var enumerated = new[]
-        {
-            new DataBlockSummary(aInfo.Name, ""),
-            new DataBlockSummary(bInfo.Name, ""),
-            new DataBlockSummary(cInfo.Name, ""),
-        };
-
-        // Two-state fake: Keep then Yes (Apply) on the second prompt.
-        var queued = new Queue<YesNoCancelResult>(new[]
-        {
-            YesNoCancelResult.No,   // A → B: Keep (stash A)
-            YesNoCancelResult.Yes,  // B → C: Apply B
-        });
-        var mbx = new ScriptedMessageBox(queued);
 
         var configLoader = new ConfigLoader(null);
         var bulkService = new BulkChangeService(new ChangeLogger(), configLoader);
@@ -464,60 +276,43 @@ public class BulkChangeViewModelDbSwitcherTests
         usageTracker.RecordUsage(Arg.Any<int>()).Returns(true);
 
         int applyCount = 0;
+        var mbx = new FakeMessageBox(YesNoCancelResult.No);   // Keep on chip-close
+        var companion = new ActiveDb(bInfo, bXml,
+            onApply: _ => applyCount++,
+            plcName: "");
+
         var vm = new BulkChangeViewModel(
             aInfo, aXml,
             new HierarchyAnalyzer(), bulkService, usageTracker, configLoader,
             onApply: _ => applyCount++,
             messageBox: mbx,
-            enumerateDataBlocks: () => enumerated,
-            switchToDataBlock: s =>
-            {
-                if (string.Equals(s.Name, aInfo.Name, StringComparison.Ordinal)) return aXml;
-                if (string.Equals(s.Name, bInfo.Name, StringComparison.Ordinal)) return bXml;
-                return cXml;
-            });
+            additionalActiveDbs: new[] { companion });
 
-        // 1. Stage on A.
-        vm.RootMembers.First(m => m.IsLeaf).EditableStartValue = "111";
-        vm.OpenDataBlocksDropdownCommand.Execute(null);
+        // 1. Stage on A (anchor).
+        var anchorRoot = vm.RootMembers.First(r => r.Name == aInfo.Name);
+        anchorRoot.AllDescendants().First(n => n.IsLeaf).PendingValue = "111";
 
-        // 2. Switch to B with Keep — A goes to stash.
-        var bSummary = vm.FilteredDataBlocks.First(b => b.Name == bInfo.Name);
-        vm.SwitchToDataBlock(bSummary).Should().BeTrue();
-        vm.CurrentDataBlockName.Should().Be(bInfo.Name);
+        // 2. Chip-× A with Keep → A stashed, B becomes sole active anchor.
+        vm.ActiveDbChips.First(c => c.DisplayName == aInfo.Name)
+            .CloseCommand.Execute(null);
+        vm.AllActiveDbs.Should().ContainSingle()
+            .Which.Info.Name.Should().Be(bInfo.Name);
         vm.StashedDbs.Should().HaveCount(1);
+        vm.StashedDbs[0].DbName.Should().Be(aInfo.Name);
 
-        // 3. Stage on B and switch to C with Apply.
-        vm.RootMembers.First(m => m.IsLeaf).EditableStartValue = "222";
-        vm.OpenDataBlocksDropdownCommand.Execute(null);
-        var cSummary = vm.FilteredDataBlocks.First(b => b.Name == cInfo.Name);
-        vm.SwitchToDataBlock(cSummary).Should().BeTrue();
+        // 3. Stage on B (now anchor) and Apply.
+        vm.RootMembers.First(m => m.IsLeaf).PendingValue = "222";
+        vm.HasPendingChanges = true;   // Apply path normally toggles this; set explicitly so CommitChanges fires.
+        vm.CommitChanges().Should().BeTrue();
 
-        // Apply must have committed B.
-        applyCount.Should().Be(1);
-        vm.CurrentDataBlockName.Should().Be(cInfo.Name);
+        applyCount.Should().Be(1, "only B is active — exactly one OnApply fires");
 
-        // A's stash must still be there — Apply on B is independent.
+        // 4. A's stash must still be there.
         vm.StashedDbs.Should().HaveCount(1);
         vm.StashedDbs[0].DbName.Should().Be(aInfo.Name);
         vm.StashedDbs[0].Edits.Should().HaveCount(1);
-        vm.StashedDbs[0].Edits[0].PendingValue.Should().Be("111");
-    }
-
-    /// <summary>
-    /// Returns a scripted sequence of YesNoCancel answers — used when one
-    /// test runs through multiple prompts and each needs a different choice
-    /// (e.g. Keep on the first switch, Apply on the second).
-    /// </summary>
-    private class ScriptedMessageBox : IMessageBoxService
-    {
-        private readonly Queue<YesNoCancelResult> _answers;
-        public ScriptedMessageBox(Queue<YesNoCancelResult> answers) { _answers = answers; }
-        public bool AskYesNo(string message, string title) => true;
-        public void ShowError(string message, string title) { }
-        public void ShowInfo(string message, string title) { }
-        public YesNoCancelResult AskYesNoCancel(string message, string title) =>
-            _answers.Count > 0 ? _answers.Dequeue() : YesNoCancelResult.Cancel;
+        vm.StashedDbs[0].Edits[0].PendingValue.Should().Be("111",
+            "Apply on B doesn't touch the stash dictionary");
     }
 
     private class FakeMessageBox : IMessageBoxService
