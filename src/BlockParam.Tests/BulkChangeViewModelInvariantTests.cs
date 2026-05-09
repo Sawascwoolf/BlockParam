@@ -31,7 +31,21 @@ namespace BlockParam.Tests;
 ///   5. anchor's chip group's PlcName == <c>CurrentPlcName</c>;
 ///   6. every <c>PendingEdits</c> entry's <c>Node</c> is reachable from
 ///      the live <c>RootMembers</c> tree — i.e. removing a DB from the
-///      active set must vacate that DB's leaves from the bound list.
+///      active set must vacate that DB's leaves from the bound list;
+///   7. <c>BulkPreview</c> is empty whenever no target is staged
+///      (<c>!HasScope &amp;&amp; !IsManualMode</c>) — captures the §B bug
+///      symptom "Bulk Preview still shows preview computed from the prior
+///      selection" after the selection got cleared by a transition;
+///   8. every <c>BulkPreview</c> entry's <c>Node</c> and every
+///      <c>ManualSelectedPaths</c> node is reachable from
+///      <c>RootMembers</c> — same shape as invariant 6, captures §H3
+///      ("removing DB A must clear its manual selections / preview rows");
+///   9. <c>ActiveDbsSummary</c> matches the §H7 toolbar format: empty
+///      when ≤ 1 DB active; comma-joined up to 4; "A, B, C, D +N more"
+///      past 4;
+///   10. <c>NewValue</c> is empty whenever no member is selected and not
+///       in manual mode — captures §B "New Value field still populated
+///       with the value that was active before the messagebox".
 /// </summary>
 public class BulkChangeViewModelInvariantTests
 {
@@ -387,6 +401,217 @@ public class BulkChangeViewModelInvariantTests
     }
 
     [Fact]
+    public void Switch_LegacyApi_OneActiveWithEdits_PromptCancel_StaysOnOriginalNoStash()
+    {
+        // Row 13 — §B: legacy SwitchToDataBlock variant of the Cancel branch.
+        // Row 11 covers Cancel via dropdown toggle; Row 5 covers Cancel via
+        // chip-close. This row pins the third user-reachable switch gesture
+        // (the SwitchToDataBlock(summary) entry point used by the dropdown
+        // row-click after the prompt window resolved) so a regression in any
+        // one path can't sneak past the matrix.
+        var env = new ActiveSetTestBuilder()
+            .WithAnchor("flat-db.xml")
+            .WithDropdownPeer("nested-struct-db.xml")
+            .WithPromptResults(YesNoCancelResult.Cancel)
+            .Build();
+
+        var anchorLeaf = env.Vm.RootMembers.SelectMany(r => new[] { r }.Concat(r.AllDescendants()))
+            .First(n => n.IsLeaf && !string.IsNullOrEmpty(n.StartValue));
+        var pendingValue = anchorLeaf.StartValue == "0" ? "1" : "0";
+        anchorLeaf.PendingValue = pendingValue;
+        var pendingPath = anchorLeaf.Path;
+
+        var nestedSummary = new DataBlockSummary("NestedStructDB", "");
+        var switched = env.Vm.SwitchToDataBlock(nestedSummary);
+
+        switched.Should().BeFalse("Cancel must reject the switch");
+        env.Vm.AllActiveDbs.Should().HaveCount(1);
+        env.Vm.AllActiveDbs[0].Info.Name.Should().Be("FlatDB");
+        env.Vm.HasStashedDbs.Should().BeFalse("Cancel does not stash");
+
+        var stillPending = env.Vm.RootMembers
+            .SelectMany(r => new[] { r }.Concat(r.AllDescendants()))
+            .First(n => n.IsLeaf && n.Path == pendingPath);
+        stillPending.PendingValue.Should().Be(pendingValue, "edit survives Cancel");
+        env.Mbx.AskYesNoCancelCallCount.Should().Be(1);
+        AssertInvariants(env.Vm);
+    }
+
+    [Fact]
+    public void Stash_AfterChipCloseKeep_LiveTreeClean_StashCountFlagsCloseConfirm()
+    {
+        // Row 14 — §B5: after Keep on chip-close, the live tree has no pending
+        // edits but the stash still holds them. The dialog's OnClosing path
+        // (BulkChangeDialog.xaml.cs ~line 905) branches on
+        // (PendingInlineEditCount > 0) || (StashedDbs.Count > 0), so a stash-
+        // only state must still expose a non-empty StashedDbs.Sum to keep the
+        // close-confirm prompt firing.
+        //
+        // Without this row, a future refactor could move the stash count off
+        // the VM (e.g. into a sub-VM the dialog doesn't know about) and the
+        // close-confirm would silently stop firing for stash-only states —
+        // exactly the data-loss class #59 follow-ups exist to prevent.
+        var env = new ActiveSetTestBuilder()
+            .WithAnchor("flat-db.xml")
+            .WithCompanion("nested-struct-db.xml")
+            .WithPendingEditsOn("NestedStructDB", count: 1)
+            .WithPromptResults(YesNoCancelResult.No)   // Keep on chip-close
+            .Build();
+
+        env.Vm.ActiveDbChips.First(c => c.DisplayName == "NestedStructDB")
+            .CloseCommand.Execute(null);
+
+        env.Vm.PendingInlineEditCount.Should().Be(0,
+            "the stashed DB's edits are no longer in the live tree");
+        env.Vm.HasStashedDbs.Should().BeTrue();
+        env.Vm.StashedDbs.Sum(s => s.Count).Should().Be(1,
+            "stash count is what BulkChangeDialog.OnClosing reads to fire the close-confirm");
+        AssertInvariants(env.Vm);
+    }
+
+    [Fact]
+    public void Remove_ChipCloseAnchor_TwoActiveNoEdits_PeerBecomesAnchor()
+    {
+        // Row 15 — §H2: chip-× the anchor in a 2-DB session with no edits.
+        // The companion takes over as the anchor (index 0 of _activeDbs);
+        // CurrentDataBlockName, the chip ordering and the tree's flat shape
+        // all follow. No prompt fires because there were no pending edits.
+        var env = new ActiveSetTestBuilder()
+            .WithAnchor("flat-db.xml", plc: "PLC_A")
+            .WithCompanion("nested-struct-db.xml", plc: "PLC_A")
+            .Build();
+
+        env.Vm.AllActiveDbs[0].Info.Name.Should().Be("FlatDB", "setup: anchor is FlatDB");
+        var anchorChip = env.Vm.ActiveDbChips.First(c => c.DisplayName == "FlatDB");
+        anchorChip.CanClose.Should().BeTrue("2-DB session — anchor is removable");
+
+        anchorChip.CloseCommand.Execute(null);
+
+        env.Vm.AllActiveDbs.Should().HaveCount(1);
+        env.Vm.AllActiveDbs[0].Info.Name.Should().Be("NestedStructDB",
+            "the surviving companion rotates into the anchor slot");
+        env.Vm.CurrentDataBlockName.Should().Be("NestedStructDB",
+            "CurrentDataBlockName tracks _activeDbs[0]");
+        env.Mbx.AskYesNoCancelCallCount.Should().Be(0, "no edits → no prompt");
+        AssertInvariants(env.Vm);
+    }
+
+    [Fact]
+    public void Remove_ChipClose_AnchorHadManualSelection_VacatesManualPaths()
+    {
+        // Row 16 — §H3: anchor A has 2 manually-selected leaves; user chip-×s
+        // A. The cleanup must vacate ManualSelectedPaths so a follow-up
+        // selection in DB B starts from a clean slate (not "2 of A's nodes
+        // still highlighted plus whatever B adds"). Invariant 8b catches the
+        // reachability angle generally; this row pins the gesture+post-state
+        // pair so a regression in the chip-close cleanup specifically trips
+        // a row whose name reads as the user-visible bug.
+        var env = new ActiveSetTestBuilder()
+            .WithAnchor("flat-db.xml")
+            .WithCompanion("nested-struct-db.xml")
+            .Build();
+
+        // Multi-DB shape: pick 2 leaves from FlatDB's synthetic subtree.
+        var anchorRoot = env.Vm.RootMembers.First(r => r.Name == "FlatDB");
+        var anchorLeaves = new[] { anchorRoot }
+            .Concat(anchorRoot.AllDescendants())
+            .Where(n => n.IsLeaf)
+            .Take(2)
+            .ToList();
+        anchorLeaves.Should().HaveCount(2, "fixture should provide ≥ 2 leaves on FlatDB");
+
+        env.Vm.UpdateManualSelection(
+            added: anchorLeaves,
+            removed: System.Array.Empty<MemberNodeViewModel>(),
+            isFilterRehydration: false);
+        env.Vm.IsManualMode.Should().BeTrue("setup: 2 leaves selected → manual mode");
+        env.Vm.ManualSelectionCount.Should().Be(2);
+
+        var anchorChip = env.Vm.ActiveDbChips.First(c => c.DisplayName == "FlatDB");
+        anchorChip.CloseCommand.Execute(null);
+
+        env.Vm.AllActiveDbs.Should().HaveCount(1);
+        env.Vm.AllActiveDbs[0].Info.Name.Should().Be("NestedStructDB");
+        env.Vm.ManualSelectedPaths.Should().BeEmpty(
+            "removing the anchor must drop its manually-selected leaves — they are " +
+            "no longer reachable in the rebuilt single-DB tree");
+        env.Vm.IsManualMode.Should().BeFalse("0 manual paths → not in manual mode");
+        env.Mbx.AskYesNoCancelCallCount.Should().Be(0, "no pending edits → no prompt");
+        AssertInvariants(env.Vm);
+    }
+
+    [Fact]
+    public void Solo_3Active_ViaSummary_SameOutcomeAsChipBody()
+    {
+        // Row 17 — §H5: the dropdown DB-name click calls SoloActiveDb(summary)
+        // rather than the chip's SoloCommand which goes via
+        // SoloActiveDbByReference. Both gestures must land on the same
+        // ComposeRemoveOthers funnel (#78). Mirror Row 6's setup but drive
+        // the summary entry point so the second user gesture is wired into
+        // the matrix and a regression that bypasses one path doesn't slip.
+        var env = new ActiveSetTestBuilder()
+            .WithAnchor("flat-db.xml")
+            .WithCompanion("nested-struct-db.xml")
+            .WithCompanion("array-db.xml")
+            .WithPendingEditsOn("FlatDB", count: 1)
+            .WithPendingEditsOn("NestedStructDB", count: 1)
+            .WithPromptResults(YesNoCancelResult.Yes, YesNoCancelResult.Yes)
+            .Build();
+
+        var targetSummary = new DataBlockSummary("ArrayDB", "");
+        env.Vm.SoloActiveDb(targetSummary);
+
+        env.Vm.AllActiveDbs.Should().HaveCount(1);
+        env.Vm.AllActiveDbs[0].Info.Name.Should().Be("ArrayDB");
+        env.AppliedOrder.Should().BeEquivalentTo(
+            new[] { "FlatDB", "NestedStructDB" },
+            o => o.WithoutStrictOrdering(),
+            "every non-target DB with pending edits committed exactly once");
+        env.Mbx.AskYesNoCancelCallCount.Should().Be(2);
+        env.Vm.HasStashedDbs.Should().BeFalse();
+        AssertInvariants(env.Vm);
+    }
+
+    [Fact]
+    public void ActiveDbsSummary_ThreeActive_CommaJoined()
+    {
+        // Row 18 — §H7: with 3 active DBs the summary is a plain comma list.
+        // Invariant 9 covers the format on every transition; this row is a
+        // focused per-state assertion so a 3-DB session has its own named
+        // entry in the matrix and the failure message reads as the symptom.
+        var env = new ActiveSetTestBuilder()
+            .WithAnchor("flat-db.xml")
+            .WithCompanion("nested-struct-db.xml")
+            .WithCompanion("array-db.xml")
+            .Build();
+
+        env.Vm.ActiveDbsSummary.Should().Be("FlatDB, NestedStructDB, ArrayDB");
+        env.Vm.HasMultipleActiveDbs.Should().BeTrue();
+        AssertInvariants(env.Vm);
+    }
+
+    [Fact]
+    public void ActiveDbsSummary_FiveActive_CollapsesToFirstFourPlusMore()
+    {
+        // Row 19 — §H7: past 4 active DBs the summary collapses to
+        // "A, B, C, D +N more" so the toolbar doesn't grow unbounded with
+        // every added companion. Pin the threshold (4 shown, +N more) so a
+        // tweak that drops to 3-shown or grows to 5-shown breaks here.
+        var env = new ActiveSetTestBuilder()
+            .WithAnchor("flat-db.xml")
+            .WithCompanion("nested-struct-db.xml")
+            .WithCompanion("array-db.xml")
+            .WithCompanion("deep-nesting-db.xml")
+            .WithCompanion("mixed-types-db.xml")
+            .Build();
+
+        env.Vm.AllActiveDbs.Should().HaveCount(5, "setup: 5 distinct fixtures");
+        env.Vm.ActiveDbsSummary.Should().Be(
+            "FlatDB, NestedStructDB, ArrayDB, DeepNestingDB +1 more");
+        AssertInvariants(env.Vm);
+    }
+
+    [Fact]
     public void Switch_LegacyApi_OneActiveWithEdits_PromptStash_OriginalStashedRestoredOnReturn()
     {
         // Row 10: legacy SwitchToDataBlock — single-DB session, target = a
@@ -508,6 +733,60 @@ public class BulkChangeViewModelInvariantTests
             .ToList();
         orphanedPaths.Should().BeEmpty(
             "invariant 6: PendingEdits drops nodes whose DB left the active set");
+
+        // (7) BulkPreview is empty when there is no staged target (no scope
+        // selected and not in manual mode). Captures §B bug: the prior
+        // selection's preview lingered after the 3-way Cancel cleared the
+        // selection. ComputeBulkPreview's hasInput check enforces this; if
+        // a transition path forgets to call it, the stale rows survive.
+        if (!vm.HasScope && !vm.IsManualMode)
+        {
+            vm.BulkPreview.Should().BeEmpty(
+                "invariant 7: BulkPreview must be empty when no scope is " +
+                "selected and not in manual mode");
+        }
+
+        // (8) BulkPreview entries and ManualSelectedPaths nodes are reachable
+        // from the live tree — same shape as invariant 6 for PendingEdits.
+        // Removing a DB from the active set must vacate any preview rows or
+        // manual-selection paths that pointed at its leaves (§H3).
+        var orphanedPreview = vm.BulkPreview
+            .Where(e => !reachableNodes.Contains(e.Node))
+            .Select(e => e.Path)
+            .ToList();
+        orphanedPreview.Should().BeEmpty(
+            "invariant 8a: BulkPreview drops nodes whose DB left the active set");
+        var orphanedManual = vm.ManualSelectedPaths
+            .Where(n => !reachableNodes.Contains(n))
+            .Select(n => n.Path)
+            .ToList();
+        orphanedManual.Should().BeEmpty(
+            "invariant 8b: ManualSelectedPaths drops nodes whose DB left the active set");
+
+        // (9) ActiveDbsSummary follows the §H7 toolbar format. The summary
+        // backs both the toolbar's comma list and the accessibility tooltip,
+        // so a tweak to the format must trip the matrix not just one screen.
+        var names = vm.AllActiveDbs.Select(d => d.Info.Name).ToList();
+        string expectedSummary;
+        if (names.Count <= 1) expectedSummary = "";
+        else if (names.Count <= 4) expectedSummary = string.Join(", ", names);
+        else expectedSummary = string.Join(", ", names.Take(4)) + " +" + (names.Count - 4) + " more";
+        vm.ActiveDbsSummary.Should().Be(expectedSummary,
+            "invariant 9: ActiveDbsSummary tracks AllActiveDbs (empty if ≤1; " +
+            "comma-joined up to 4; 'A, B, C, D +N more' past 4)");
+
+        // (10) NewValue is cleared when no member is selected and not in
+        // manual mode. Captures §B bug: the field was still showing the
+        // value typed before the 3-way prompt fired even though the
+        // selection got cleared. OnMemberSelected(null) clears _newValue
+        // — any new path that lands the dialog in "no selection" without
+        // routing through OnMemberSelected leaves the bug in.
+        if (!vm.HasSelection && !vm.IsManualMode)
+        {
+            vm.NewValue.Should().BeEmpty(
+                "invariant 10: NewValue must be empty when nothing is " +
+                "selected and not in manual mode");
+        }
     }
 
     // ───────────────────────── helpers ─────────────────────────
