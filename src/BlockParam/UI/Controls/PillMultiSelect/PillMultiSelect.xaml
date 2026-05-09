@@ -127,7 +127,10 @@
     <Grid>
         <ToggleButton x:Name="PillTrigger"
                       Style="{StaticResource PillTriggerStyle}"
-                      IsChecked="{Binding IsOpen, Mode=TwoWay}">
+                      IsChecked="{Binding IsOpen, Mode=TwoWay}"
+                      ToolTip="{Binding SelectionTooltip}"
+                      ToolTipService.InitialShowDelay="600"
+                      ToolTipService.ShowDuration="20000">
             <StackPanel Orientation="Horizontal">
                 <!-- Optional leading icon. Bound to VM.Icon (Geometry?). When
                      null the Path collapses, leaving the label flush left. -->
@@ -250,6 +253,37 @@
                              BorderThickness="0" Background="Transparent"
                              ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                              ScrollViewer.VerticalScrollBarVisibility="Auto">
+                        <!-- "Selected first" grouping. The VM only attaches
+                             a GroupDescription when there's both a selected
+                             AND an unselected item in the snapshot, so the
+                             True group always comes first and we render the
+                             1px divider only above the False group. -->
+                        <ListBox.GroupStyle>
+                            <GroupStyle HidesIfEmpty="True">
+                                <GroupStyle.ContainerStyle>
+                                    <Style TargetType="GroupItem">
+                                        <Setter Property="Template">
+                                            <Setter.Value>
+                                                <ControlTemplate TargetType="GroupItem">
+                                                    <StackPanel>
+                                                        <Border x:Name="GroupDivider"
+                                                                Height="1" Background="#EEF1F4"
+                                                                Margin="8,4"/>
+                                                        <ItemsPresenter/>
+                                                    </StackPanel>
+                                                    <ControlTemplate.Triggers>
+                                                        <DataTrigger Binding="{Binding Name}" Value="True">
+                                                            <Setter TargetName="GroupDivider"
+                                                                    Property="Visibility" Value="Collapsed"/>
+                                                        </DataTrigger>
+                                                    </ControlTemplate.Triggers>
+                                                </ControlTemplate>
+                                            </Setter.Value>
+                                        </Setter>
+                                    </Style>
+                                </GroupStyle.ContainerStyle>
+                            </GroupStyle>
+                        </ListBox.GroupStyle>
                         <ListBox.ItemTemplate>
                             <DataTemplate>
                                 <Grid>

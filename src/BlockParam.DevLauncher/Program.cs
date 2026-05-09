@@ -70,6 +70,13 @@ class Program
             return;
         }
 
+        // --demo-pill                              Interactive multi-PLC pill demo (no auto-close)
+        if (args.Length >= 1 && args[0] == "--demo-pill")
+        {
+            PillMultiSelectCapture.RunDbInteractive();
+            return;
+        }
+
         // --- Parse capture arguments ---
         // --capture <out.png> [<dbName>]          one-shot single scene
         // --capture-script <script.json>          multi-scene JSON-driven

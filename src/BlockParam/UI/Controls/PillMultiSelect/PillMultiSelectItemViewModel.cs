@@ -20,4 +20,17 @@ public class PillMultiSelectItemViewModel : ViewModelBase
         get => _isSelected;
         set => SetProperty(ref _isSelected, value);
     }
+
+    /// <summary>
+    /// Snapshot of <see cref="IsSelected"/> taken when the popup opened.
+    /// Drives the "selected items at the top" ordering — held frozen while
+    /// the popup is open so toggling a checkbox doesn't reshuffle the list
+    /// out from under the user's cursor. Reset on the next popup open.
+    /// </summary>
+    public bool WasSelectedAtSort
+    {
+        get => _wasSelectedAtSort;
+        set => SetProperty(ref _wasSelectedAtSort, value);
+    }
+    private bool _wasSelectedAtSort;
 }

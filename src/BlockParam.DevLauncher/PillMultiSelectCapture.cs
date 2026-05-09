@@ -142,6 +142,73 @@ internal static class PillMultiSelectCapture
     }
 
     /// <summary>
+    /// Interactive demo: opens a normal (chromed, resizable) window hosting
+    /// the multi-PLC pill row pre-seeded with the same fixtures as the
+    /// capture scenes. The window stays up so the user can click pills,
+    /// toggle selections, type in the search box, and watch the overflow
+    /// rules engage in real time.
+    /// </summary>
+    public static void RunDbInteractive()
+    {
+        UiZoomService.ReplaceShared(UiZoomService.CreateEphemeral());
+
+        // Application MUST be constructed before any Window/UserControl —
+        // XAML markup extensions (loc:Loc, StaticResource on theme keys)
+        // resolve against Application.Current. Building the visual tree
+        // first leaves you with un-resolved bindings: blank white window.
+        var app = new Application();
+        app.DispatcherUnhandledException += (_, e) =>
+        {
+            Log.Error(e.Exception, "UNHANDLED EXCEPTION in dispatcher");
+            e.Handled = true;
+        };
+
+        var seeds = new[]
+        {
+            new PlcSeed("PLC_PowerStation", PlcASample, new[] { 10, 99 }),
+            new PlcSeed("PLC_FillerLine", PlcBSample, new[] { 5, 21 }),
+            new PlcSeed("PLC_HVAC", PlcCSample, new[] { 30 }),
+            new PlcSeed("PLC_Utilities", PlcDSample, new[] { 50, 51 }),
+        };
+
+        var wrap = new WrapPanel { Orientation = Orientation.Horizontal };
+        foreach (var seed in seeds)
+            wrap.Children.Add(BuildPlcPill(seed));
+
+        var hint = new TextBlock
+        {
+            Text = "Click any pill to open its dropdown. Toggle selections to watch the "
+                 + "overflow rules engage (full names → DB-numbers → \"+N more\"). "
+                 + "Resize the window narrower to see the WrapPanel reflow.",
+            TextWrapping = TextWrapping.Wrap,
+            Foreground = new SolidColorBrush(Color.FromRgb(0x6B, 0x72, 0x80)),
+            FontSize = 11,
+            Margin = new Thickness(4, 0, 4, 12),
+        };
+
+        var stack = new StackPanel();
+        stack.Children.Add(hint);
+        stack.Children.Add(wrap);
+
+        var host = new Border
+        {
+            Background = new SolidColorBrush(Color.FromRgb(0xF6, 0xF7, 0xF9)),
+            Padding = new Thickness(20, 18, 20, 20),
+            Child = stack,
+        };
+
+        var window = new Window
+        {
+            Title = "PillMultiSelect — interactive demo",
+            Content = host,
+            Width = 900,
+            Height = 320,
+            WindowStartupLocation = WindowStartupLocation.CenterScreen,
+        };
+        app.Run(window);
+    }
+
+    /// <summary>
     /// Multi-PLC datablock demo. Renders four scenes that exercise the
     /// overflow rules (full names below threshold, DB-numbers above, "+N more"
     /// collapse) and the WrapPanel layout for projects with many PLCs.
@@ -237,33 +304,7 @@ internal static class PillMultiSelectCapture
         var wrap = new WrapPanel { Orientation = Orientation.Horizontal };
 
         foreach (var seed in plcs)
-        {
-            var vm = new PillMultiSelectViewModel
-            {
-                Label = seed.Plc,
-                Icon = Geometry.Parse(DatabaseIconPath),
-            };
-            foreach (var (name, num) in seed.Dbs)
-                vm.AddItem(new PillMultiSelectItemViewModel(name, $"DB{num}", num));
-            foreach (var num in seed.SelectedDbNumbers)
-            {
-                var item = vm.Items.FirstOrDefault(i => (int?)i.Payload == num);
-                if (item != null) item.IsSelected = true;
-            }
-
-            // Wire DB overflow rules: full names below threshold, DB-numbers
-            // above (count OR chars), then collapse with "+N more".
-            var options = PillOverflowOptions.DataBlockDefault();
-            vm.DisplayFormatter = selected => PillOverflowFormatter.Format(selected, options);
-
-            var control = new PillMultiSelect
-            {
-                DataContext = vm,
-                HorizontalAlignment = HorizontalAlignment.Left,
-                Margin = new Thickness(0, 0, 8, 8),
-            };
-            wrap.Children.Add(control);
-        }
+            wrap.Children.Add(BuildPlcPill(seed));
 
         var host = new Border
         {
@@ -291,6 +332,41 @@ internal static class PillMultiSelectCapture
             window.SizeToContent = SizeToContent.Height;
         }
         return window;
+    }
+
+    /// <summary>
+    /// Constructs one configured <see cref="PillMultiSelect"/> from a PLC
+    /// seed. Used by both the headless capture scenes and the interactive
+    /// demo so the layout, fixtures, and overflow rules stay in sync.
+    /// </summary>
+    private static PillMultiSelect BuildPlcPill(PlcSeed seed)
+    {
+        var vm = new PillMultiSelectViewModel
+        {
+            Label = seed.Plc,
+            Icon = Geometry.Parse(DatabaseIconPath),
+        };
+        foreach (var (name, num) in seed.Dbs)
+            vm.AddItem(new PillMultiSelectItemViewModel(name, $"DB{num}", num));
+        foreach (var num in seed.SelectedDbNumbers)
+        {
+            var item = vm.Items.FirstOrDefault(i => (int?)i.Payload == num);
+            if (item != null) item.IsSelected = true;
+        }
+
+        var options = PillOverflowOptions.DataBlockDefault();
+        vm.DisplayFormatter = selected => PillOverflowFormatter.Format(selected, options);
+        // Hover the pill to recover the full DB names that overflow has
+        // collapsed/abbreviated — opt-in via TooltipFormatter so callers
+        // who don't want hover hints simply leave it null.
+        vm.TooltipFormatter = PillTooltipFormatters.FullNames;
+
+        return new PillMultiSelect
+        {
+            DataContext = vm,
+            HorizontalAlignment = HorizontalAlignment.Left,
+            Margin = new Thickness(0, 0, 8, 8),
+        };
     }
 
     private static (Window window, PillMultiSelect control, PillMultiSelectViewModel vm) BuildSceneWindow()
