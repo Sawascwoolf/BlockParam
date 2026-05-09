@@ -53,6 +53,14 @@ internal static class PillMultiSelectCapture
     /// </summary>
     private record PlcSeed(string Plc, (string Name, int Number)[] Dbs, int[] SelectedDbNumbers);
 
+    /// <summary>
+    /// One step in a headless-capture sequence: a closure that builds the
+    /// window for the scene and a closure that snaps it to disk once layout
+    /// has settled. Both run on the WPF dispatcher thread inside
+    /// <see cref="RunCaptureScenes"/>.
+    /// </summary>
+    private sealed record CaptureScene(Func<Window> Build, Action<Window> Capture);
+
     private static readonly (string Name, int Number)[] PlcASample =
     {
         ("DB_ProcessControl_HighPriority", 10),
@@ -86,59 +94,40 @@ internal static class PillMultiSelectCapture
 
     public static void Run(string outDir)
     {
-        var en = new CultureInfo("en-US");
-        Thread.CurrentThread.CurrentCulture = en;
-        Thread.CurrentThread.CurrentUICulture = en;
-        CultureInfo.DefaultThreadCurrentCulture = en;
-        CultureInfo.DefaultThreadCurrentUICulture = en;
-        UiZoomService.ReplaceShared(UiZoomService.CreateEphemeral());
-
-        Directory.CreateDirectory(outDir);
-
-        var app = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
-        app.DispatcherUnhandledException += (_, e) =>
-        {
-            Log.Error(e.Exception, "UNHANDLED EXCEPTION");
-            e.Handled = true;
-        };
-
-        Action? runNext = null;
-        var scenes = new (string File, string[] SelectedAbbrevs, bool Open)[]
+        var sceneData = new (string File, string[] Selected, bool Open)[]
         {
             ("01_pill_closed.png", new[] { "AKO", "EKR", "GWE" }, false),
             ("02_pill_open.png",   new[] { "AKO", "BSC" },        true),
         };
 
-        var idx = 0;
-        runNext = () =>
+        var scenes = new List<CaptureScene>();
+        foreach (var (file, selected, open) in sceneData)
         {
-            if (idx >= scenes.Length) { app.Shutdown(); return; }
-            var scene = scenes[idx++];
-
-            var (window, control, vm) = BuildSceneWindow();
-            ApplySelection(vm, scene.SelectedAbbrevs);
-            vm.IsOpen = scene.Open;
-
-            window.ContentRendered += (_, _) =>
-            {
-                window.Dispatcher.BeginInvoke(new Action(() =>
+            // Build creates the window AND captures the inner control into
+            // a closure variable; Capture then reads that variable to do
+            // the composite render. Each iteration gets its own `control`.
+            PillMultiSelect? control = null;
+            scenes.Add(new CaptureScene(
+                Build: () =>
                 {
-                    PumpLayout(window);
-                    var outPath = Path.Combine(outDir, scene.File);
-                    if (scene.Open)
-                        CompositeTriggerAndPopupToPng(window, control, outPath, scale: 2.0);
+                    var (window, c, vm) = BuildSceneWindow();
+                    ApplySelection(vm, selected);
+                    vm.IsOpen = open;
+                    control = c;
+                    return window;
+                },
+                Capture: window =>
+                {
+                    var outPath = Path.Combine(outDir, file);
+                    if (open)
+                        CompositeTriggerAndPopupToPng(window, control!, outPath, scale: 2.0);
                     else
                         Program.CaptureWindowToPng(window, outPath, scale: 2.0);
                     Log.Information("Pill scene saved: {Path}", outPath);
-                    window.Close();
-                    runNext!();
-                }), DispatcherPriority.Background);
-            };
-            window.Show();
-        };
+                }));
+        }
 
-        runNext();
-        app.Run();
+        RunCaptureScenes(outDir, scenes);
     }
 
     /// <summary>
@@ -215,16 +204,7 @@ internal static class PillMultiSelectCapture
     /// </summary>
     public static void RunDb(string outDir)
     {
-        var en = new CultureInfo("en-US");
-        Thread.CurrentThread.CurrentCulture = en;
-        Thread.CurrentThread.CurrentUICulture = en;
-        CultureInfo.DefaultThreadCurrentCulture = en;
-        CultureInfo.DefaultThreadCurrentUICulture = en;
-        UiZoomService.ReplaceShared(UiZoomService.CreateEphemeral());
-
-        Directory.CreateDirectory(outDir);
-
-        var scenes = new (string File, PlcSeed[] Plcs)[]
+        var sceneData = new (string File, PlcSeed[] Plcs)[]
         {
             // Below thresholds: full DB names rendered.
             ("03_db_short.png", new[]
@@ -257,6 +237,44 @@ internal static class PillMultiSelectCapture
             }),
         };
 
+        var scenes = new List<CaptureScene>();
+        foreach (var (file, plcs) in sceneData)
+        {
+            // Wrap scenario uses a narrower host so the second row actually appears.
+            var width = file.Contains("wrap") ? 720.0 : double.NaN;
+            scenes.Add(new CaptureScene(
+                Build: () => BuildPlcRowWindow(plcs, width),
+                Capture: window =>
+                {
+                    var outPath = Path.Combine(outDir, file);
+                    Program.CaptureWindowToPng(window, outPath, scale: 2.0);
+                    Log.Information("DB pill scene saved: {Path}", outPath);
+                }));
+        }
+
+        RunCaptureScenes(outDir, scenes);
+    }
+
+    /// <summary>
+    /// Shared headless-capture orchestration. Pins en-US so screenshots are
+    /// language-stable, sets up an explicit-shutdown <see cref="Application"/>
+    /// with a logging exception handler, then drives each scene through the
+    /// dispatcher: build → wait for ContentRendered → pump layout → capture →
+    /// close → next. Each scene encapsulates the one-off bits (which window
+    /// to build, where the PNG goes) so this method is the only place the
+    /// boilerplate lives.
+    /// </summary>
+    private static void RunCaptureScenes(string outDir, IReadOnlyList<CaptureScene> scenes)
+    {
+        var en = new CultureInfo("en-US");
+        Thread.CurrentThread.CurrentCulture = en;
+        Thread.CurrentThread.CurrentUICulture = en;
+        CultureInfo.DefaultThreadCurrentCulture = en;
+        CultureInfo.DefaultThreadCurrentUICulture = en;
+        UiZoomService.ReplaceShared(UiZoomService.CreateEphemeral());
+
+        Directory.CreateDirectory(outDir);
+
         var app = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
         app.DispatcherUnhandledException += (_, e) =>
         {
@@ -268,20 +286,15 @@ internal static class PillMultiSelectCapture
         Action? runNext = null;
         runNext = () =>
         {
-            if (idx >= scenes.Length) { app.Shutdown(); return; }
+            if (idx >= scenes.Count) { app.Shutdown(); return; }
             var scene = scenes[idx++];
-            // Wrap scenario uses a narrower host so the second row actually appears.
-            var width = scene.File.Contains("wrap") ? 720.0 : double.NaN;
-            var window = BuildPlcRowWindow(scene.Plcs, width);
-
+            var window = scene.Build();
             window.ContentRendered += (_, _) =>
             {
                 window.Dispatcher.BeginInvoke(new Action(() =>
                 {
                     PumpLayout(window);
-                    var outPath = Path.Combine(outDir, scene.File);
-                    Program.CaptureWindowToPng(window, outPath, scale: 2.0);
-                    Log.Information("DB pill scene saved: {Path}", outPath);
+                    scene.Capture(window);
                     window.Close();
                     runNext!();
                 }), DispatcherPriority.Background);

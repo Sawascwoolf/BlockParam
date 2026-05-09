@@ -27,6 +27,8 @@ public class PillMultiSelectViewModel : ViewModelBase
     private string? _searchPlaceholder;
     private Geometry? _icon;
     private bool _sortSelectedFirst = true;
+    private Func<IReadOnlyList<PillMultiSelectItemViewModel>, string>? _displayFormatter;
+    private Func<IReadOnlyList<PillMultiSelectItemViewModel>, string?>? _tooltipFormatter;
     private readonly ListCollectionView _filteredView;
 
     public PillMultiSelectViewModel()
@@ -150,7 +152,6 @@ public class PillMultiSelectViewModel : ViewModelBase
             OnPropertyChanged(nameof(SelectedAbbreviationsText));
         }
     }
-    private Func<IReadOnlyList<PillMultiSelectItemViewModel>, string>? _displayFormatter;
 
     /// <summary>
     /// What the trigger pill renders for its selection summary. Routes
@@ -187,7 +188,6 @@ public class PillMultiSelectViewModel : ViewModelBase
             OnPropertyChanged(nameof(SelectionTooltip));
         }
     }
-    private Func<IReadOnlyList<PillMultiSelectItemViewModel>, string?>? _tooltipFormatter;
 
     /// <summary>
     /// Bound to the trigger pill's <c>ToolTip</c>. Null when the formatter

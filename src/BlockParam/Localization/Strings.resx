@@ -852,6 +852,10 @@ Compile the block now?</value>
   <data name="PillMultiSelect_Reset" xml:space="preserve">
     <value>Reset</value>
   </data>
+  <data name="PillMultiSelect_Clear" xml:space="preserve">
+    <value>Clear</value>
+    <comment>Tooltip on the X button that wipes the trigger pill's selection</comment>
+  </data>
   <data name="PillMultiSelect_PlusMore" xml:space="preserve">
     <value>+{0} more</value>
     <comment>{0} = number of hidden selected items past the visible threshold</comment>
