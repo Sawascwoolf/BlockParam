@@ -56,6 +56,13 @@ class Program
             return;
         }
 
+        // --capture-pill <out-dir>                 PillMultiSelect demo: closed + open popup
+        if (args.Length >= 2 && args[0] == "--capture-pill")
+        {
+            PillMultiSelectCapture.Run(Path.GetFullPath(args[1]));
+            return;
+        }
+
         // --- Parse capture arguments ---
         // --capture <out.png> [<dbName>]          one-shot single scene
         // --capture-script <script.json>          multi-scene JSON-driven

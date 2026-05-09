@@ -842,4 +842,14 @@ Compile the block now?</value>
   <data name="ConfigEditor_ExportFile_NotImplemented" xml:space="preserve">
     <value>Export of '{0}' is not yet implemented.</value>
   </data>
+  <!-- PillMultiSelect control (popup search box + footer actions) -->
+  <data name="PillMultiSelect_SearchPlaceholder" xml:space="preserve">
+    <value>Search...</value>
+  </data>
+  <data name="PillMultiSelect_SelectAll" xml:space="preserve">
+    <value>Select all</value>
+  </data>
+  <data name="PillMultiSelect_Reset" xml:space="preserve">
+    <value>Reset</value>
+  </data>
 </root>
