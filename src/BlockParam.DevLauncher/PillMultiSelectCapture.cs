@@ -1,6 +1,8 @@
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using System.Linq;
 using System.Threading;
 using System.Windows;
 using System.Windows.Controls;
@@ -40,6 +42,47 @@ internal static class PillMultiSelectCapture
     // Material person icon (24x24).
     private const string PersonIconPath =
         "M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z";
+
+    // Material database / chip icon (24x24) — per-PLC pill leading glyph.
+    private const string DatabaseIconPath =
+        "M12 3C7.58 3 4 4.79 4 7v10c0 2.21 3.59 4 8 4s8-1.79 8-4V7c0-2.21-3.58-4-8-4zm0 2c3.87 0 6 1.5 6 2s-2.13 2-6 2-6-1.5-6-2 2.13-2 6-2zm0 14c-3.87 0-6-1.5-6-2v-2.4c1.43.86 3.6 1.4 6 1.4s4.57-.54 6-1.4V17c0 .5-2.13 2-6 2zm0-5c-3.87 0-6-1.5-6-2V9.6c1.43.86 3.6 1.4 6 1.4s4.57-.54 6-1.4V12c0 .5-2.13 2-6 2z";
+
+    /// <summary>
+    /// Per-PLC seed for the multi-PLC demo scenes: PLC name + a list of
+    /// (db name, db number) pairs + which numbers are selected.
+    /// </summary>
+    private record PlcSeed(string Plc, (string Name, int Number)[] Dbs, int[] SelectedDbNumbers);
+
+    private static readonly (string Name, int Number)[] PlcASample =
+    {
+        ("DB_ProcessControl_HighPriority", 10),
+        ("DB_ProcessControl_LowPriority", 11),
+        ("DB_PumpStation_001", 42),
+        ("DB_ConfigParams", 99),
+        ("DB_DiagnosticData", 100),
+        ("DB_RecipeManager", 101),
+        ("DB_TankSettings_3", 200),
+    };
+
+    private static readonly (string Name, int Number)[] PlcBSample =
+    {
+        ("DB_ConveyorControl", 5),
+        ("DB_LabelPrinter", 6),
+        ("DB_QualityCheck", 20),
+        ("DB_PackagingLine", 21),
+    };
+
+    private static readonly (string Name, int Number)[] PlcCSample =
+    {
+        ("DB_HVAC_Zone1", 30),
+        ("DB_HVAC_Zone2", 31),
+    };
+
+    private static readonly (string Name, int Number)[] PlcDSample =
+    {
+        ("DB_AirCompressor", 50),
+        ("DB_WaterChiller", 51),
+    };
 
     public static void Run(string outDir)
     {
@@ -96,6 +139,158 @@ internal static class PillMultiSelectCapture
 
         runNext();
         app.Run();
+    }
+
+    /// <summary>
+    /// Multi-PLC datablock demo. Renders four scenes that exercise the
+    /// overflow rules (full names below threshold, DB-numbers above, "+N more"
+    /// collapse) and the WrapPanel layout for projects with many PLCs.
+    /// </summary>
+    public static void RunDb(string outDir)
+    {
+        var en = new CultureInfo("en-US");
+        Thread.CurrentThread.CurrentCulture = en;
+        Thread.CurrentThread.CurrentUICulture = en;
+        CultureInfo.DefaultThreadCurrentCulture = en;
+        CultureInfo.DefaultThreadCurrentUICulture = en;
+        UiZoomService.ReplaceShared(UiZoomService.CreateEphemeral());
+
+        Directory.CreateDirectory(outDir);
+
+        var scenes = new (string File, PlcSeed[] Plcs)[]
+        {
+            // Below thresholds: full DB names rendered.
+            ("03_db_short.png", new[]
+            {
+                new PlcSeed("PLC_PowerStation", PlcASample, new[] { 99 }),
+            }),
+            // Char-threshold trip: 3 long names → switch to DB-numbers.
+            ("04_db_chars_overflow.png", new[]
+            {
+                new PlcSeed("PLC_PowerStation", PlcASample, new[] { 10, 42, 100 }),
+            }),
+            // Count + collapse trip: 6 selected → DB-numbers AND "+N more".
+            ("05_db_count_overflow.png", new[]
+            {
+                new PlcSeed("PLC_PowerStation", PlcASample, new[] { 10, 11, 42, 99, 100, 200 }),
+            }),
+            // Two PLCs side by side, each carrying its own selection.
+            ("06_db_multi_plc.png", new[]
+            {
+                new PlcSeed("PLC_PowerStation", PlcASample, new[] { 10, 99 }),
+                new PlcSeed("PLC_FillerLine", PlcBSample, new[] { 5, 21 }),
+            }),
+            // Four PLCs — WrapPanel demonstrates row-2 wrap on a narrower host.
+            ("07_db_wrap.png", new[]
+            {
+                new PlcSeed("PLC_PowerStation", PlcASample, new[] { 10, 11, 42, 99, 100, 200 }),
+                new PlcSeed("PLC_FillerLine", PlcBSample, new[] { 5, 21 }),
+                new PlcSeed("PLC_HVAC", PlcCSample, new[] { 30 }),
+                new PlcSeed("PLC_Utilities", PlcDSample, new[] { 50, 51 }),
+            }),
+        };
+
+        var app = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
+        app.DispatcherUnhandledException += (_, e) =>
+        {
+            Log.Error(e.Exception, "UNHANDLED EXCEPTION");
+            e.Handled = true;
+        };
+
+        var idx = 0;
+        Action? runNext = null;
+        runNext = () =>
+        {
+            if (idx >= scenes.Length) { app.Shutdown(); return; }
+            var scene = scenes[idx++];
+            // Wrap scenario uses a narrower host so the second row actually appears.
+            var width = scene.File.Contains("wrap") ? 720.0 : double.NaN;
+            var window = BuildPlcRowWindow(scene.Plcs, width);
+
+            window.ContentRendered += (_, _) =>
+            {
+                window.Dispatcher.BeginInvoke(new Action(() =>
+                {
+                    PumpLayout(window);
+                    var outPath = Path.Combine(outDir, scene.File);
+                    Program.CaptureWindowToPng(window, outPath, scale: 2.0);
+                    Log.Information("DB pill scene saved: {Path}", outPath);
+                    window.Close();
+                    runNext!();
+                }), DispatcherPriority.Background);
+            };
+            window.Show();
+        };
+
+        runNext();
+        app.Run();
+    }
+
+    /// <summary>
+    /// Builds a chromeless host whose content is a WrapPanel of one
+    /// <see cref="PillMultiSelect"/> per supplied PLC seed. Each pill carries
+    /// the PLC name as its label and a <see cref="PillOverflowFormatter"/>
+    /// configured for the DB defaults.
+    /// </summary>
+    private static Window BuildPlcRowWindow(IReadOnlyList<PlcSeed> plcs, double widthOrNaN)
+    {
+        var wrap = new WrapPanel { Orientation = Orientation.Horizontal };
+
+        foreach (var seed in plcs)
+        {
+            var vm = new PillMultiSelectViewModel
+            {
+                Label = seed.Plc,
+                Icon = Geometry.Parse(DatabaseIconPath),
+            };
+            foreach (var (name, num) in seed.Dbs)
+                vm.AddItem(new PillMultiSelectItemViewModel(name, $"DB{num}", num));
+            foreach (var num in seed.SelectedDbNumbers)
+            {
+                var item = vm.Items.FirstOrDefault(i => (int?)i.Payload == num);
+                if (item != null) item.IsSelected = true;
+            }
+
+            // Wire DB overflow rules: full names below threshold, DB-numbers
+            // above (count OR chars), then collapse with "+N more".
+            var options = PillOverflowOptions.DataBlockDefault();
+            vm.DisplayFormatter = selected => PillOverflowFormatter.Format(selected, options);
+
+            var control = new PillMultiSelect
+            {
+                DataContext = vm,
+                HorizontalAlignment = HorizontalAlignment.Left,
+                Margin = new Thickness(0, 0, 8, 8),
+            };
+            wrap.Children.Add(control);
+        }
+
+        var host = new Border
+        {
+            Background = new SolidColorBrush(Color.FromRgb(0xF6, 0xF7, 0xF9)),
+            Padding = new Thickness(20, 20, 20, 12),
+            Child = wrap,
+        };
+
+        var window = new Window
+        {
+            Content = host,
+            WindowStyle = WindowStyle.None,
+            ResizeMode = ResizeMode.NoResize,
+            ShowInTaskbar = false,
+            AllowsTransparency = true,
+            Background = Brushes.Transparent,
+        };
+        if (double.IsNaN(widthOrNaN))
+        {
+            window.SizeToContent = SizeToContent.WidthAndHeight;
+        }
+        else
+        {
+            window.Width = widthOrNaN;
+            window.SizeToContent = SizeToContent.Height;
+        }
+        return window;
     }
 
     private static (Window window, PillMultiSelect control, PillMultiSelectViewModel vm) BuildSceneWindow()

@@ -1,3 +1,5 @@
+using System;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Collections.Specialized;
 using System.ComponentModel;
@@ -98,12 +100,38 @@ public class PillMultiSelectViewModel : ViewModelBase
     public bool HasSelection => SelectedCount > 0;
 
     /// <summary>
-    /// Comma-joined abbreviations of the selected items, in selection order.
-    /// Drives the trigger pill's middle-text region — matches the reference
-    /// screenshot's "AKO, BSC" / "AKO, EKR, GWE" rendering.
+    /// Custom display strategy for the trigger pill's middle-text region.
+    /// Default (when null) is "comma-joined abbreviations of selected items".
+    /// Callers with overflow concerns (long DB names, many entries) set this
+    /// to <see cref="PillOverflowFormatter.Format"/> bound to a configured
+    /// <see cref="PillOverflowOptions"/>.
     /// </summary>
-    public string SelectedAbbreviationsText =>
-        string.Join(", ", Items.Where(i => i.IsSelected).Select(i => i.Abbreviation));
+    public Func<IReadOnlyList<PillMultiSelectItemViewModel>, string>? DisplayFormatter
+    {
+        get => _displayFormatter;
+        set
+        {
+            _displayFormatter = value;
+            OnPropertyChanged(nameof(SelectedAbbreviationsText));
+        }
+    }
+    private Func<IReadOnlyList<PillMultiSelectItemViewModel>, string>? _displayFormatter;
+
+    /// <summary>
+    /// What the trigger pill renders for its selection summary. Routes
+    /// through <see cref="DisplayFormatter"/> when one is set; otherwise
+    /// falls back to the simple comma-join used by the reference design.
+    /// </summary>
+    public string SelectedAbbreviationsText
+    {
+        get
+        {
+            var selected = Items.Where(i => i.IsSelected).ToList();
+            return _displayFormatter != null
+                ? _displayFormatter(selected)
+                : string.Join(", ", selected.Select(i => i.Abbreviation));
+        }
+    }
 
     public ICommand ToggleOpenCommand { get; }
     public ICommand SelectAllCommand { get; }

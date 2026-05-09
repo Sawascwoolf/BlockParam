@@ -63,6 +63,13 @@ class Program
             return;
         }
 
+        // --capture-pill-db <out-dir>              Multi-PLC DB pill demo (overflow + wrap)
+        if (args.Length >= 2 && args[0] == "--capture-pill-db")
+        {
+            PillMultiSelectCapture.RunDb(Path.GetFullPath(args[1]));
+            return;
+        }
+
         // --- Parse capture arguments ---
         // --capture <out.png> [<dbName>]          one-shot single scene
         // --capture-script <script.json>          multi-scene JSON-driven
