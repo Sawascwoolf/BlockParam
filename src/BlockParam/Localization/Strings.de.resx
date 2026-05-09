@@ -332,7 +332,6 @@ Datenbaustein jetzt kompilieren?</value></data>
   <data name="Dialog_SwitchDb_Empty" xml:space="preserve"><value>Kein passender DB.</value></data>
   <data name="Dialog_SwitchDb_InstanceBadge" xml:space="preserve"><value>Instanz</value></data>
   <data name="Dialog_SwitchDb_SoloTooltip" xml:space="preserve"><value>Nur diesen DB anzeigen (andere abwählen)</value></data>
-  <data name="Dialog_ActiveDbsSummary_Tooltip" xml:space="preserve"><value>Alle in diesem Dialog aktiven Datenbausteine. Über die Auswahl (links) hinzufügen oder entfernen.</value></data>
   <data name="Dialog_ActiveDbChip_Close_Tooltip" xml:space="preserve"><value>Diesen Datenbaustein aus dem Dialog entfernen</value></data>
   <data name="Dialog_ActiveDbChip_Solo_Tooltip" xml:space="preserve"><value>Nur zu diesem Datenbaustein wechseln (andere schließen)</value></data>
   <data name="Dialog_SwitchDb_DiscardConfirm_Title" xml:space="preserve"><value>Vorgemerkte Änderungen verwerfen?</value></data>

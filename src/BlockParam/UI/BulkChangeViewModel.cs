@@ -398,7 +398,6 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         if (dbsChanged) RebuildAfterActiveSetChanged();
         if (stashesChanged) SyncStashedDbsCollection();
         OnPropertyChanged(nameof(HasMultipleActiveDbs));
-        OnPropertyChanged(nameof(ActiveDbsSummary));
     }
 
     public string Title
@@ -1003,25 +1002,6 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     public bool HasMultipleActiveDbs => _activeDbs.Count > 1;
 
     /// <summary>
-    /// Comma-joined list of all active DB names, kept for tooltip /
-    /// accessibility surfaces that want the full set as plain text. The
-    /// toolbar UI itself renders <see cref="ActiveDbChips"/> instead so
-    /// each DB has its own × close affordance.
-    /// </summary>
-    public string ActiveDbsSummary
-    {
-        get
-        {
-            if (_activeDbs.Count <= 1) return "";
-            var names = _activeDbs.Select(d => d.Info.Name).ToList();
-            const int maxShown = 4;
-            if (names.Count <= maxShown)
-                return string.Join(", ", names);
-            return $"{string.Join(", ", names.Take(maxShown))} +{names.Count - maxShown} more";
-        }
-    }
-
-    /// <summary>
     /// Flat list of chips, one per active DB. Useful for tests and any code
     /// that needs to enumerate every chip without descending into groups.
     /// Use <see cref="ActiveDbChipGroups"/> for the toolbar UI — it bundles
@@ -1453,7 +1433,6 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         RefreshFlatList();
         RebuildActiveDbChips();
         OnPropertyChanged(nameof(HasMultipleActiveDbs));
-        OnPropertyChanged(nameof(ActiveDbsSummary));
         OnPropertyChanged(nameof(SelectedFlatMember));
         OnPropertyChanged(nameof(SelectedScope));
         OnPropertyChanged(nameof(HasSelection));

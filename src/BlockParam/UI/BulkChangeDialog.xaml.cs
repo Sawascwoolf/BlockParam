@@ -30,11 +30,6 @@ public partial class BulkChangeDialog : Window
     }
 
     private bool _suppressSelectionEvents;
-    // Set true while OnDbSwitcherSearchKeyDown navigates into the result list
-    // — prevents the resulting SelectionChanged from being interpreted as a
-    // user-initiated switch (#59 review: Down arrow used to accidentally
-    // switch to the first DB).
-    private bool _suppressDbSwitcherSelectionChanged;
 
     // Inspector collapse: remember the expanded width so we can restore it.
     // 340 matches the XAML default; overwritten once the user resizes.
@@ -1160,13 +1155,7 @@ public partial class BulkChangeDialog : Window
             case Key.Down:
                 if (DbSwitcherList.Items.Count > 0)
                 {
-                    // Highlight the first row and move focus to it. The
-                    // SelectionChanged that fires here is *navigation*, not
-                    // a user pick — gate it so the switch only triggers on
-                    // explicit Enter / mouse click.
-                    _suppressDbSwitcherSelectionChanged = true;
-                    try { DbSwitcherList.SelectedIndex = 0; }
-                    finally { _suppressDbSwitcherSelectionChanged = false; }
+                    DbSwitcherList.SelectedIndex = 0;
                     var firstContainer = (ListBoxItem?)DbSwitcherList.ItemContainerGenerator.ContainerFromIndex(0);
                     firstContainer?.Focus();
                     e.Handled = true;
@@ -1201,27 +1190,6 @@ public partial class BulkChangeDialog : Window
             picked.IsActive = !picked.IsActive;
             e.Handled = true;
         }
-    }
-
-    /// <summary>
-    /// Legacy single-select handler retained until the dropdown is fully
-    /// converted to multi-select interactions. The XAML no longer wires
-    /// SelectionChanged to this method, so it's a dead branch — kept only
-    /// for reference / safe cleanup in a follow-up.
-    /// </summary>
-    private void OnDbSwitcherSelectionChanged(object sender, SelectionChangedEventArgs e)
-    {
-        if (_suppressDbSwitcherSelectionChanged) return;
-        if (DataContext is not BulkChangeViewModel vm) return;
-        if (sender is not ListBox lb) return;
-        if (lb.SelectedItem is not Models.DataBlockSummary picked) return;
-
-        // Defer so the popup can absorb the StaysOpen=False close gracefully.
-        Dispatcher.BeginInvoke(new Action(() =>
-        {
-            vm.SwitchToDataBlock(picked);
-            lb.SelectedItem = null;
-        }), System.Windows.Threading.DispatcherPriority.Background);
     }
 
     /// <summary>

@@ -398,43 +398,6 @@ public class BulkChangeViewModelInvariantTests
     }
 
     [Fact]
-    public void Switch_LegacyApi_OneActiveWithEdits_PromptCancel_StaysOnOriginalNoStash()
-    {
-        // Row 13 — §B: legacy SwitchToDataBlock variant of the Cancel branch.
-        // Row 11 covers Cancel via dropdown toggle; Row 5 covers Cancel via
-        // chip-close. This row pins the third user-reachable switch gesture
-        // (the SwitchToDataBlock(summary) entry point used by the dropdown
-        // row-click after the prompt window resolved) so a regression in any
-        // one path can't sneak past the matrix.
-        var env = new ActiveSetTestBuilder()
-            .WithAnchor("flat-db.xml")
-            .WithDropdownPeer("nested-struct-db.xml")
-            .WithPromptResults(YesNoCancelResult.Cancel)
-            .Build();
-
-        var anchorLeaf = env.Vm.RootMembers.SelectMany(r => new[] { r }.Concat(r.AllDescendants()))
-            .First(n => n.IsLeaf && !string.IsNullOrEmpty(n.StartValue));
-        var pendingValue = anchorLeaf.StartValue == "0" ? "1" : "0";
-        anchorLeaf.PendingValue = pendingValue;
-        var pendingPath = anchorLeaf.Path;
-
-        var nestedSummary = new DataBlockSummary("NestedStructDB", "");
-        var switched = env.Vm.SwitchToDataBlock(nestedSummary);
-
-        switched.Should().BeFalse("Cancel must reject the switch");
-        env.Vm.AllActiveDbs.Should().HaveCount(1);
-        env.Vm.AllActiveDbs[0].Info.Name.Should().Be("FlatDB");
-        env.Vm.HasStashedDbs.Should().BeFalse("Cancel does not stash");
-
-        var stillPending = env.Vm.RootMembers
-            .SelectMany(r => new[] { r }.Concat(r.AllDescendants()))
-            .First(n => n.IsLeaf && n.Path == pendingPath);
-        stillPending.PendingValue.Should().Be(pendingValue, "edit survives Cancel");
-        env.Mbx.AskYesNoCancelCallCount.Should().Be(1);
-        AssertInvariants(env.Vm);
-    }
-
-    [Fact]
     public void Remove_ChipCloseAnchor_CrossPlc_PeerBecomesAnchor_PlcDisplayRotates()
     {
         // Row 14 — §H2 + §I: chip-× the anchor in a 2-DB cross-PLC session

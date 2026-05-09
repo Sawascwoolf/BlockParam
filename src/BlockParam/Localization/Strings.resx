@@ -841,12 +841,6 @@ Closing the dialog will discard them. Close anyway?</value>
   <data name="Dialog_SwitchDb_SoloTooltip" xml:space="preserve">
     <value>Show only this DB (uncheck the others)</value>
   </data>
-  <!-- Tooltip on the toolbar's comma-joined active-DB list (#58 peer-mode).
-       Helps users who hover the summary read the full unabbreviated set
-       even when "+N more" truncated it. -->
-  <data name="Dialog_ActiveDbsSummary_Tooltip" xml:space="preserve">
-    <value>All data blocks currently active in this dialog. Open the picker (left) to add or remove.</value>
-  </data>
   <!-- Tooltip on each active-DB chip's × close button. The button is
        disabled when the chip is the last remaining DB (the dialog must
        always have at least one). -->
