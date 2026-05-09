@@ -28,7 +28,10 @@ namespace BlockParam.Tests;
 ///      (single-DB → flat top-level; multi-DB → exactly N synthetic
 ///      <c>Datatype="DB"</c> roots, one per active DB);
 ///   4. <c>HasStashedDbs == (StashedDbs.Count &gt; 0)</c>;
-///   5. anchor's chip group's PlcName == <c>CurrentPlcName</c>.
+///   5. anchor's chip group's PlcName == <c>CurrentPlcName</c>;
+///   6. every <c>PendingEdits</c> entry's <c>Node</c> is reachable from
+///      the live <c>RootMembers</c> tree — i.e. removing a DB from the
+///      active set must vacate that DB's leaves from the bound list.
 /// </summary>
 public class BulkChangeViewModelInvariantTests
 {
@@ -285,6 +288,105 @@ public class BulkChangeViewModelInvariantTests
     }
 
     [Fact]
+    public void DropdownRow_ToggleToAdd_AnchorHasEdits_PromptCancel_LeavesActiveSetUnchanged()
+    {
+        // Row 11 — captures observed bug on PR #74 §B repro:
+        // Single-DB session (anchor A with pending edits). User opens the
+        // switcher dropdown and toggles peer B's IsActive=true. A 3-way
+        // prompt fires for A's pending edits. User picks Cancel.
+        //
+        // Expected: active set stays [A]; B is NOT added; tree shape and
+        // anchor's pending edit are byte-identical to the pre-toggle state.
+        // Reported behaviour: active set ends up [A, B] — the dropdown
+        // toggle mutates _activeDbs before the prompt resolves and Cancel
+        // doesn't roll the mutation back.
+        var env = new ActiveSetTestBuilder()
+            .WithAnchor("flat-db.xml")
+            .WithDropdownPeer("nested-struct-db.xml")
+            .WithPendingEditsOn("FlatDB", count: 1)
+            .WithPromptResults(YesNoCancelResult.Cancel)
+            .Build();
+
+        var anchorLeaf = FindFirstPendingLeaf(env.Vm, "FlatDB");
+        var pendingValue = anchorLeaf.PendingValue;
+
+        env.Vm.OpenDataBlocksDropdownCommand.Execute(null);
+        var peerRow = env.Vm.FilteredDataBlockItems.First(i => i.Name == "NestedStructDB");
+        peerRow.IsActive = true;
+
+        env.Vm.AllActiveDbs.Should().HaveCount(1, "Cancel must leave the active set untouched");
+        env.Vm.AllActiveDbs[0].Info.Name.Should().Be("FlatDB");
+        env.Vm.HasStashedDbs.Should().BeFalse("Cancel does not stash");
+        anchorLeaf.PendingValue.Should().Be(pendingValue, "anchor edit survives Cancel");
+        anchorLeaf.IsPendingInlineEdit.Should().BeTrue();
+        AssertInvariants(env.Vm);
+    }
+
+    [Fact]
+    public void DropdownCancel_ThenChipCloseAnchor_PromptKeep_StashesAnchorAndClearsPendingList()
+    {
+        // Row 12 — captures observed bug on PR #74 §B, stacked on top of
+        // Row 11's bug-1 state.
+        //
+        // Sequence (matches the user-reported repro):
+        //   1. Single-DB session: anchor A (FlatDB) with 1 pending edit.
+        //   2. Open dropdown, toggle peer B (NestedStructDB) IsActive=true.
+        //      3-way prompt fires; user picks Cancel.
+        //      → Per Row 11, the active set ends up [A, B] (bug 1).
+        //   3. User then chip-×'s A. 3-way prompt fires; user picks Keep
+        //      (No / Stash).
+        //
+        // Expected: A leaves the active set, A's pending edit moves into
+        // StashedDbs, and PendingEdits drops every entry that referenced A.
+        //
+        // Observed VM-layer behaviour: A leaves the active set (good), but
+        // its pending edits are SILENTLY DROPPED — not migrated to the
+        // stash (HasStashedDbs == False) and not retained anywhere. The
+        // user-visible "pending edits still showing" is then a downstream
+        // UI binding that holds a stale snapshot of the inspector list;
+        // the VM-layer data-loss is the root cause.
+        //
+        // Note: when bug 1 is fixed (Cancel leaves the active set as [A]),
+        // step 3 becomes a chip-× on the only active DB, which is disabled
+        // (Row 4). At that point this test should be re-evaluated — the
+        // bug it captures may disappear as a consequence of fixing #1.
+        var env = new ActiveSetTestBuilder()
+            .WithAnchor("flat-db.xml")
+            .WithDropdownPeer("nested-struct-db.xml")
+            .WithPendingEditsOn("FlatDB", count: 1)
+            .WithPromptResults(
+                YesNoCancelResult.Cancel,   // Cancel the switch / add prompt
+                YesNoCancelResult.No)       // Then Keep on chip-close
+            .Build();
+
+        var anchorLeaf = FindFirstPendingLeaf(env.Vm, "FlatDB");
+        var pendingValue = anchorLeaf.PendingValue;
+
+        // Step 2 — dropdown toggle + Cancel (bug 1 trigger).
+        env.Vm.OpenDataBlocksDropdownCommand.Execute(null);
+        var peerRow = env.Vm.FilteredDataBlockItems.First(i => i.Name == "NestedStructDB");
+        peerRow.IsActive = true;
+
+        // Step 3 — chip-× A. The state is corrupted from step 2 ([A, B]
+        // instead of [A]); A is still the anchor in this corrupted set.
+        var anchorChip = env.Vm.ActiveDbChips.First(c => c.DisplayName == "FlatDB");
+        anchorChip.CloseCommand.Execute(null);
+
+        env.Vm.AllActiveDbs.Should().ContainSingle()
+            .Which.Info.Name.Should().Be("NestedStructDB",
+                "Keep on chip-close removes A from the active set");
+        // The data-loss assertion: A's edits must end up SOMEWHERE — either
+        // in the stash (Keep) or applied (would not be Keep). Currently
+        // they're dropped on the floor.
+        env.Vm.HasStashedDbs.Should().BeTrue("Keep moves pending edits into the stash");
+        env.Vm.StashedDbs.Should().ContainSingle(s => s.DbName == "FlatDB",
+            "A's pending edit must land in the stash dictionary, not be silently dropped");
+        env.Vm.PendingEdits.Should().BeEmpty(
+            "removed DB's pending leaves must vacate the bound PendingEdits list");
+        AssertInvariants(env.Vm);
+    }
+
+    [Fact]
     public void Switch_LegacyApi_OneActiveWithEdits_PromptStash_OriginalStashedRestoredOnReturn()
     {
         // Row 10: legacy SwitchToDataBlock — single-DB session, target = a
@@ -393,6 +495,19 @@ public class BulkChangeViewModelInvariantTests
             anchorGroup.PlcName.Should().Be(vm.CurrentPlcName,
                 "invariant 5: anchor's chip-group PLC name == CurrentPlcName");
         }
+
+        // (6) PendingEdits only references nodes still reachable in the live
+        // tree — removing a DB from the active set must vacate that DB's
+        // leaves from the bound "pending changes" inspector list.
+        var reachableNodes = vm.RootMembers
+            .SelectMany(r => new[] { r }.Concat(r.AllDescendants()))
+            .ToHashSet();
+        var orphanedPaths = vm.PendingEdits
+            .Where(e => !reachableNodes.Contains(e.Node))
+            .Select(e => e.Path)
+            .ToList();
+        orphanedPaths.Should().BeEmpty(
+            "invariant 6: PendingEdits drops nodes whose DB left the active set");
     }
 
     // ───────────────────────── helpers ─────────────────────────
