@@ -3,6 +3,7 @@ using System.Globalization;
 using System.IO;
 using System.Text;
 using System.Text.RegularExpressions;
+using BlockParam.Services;
 
 namespace BlockParam.Diagnostics;
 
@@ -89,9 +90,7 @@ public static class Log
     // computation is cheap and Directory.CreateDirectory is idempotent.
     private static string ResolveLogPath()
     {
-        var dir = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-            "BlockParam", "logs");
+        var dir = AppDirectories.LogsDir;
         Directory.CreateDirectory(dir);
         var version = typeof(Log).Assembly.GetName().Version;
         var fileName = $"bulkchange-v{version}-{DateTime.Now:yyyy-MM-dd}.log";

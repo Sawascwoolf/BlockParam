@@ -1,0 +1,33 @@
+{
+  "version": "1.0",
+  "rules": [
+    {
+      "pathPattern": ".*\\.startTime$",
+      "datatype": "Time",
+      "constraints": { "min": "T#100ms", "max": "T#10s" },
+      "commentTemplate": "Ramp-up time for motor {parent}"
+    },
+    {
+      "pathPattern": ".*\\.maxSpeed$",
+      "datatype": "Real",
+      "constraints": { "min": 0, "max": 1500 }
+    },
+    {
+      "pathPattern": ".*\\.direction$",
+      "datatype": "Int",
+      "constraints": { "allowedValues": [0, 1, 2] },
+      "commentTemplate": "0 = stop, 1 = forward, 2 = reverse"
+    },
+    {
+      "pathPattern": ".*\\.tagName$",
+      "tagTableReference": { "tableName": "MOTOR_TAGS" },
+      "constraints": { "requireTagTableValue": true }
+    },
+    {
+      "pathPattern": ".*\\.thermalCutoff$",
+      "datatype": "Real",
+      "constraints": { "min": 40, "max": 130 },
+      "excludeFromSetpoints": true
+    }
+  ]
+}

@@ -26,6 +26,7 @@ start with [Getting Started](getting-started.md).
 - [`docs/configuration.md`](../configuration.md) — JSON schema reference for rule files.
 - [`docs/example-config.jsonc`](../example-config.jsonc) — annotated sample config.
 - [`docs/admin-license-deployment.md`](../admin-license-deployment.md) — multi-seat license rollout via SCCM / Intune / GPO.
+- [`docs/legal/`](../legal/index.md) — Terms and Conditions, Privacy Policy.
 
 Found a gap or a stale screenshot? Open an issue at
 [github.com/Sawascwoolf/BlockParam/issues](https://github.com/Sawascwoolf/BlockParam/issues).

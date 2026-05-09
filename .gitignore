@@ -51,6 +51,9 @@ Thumbs.db
 ## Claude Code worktrees (agent scratch dirs, separate git worktrees)
 .claude/worktrees/
 
+## Repo-local scratch dir for ad-hoc debug artifacts (copied logs, dumps, etc.).
+.tmp/
+
 ## Claude Code per-developer settings (contain local paths, personal allowlists)
 .claude/settings.json
 .claude/settings.local.json

@@ -191,6 +191,17 @@ Dies kann nicht rückgängig gemacht werden.</value></data>
   <data name="ConfigEditor_Project" xml:space="preserve"><value>Projekt</value></data>
   <data name="ConfigEditor_Local" xml:space="preserve"><value>Lokal</value></data>
   <data name="ConfigEditor_Shared" xml:space="preserve"><value>Gemeinsam</value></data>
+  <data name="ConfigEditor_NewRule_Short" xml:space="preserve"><value>+ Regel</value></data>
+  <data name="ConfigEditor_NewRule_Tooltip" xml:space="preserve"><value>Fügt eine neue Regel zur aktuell ausgewählten Datei hinzu. Ist keine Datei ausgewählt, wird eine neue Datei mit einer Startregel erzeugt.</value></data>
+  <data name="ConfigEditor_NewFile_Short" xml:space="preserve"><value>+ Datei</value></data>
+  <data name="ConfigEditor_NewFile_Tooltip" xml:space="preserve"><value>Erzeugt eine neue Regeldatei mit einer Startregel.</value></data>
+  <data name="ConfigEditor_Import" xml:space="preserve"><value>Importieren...</value></data>
+  <data name="ConfigEditor_Import_Tooltip" xml:space="preserve"><value>Regeldateien importieren (noch nicht implementiert).</value></data>
+  <data name="ConfigEditor_Export" xml:space="preserve"><value>Exportieren...</value></data>
+  <data name="ConfigEditor_Export_Tooltip" xml:space="preserve"><value>Die ausgewählte Regeldatei exportieren (noch nicht implementiert).</value></data>
+  <data name="ConfigEditor_FileActions" xml:space="preserve"><value>Dateiaktionen</value></data>
+  <data name="ConfigEditor_DeleteFile" xml:space="preserve"><value>Datei löschen</value></data>
+  <data name="ConfigEditor_ExportFile" xml:space="preserve"><value>Datei exportieren...</value></data>
   <!-- Inline-Hilfe Tooltips für ConfigEditor-Felder -->
   <data name="ConfigEditor_Help_PathPattern" xml:space="preserve"><value>Regex-Muster für den Elementpfad innerhalb des DB.
 Beispiele:
@@ -296,4 +307,21 @@ Datenbaustein jetzt kompilieren?</value></data>
   <data name="Update_IncludePrereleases" xml:space="preserve"><value>Vorabversionen einbeziehen</value></data>
   <data name="Update_IncludePrereleasesTooltip" xml:space="preserve"><value>Release-Candidate- / Beta-Versionen (z. B. v0.4.0-rc1) als Updates anzeigen.</value></data>
   <data name="Update_ManagedHint" xml:space="preserve"><value>Die Update-Prüfung wird zentral verwaltet und kann lokal nicht geändert werden.</value></data>
+  <!-- Regel-Editor: linke Spalte und Validierung -->
+  <data name="ConfigEditor_NoPattern" xml:space="preserve"><value>(kein Muster)</value></data>
+  <data name="ConfigEditor_RuleSecondary_TagTable" xml:space="preserve"><value>Variablentabelle: {0}</value></data>
+  <data name="ConfigEditor_RuleSecondary_Allowed" xml:space="preserve"><value>Erlaubt: {0}</value></data>
+  <data name="ConfigEditor_RuleSecondary_Comment" xml:space="preserve"><value>Kommentar: {0}</value></data>
+  <data name="ConfigEditor_HeaderSummary_OneRule" xml:space="preserve"><value>1 Regel</value></data>
+  <data name="ConfigEditor_HeaderSummary_NRules" xml:space="preserve"><value>{0} Regeln</value></data>
+  <data name="ConfigEditor_RuleValidation_NeedsPathPattern" xml:space="preserve"><value>Regel in '{0}' benötigt ein Pfadmuster.</value></data>
+  <data name="ConfigEditor_RuleValidation_MinGtMax" xml:space="preserve"><value>Regel '{0}' in '{1}': Min ({2}) muss ≤ Max ({3}) sein.</value></data>
+  <data name="ConfigEditor_NewRule_Failed" xml:space="preserve"><value>Neue Regel konnte nicht erstellt werden: {0}</value></data>
+  <data name="ConfigEditor_NewFile_NoDir" xml:space="preserve"><value>Kein gültiges Speicherverzeichnis verfügbar.</value></data>
+  <data name="ConfigEditor_NewFile_Failed" xml:space="preserve"><value>Neue Datei konnte nicht erstellt werden: {0}</value></data>
+  <data name="ConfigEditor_Duplicate_Failed" xml:space="preserve"><value>Regel konnte nicht dupliziert werden: {0}</value></data>
+  <data name="ConfigEditor_DeleteFile_Failed" xml:space="preserve"><value>Datei kann nicht gelöscht werden: {0}</value></data>
+  <data name="ConfigEditor_Import_NotImplemented" xml:space="preserve"><value>Import ist noch nicht implementiert.</value></data>
+  <data name="ConfigEditor_Export_NotImplemented" xml:space="preserve"><value>Export ist noch nicht implementiert.</value></data>
+  <data name="ConfigEditor_ExportFile_NotImplemented" xml:space="preserve"><value>Export von '{0}' ist noch nicht implementiert.</value></data>
 </root>
