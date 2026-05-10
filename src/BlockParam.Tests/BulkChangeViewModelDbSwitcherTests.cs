@@ -197,9 +197,11 @@ public class BulkChangeViewModelDbSwitcherTests
             currentPlcName: "PLC_Line1",
             additionalActiveDbs: new[] { peer });
 
-        // Stage on the anchor (PLC_Line1).
+        // Stage on the anchor (PLC_Line1). Use EditableStartValue (production
+        // path) so the PendingEditStore is populated — CountPendingEditsForDb
+        // reads from the store to decide whether to prompt before remove.
         var anchorRoot = vm.RootMembers.First(r => r.Name == aInfo.Name);
-        anchorRoot.AllDescendants().First(n => n.IsLeaf).PendingValue = "111";
+        anchorRoot.AllDescendants().First(n => n.IsLeaf).EditableStartValue = "111";
 
         // Chip-× anchor → Keep (stash).
         vm.ActiveDbChips.First(c => c.DisplayName == aInfo.Name)
@@ -240,9 +242,11 @@ public class BulkChangeViewModelDbSwitcherTests
             messageBox: mbx,
             additionalActiveDbs: new[] { peer });
 
-        // Stage on the anchor.
+        // Stage on the anchor. Use EditableStartValue (production path) so the
+        // PendingEditStore is populated — CountPendingEditsForDb reads from the
+        // store to decide whether to prompt before remove.
         var anchorRoot = vm.RootMembers.First(r => r.Name == aInfo.Name);
-        anchorRoot.AllDescendants().First(n => n.IsLeaf).PendingValue = "777";
+        anchorRoot.AllDescendants().First(n => n.IsLeaf).EditableStartValue = "777";
 
         // Chip-× anchor → Keep (stash).
         vm.ActiveDbChips.First(c => c.DisplayName == aInfo.Name)
@@ -288,9 +292,11 @@ public class BulkChangeViewModelDbSwitcherTests
             messageBox: mbx,
             additionalActiveDbs: new[] { peer });
 
-        // 1. Stage on A (anchor).
+        // 1. Stage on A (anchor). Use EditableStartValue (production path) so
+        // the PendingEditStore is populated — CountPendingEditsForDb reads from
+        // the store to decide whether to prompt before remove.
         var anchorRoot = vm.RootMembers.First(r => r.Name == aInfo.Name);
-        anchorRoot.AllDescendants().First(n => n.IsLeaf).PendingValue = "111";
+        anchorRoot.AllDescendants().First(n => n.IsLeaf).EditableStartValue = "111";
 
         // 2. Chip-× A with Keep → A stashed, B becomes sole active anchor.
         vm.ActiveDbChips.First(c => c.DisplayName == aInfo.Name)
@@ -301,7 +307,7 @@ public class BulkChangeViewModelDbSwitcherTests
         vm.StashedDbs[0].DbName.Should().Be(aInfo.Name);
 
         // 3. Stage on B (now anchor) and Apply.
-        vm.RootMembers.First(m => m.IsLeaf).PendingValue = "222";
+        vm.RootMembers.First(m => m.IsLeaf).EditableStartValue = "222";
         vm.HasPendingChanges = true;   // Apply path normally toggles this; set explicitly so CommitChanges fires.
         vm.CommitChanges().Should().BeTrue();
 

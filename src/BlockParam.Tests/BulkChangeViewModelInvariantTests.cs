@@ -278,10 +278,12 @@ public class BulkChangeViewModelInvariantTests
         env.Vm.StashedDbs.Should().ContainSingle(s => s.DbName == "NestedStructDB");
 
         // Stage a pending edit on FlatDB (the still-active anchor) after the
-        // peer drop, i.e. while we're in single-DB shape.
+        // peer drop, i.e. while we're in single-DB shape. Use EditableStartValue
+        // (production path) so the PendingEditStore is populated — CountPendingEditsForDb
+        // reads from the store to decide whether to prompt before remove.
         var anchorLeaf = env.Vm.RootMembers.SelectMany(r => new[] { r }.Concat(r.AllDescendants()))
             .First(n => n.IsLeaf && !string.IsNullOrEmpty(n.StartValue));
-        anchorLeaf.PendingValue = anchorLeaf.StartValue == "0" ? "1" : "0";
+        anchorLeaf.EditableStartValue = anchorLeaf.StartValue == "0" ? "1" : "0";
 
         // Reactivate the stashed peer via header click.
         var promptsBefore = env.Mbx.AskYesNoCancelCallCount;
@@ -521,6 +523,78 @@ public class BulkChangeViewModelInvariantTests
         env.Vm.ManualSelectedPaths.Should().BeEquivalentTo(peerLeaves,
             "ManualSelectedPaths holds B's nodes only — none of A's nodes survived");
         env.Mbx.AskYesNoCancelCallCount.Should().Be(0, "no pending edits → no prompt");
+        AssertInvariants(env.Vm);
+    }
+
+    [Fact]
+    public void PendingEditStore_SurvivesTreeRebuild_AnchorEditKeptAfterPeerRemoved()
+    {
+        // Regression guard for the orphaning bug fixed by PendingEditStore:
+        // Start with 2 active DBs. Stage an edit on the anchor (A). Then remove
+        // the peer (B) which has no edits — B's chip-close is silent (no prompt)
+        // and triggers BuildRootMembersFromActiveDbs transitioning from multi-DB
+        // to single-DB shape. This discards and recreates all MemberNodeViewModels.
+        // The store must seed the fresh anchor VM with the original pending value
+        // so nothing is lost. Without the store, A's pending edit would be orphaned.
+        var env = new ActiveSetTestBuilder()
+            .WithAnchor("flat-db.xml")
+            .WithPeer("nested-struct-db.xml")
+            .WithPendingEditsOn("FlatDB", count: 1)
+            .Build();
+
+        // Verify setup: anchor has a pending edit, tree is in multi-DB shape.
+        env.Vm.AllActiveDbs.Should().HaveCount(2);
+        var anchorLeafBefore = FindFirstPendingLeaf(env.Vm, "FlatDB");
+        var expectedPendingValue = anchorLeafBefore.PendingValue;
+        expectedPendingValue.Should().NotBeNull("setup: anchor has exactly one pending edit");
+
+        // Remove the peer (no pending edits on peer → no prompt).
+        var peerChip = env.Vm.ActiveDbChips.First(c => c.DisplayName == "NestedStructDB");
+        peerChip.CloseCommand.Execute(null);
+
+        // Tree rebuilt: multi-DB → single-DB (flat) shape, all VMs replaced.
+        env.Vm.AllActiveDbs.Should().HaveCount(1, "peer was silently removed");
+        env.Mbx.AskYesNoCancelCallCount.Should().Be(0, "no edits on peer → no prompt");
+        env.Vm.RootMembers.Should().AllSatisfy(r =>
+            r.Datatype.Should().NotBe("DB"), "single-DB shape: no synthetic roots");
+
+        // Find the anchor's leaf in the new flat tree.
+        var anchorLeafAfter = FindFirstPendingLeaf(env.Vm, "FlatDB");
+        anchorLeafAfter.PendingValue.Should().Be(expectedPendingValue,
+            "PendingEditStore must seed the fresh anchor VM with its pending value " +
+            "after the tree rebuilt from multi-DB to single-DB shape");
+        env.Vm.PendingInlineEditCount.Should().Be(1,
+            "exactly one pending edit survives the rebuild");
+        AssertInvariants(env.Vm);
+    }
+
+    [Fact]
+    public void PendingEditStore_SurvivesTreeRebuild_PeerEditKeptAfterCancel()
+    {
+        // 'Cancel = inert' guarantee extended to the store layer: when the
+        // user cancels the remove prompt, the pending edit must not be cleared
+        // from the store or from the VM.
+        var env = new ActiveSetTestBuilder()
+            .WithAnchor("flat-db.xml")
+            .WithPeer("nested-struct-db.xml")
+            .WithPendingEditsOn("NestedStructDB", count: 1)
+            .WithPromptResults(YesNoCancelResult.Cancel)
+            .Build();
+
+        var peerLeaf = FindFirstPendingLeaf(env.Vm, "NestedStructDB");
+        var expectedPendingValue = peerLeaf.PendingValue;
+
+        // Attempt to remove the peer — prompt fires, user cancels.
+        var peerChip = env.Vm.ActiveDbChips.First(c => c.DisplayName == "NestedStructDB");
+        peerChip.CloseCommand.Execute(null);
+
+        // After cancel: same VMs, same tree shape, store still has the edit.
+        env.Vm.AllActiveDbs.Should().HaveCount(2, "Cancel leaves the peer active");
+        var peerLeafAfter = FindFirstPendingLeaf(env.Vm, "NestedStructDB");
+        peerLeafAfter.PendingValue.Should().Be(expectedPendingValue,
+            "store must not clear the pending edit on a cancelled remove gesture");
+        env.Vm.PendingInlineEditCount.Should().Be(1,
+            "pending count unchanged after cancel");
         AssertInvariants(env.Vm);
     }
 

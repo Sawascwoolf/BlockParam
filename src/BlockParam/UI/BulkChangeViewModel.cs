@@ -907,32 +907,36 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
                 IndexSubtree(vm, only);
                 RootMembers.Add(vm);
             }
-            return;
         }
-
-        // Multi-DB: one synthetic group node per DB. Children are the DB's
-        // real top-level members, reused by reference — Path strings stay
-        // unchanged, so existing rule patterns / scope-detection on member
-        // paths still match across DBs.
-        // Cross-PLC name collision: two PLCs can each host a DB called
-        // "DB_Foo". Tag any colliding synthetic root with its PLC prefix so
-        // the user can tell them apart in the tree.
-        var nameCounts = _activeDbs
-            .GroupBy(d => d.Info.Name, StringComparer.Ordinal)
-            .ToDictionary(g => g.Key, g => g.Count(), StringComparer.Ordinal);
-        for (int i = 0; i < _activeDbs.Count; i++)
+        else
         {
-            var db = _activeDbs[i];
-            var plc = i == 0 ? _currentPlcName : db.PlcName;
-            bool collides = nameCounts.TryGetValue(db.Info.Name, out var c) && c > 1;
-            var displayName = collides && !string.IsNullOrEmpty(plc)
-                ? $"{plc} / {db.Info.Name}"
-                : db.Info.Name;
-            AddDbGroupRoot(db, displayName);
+            // Multi-DB: one synthetic group node per DB. Children are the DB's
+            // real top-level members, reused by reference — Path strings stay
+            // unchanged, so existing rule patterns / scope-detection on member
+            // paths still match across DBs.
+            // Cross-PLC name collision: two PLCs can each host a DB called
+            // "DB_Foo". Tag any colliding synthetic root with its PLC prefix so
+            // the user can tell them apart in the tree.
+            var nameCounts = _activeDbs
+                .GroupBy(d => d.Info.Name, StringComparer.Ordinal)
+                .ToDictionary(g => g.Key, g => g.Count(), StringComparer.Ordinal);
+            for (int i = 0; i < _activeDbs.Count; i++)
+            {
+                var db = _activeDbs[i];
+                var plc = i == 0 ? _currentPlcName : db.PlcName;
+                bool collides = nameCounts.TryGetValue(db.Info.Name, out var c) && c > 1;
+                var displayName = collides && !string.IsNullOrEmpty(plc)
+                    ? $"{plc} / {db.Info.Name}"
+                    : db.Info.Name;
+                AddDbGroupRoot(db, displayName);
+            }
         }
 
         // Seed any pending values that survived the rebuild (active-set
         // transitions preserve MemberNode instances but mint fresh VMs).
+        // Called unconditionally — single-DB rebuilds are just as likely to
+        // need store seeding as multi-DB ones (e.g. peer chip removed while
+        // the anchor DB had a pending inline edit in progress).
         SeedVmsFromStore();
     }
 
@@ -948,7 +952,8 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         var validator = BuildValidator();
         foreach (var (node, pendingValue) in _pendingEditStore.GetAll())
         {
-            if (!_modelToVm.TryGetValue(node, out var vm)) continue;
+            if (!_modelToVm.TryGetValue(node, out var vm))
+                continue;
             // Set the field directly to avoid firing OnSingleValueEdited,
             // which would write back to the store (creating a loop) and
             // charge a spurious "new edit" warn for the free-tier cap.

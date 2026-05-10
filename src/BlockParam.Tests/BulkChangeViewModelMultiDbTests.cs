@@ -137,8 +137,8 @@ public class BulkChangeViewModelMultiDbTests
         var peerSyntheticRoot = vm.RootMembers[1];
         var focusedLeaf = focusedSyntheticRoot.AllDescendants().First(n => n.IsLeaf);
         var peerLeaf = peerSyntheticRoot.AllDescendants().First(n => n.IsLeaf);
-        focusedLeaf.PendingValue = focusedLeaf.StartValue == "0" ? "1" : "0";
-        peerLeaf.PendingValue = peerLeaf.StartValue == "0" ? "1" : "0";
+        focusedLeaf.EditableStartValue = focusedLeaf.StartValue == "0" ? "1" : "0";
+        peerLeaf.EditableStartValue = peerLeaf.StartValue == "0" ? "1" : "0";
 
         vm.ApplyCommand.Execute(null);
 
@@ -156,8 +156,8 @@ public class BulkChangeViewModelMultiDbTests
 
         var focusedLeaf = vm.RootMembers[0].AllDescendants().First(n => n.IsLeaf);
         var peerLeaf = vm.RootMembers[1].AllDescendants().First(n => n.IsLeaf);
-        focusedLeaf.PendingValue = focusedLeaf.StartValue == "0" ? "1" : "0";
-        peerLeaf.PendingValue = peerLeaf.StartValue == "0" ? "1" : "0";
+        focusedLeaf.EditableStartValue = focusedLeaf.StartValue == "0" ? "1" : "0";
+        peerLeaf.EditableStartValue = peerLeaf.StartValue == "0" ? "1" : "0";
 
         vm.ApplyCommand.Execute(null);
 
@@ -196,8 +196,8 @@ public class BulkChangeViewModelMultiDbTests
 
         var focusedLeaf = vm.RootMembers[0].AllDescendants().First(n => n.IsLeaf);
         var peerLeaf = vm.RootMembers[1].AllDescendants().First(n => n.IsLeaf);
-        focusedLeaf.PendingValue = focusedLeaf.StartValue == "0" ? "1" : "0";
-        peerLeaf.PendingValue = peerLeaf.StartValue == "0" ? "1" : "0";
+        focusedLeaf.EditableStartValue = focusedLeaf.StartValue == "0" ? "1" : "0";
+        peerLeaf.EditableStartValue = peerLeaf.StartValue == "0" ? "1" : "0";
 
         vm.ApplyCommand.Execute(null);
 
@@ -295,12 +295,12 @@ public class BulkChangeViewModelMultiDbTests
         var focusedLeaf = vm.RootMembers
             .First(r => r.Name == focused.Name)
             .AllDescendants().First(n => n.IsLeaf);
-        focusedLeaf.PendingValue = focusedLeaf.StartValue == "0" ? "1" : "0";
+        focusedLeaf.EditableStartValue = focusedLeaf.StartValue == "0" ? "1" : "0";
 
         var peerLeaf = vm.RootMembers
             .First(r => r.Name == peer.Name)
             .AllDescendants().First(n => n.IsLeaf);
-        peerLeaf.PendingValue = peerLeaf.StartValue == "0" ? "1" : "0";
+        peerLeaf.EditableStartValue = peerLeaf.StartValue == "0" ? "1" : "0";
 
         vm.ApplyCommand.Execute(null);
 
@@ -372,7 +372,7 @@ public class BulkChangeViewModelMultiDbTests
         var peerLeaf = vm.RootMembers
             .First(r => r.Name == peer.Name)
             .AllDescendants().First(n => n.IsLeaf);
-        peerLeaf.PendingValue = peerLeaf.StartValue == "0" ? "1" : "0";
+        peerLeaf.EditableStartValue = peerLeaf.StartValue == "0" ? "1" : "0";
 
         // Open the popup so FilteredDataBlockItems is populated, then toggle
         // off the peer row.
@@ -738,13 +738,15 @@ public class BulkChangeViewModelMultiDbTests
 
         vm.AllActiveDbs.Should().HaveCount(2);
 
-        // Stage a pending edit on the peer's tree.
+        // Stage a pending edit on the peer's tree. Use EditableStartValue
+        // (production path) so the PendingEditStore is populated — CountPendingEditsForDb
+        // reads from the store to decide whether to prompt before remove.
         var peerLeaf = vm.RootMembers
             .First(r => r.Name == peer.Name)
             .AllDescendants().First(n => n.IsLeaf);
         var original = peerLeaf.StartValue ?? "0";
         var pending = original == "0" ? "1" : "0";
-        peerLeaf.PendingValue = pending;
+        peerLeaf.EditableStartValue = pending;
 
         // Close the peer chip — pending edit triggers the 3-way prompt;
         // FakeMessageBox returns "No" so the edits get stashed.
