@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.Globalization;
 using System.IO;
 using System.Linq;
@@ -137,7 +138,7 @@ internal static class PillMultiSelectCapture
                 Build: () =>
                 {
                     var (window, c) = BuildSceneWindow();
-                    ApplySelectionByAbbrev(c, selected);
+                    ApplySelectionByAbbrevDp(c, DemoEmployees, selected);
                     SetIsOpen(c, open);
                     control = c;
                     return window;
@@ -375,10 +376,10 @@ internal static class PillMultiSelectCapture
         // collapsed/abbreviated.
         pill.TooltipFormatter = PillTooltipFormatters.FullNames;
 
-        // TODO Phase 2: replace this internal access with SelectedItems DP.
-        // Phase 1 has no SelectedItems DP, so we walk the internal rows to
-        // pre-select items that match the seed's chosen DB numbers.
-        pill.Loaded += (_, _) => ApplySelectionByDbNumber(pill, seed.SelectedDbNumbers);
+        // Pre-select items whose DbNumber is in the seed's chosen set.
+        // Uses the SelectedItems DP directly — no reflection, no Loaded event.
+        pill.SelectedItems = new ObservableCollection<object>(
+            dbs.Where(d => seed.SelectedDbNumbers.Contains(d.DbNumber)));
 
         return pill;
     }
@@ -420,60 +421,33 @@ internal static class PillMultiSelectCapture
         return (window, control);
     }
 
-    // ── Selection helpers (use InternalsVisibleTo until Phase 2 SelectedItems DP) ──
+    // ── Selection helpers ─────────────────────────────────────────────────────
 
     /// <summary>
-    /// Pre-selects rows by matching their Abbreviation string. Used for the
-    /// employee scenes where abbreviations are stable keys.
-    /// TODO Phase 2: replace with SelectedItems DP binding.
+    /// Pre-selects rows whose Abbreviation is in <paramref name="abbrevs"/> by
+    /// filtering the source collection and assigning the matching items to the
+    /// <see cref="PillMultiSelect.SelectedItems"/> DP. No reflection required.
     /// </summary>
-    private static void ApplySelectionByAbbrev(PillMultiSelect pill, string[] abbrevs)
+    private static void ApplySelectionByAbbrevDp(
+        PillMultiSelect pill,
+        IReadOnlyList<DemoEmployee> employees,
+        string[] abbrevs)
     {
-        var state = GetInternalState(pill);
-        if (state == null) return;
         var abbrevSet = new HashSet<string>(abbrevs, StringComparer.Ordinal);
-        foreach (var row in state.Items)
-        {
-            if (abbrevSet.Contains(row.Abbreviation))
-                row.IsSelected = true;
-        }
-    }
-
-    /// <summary>
-    /// Pre-selects rows by matching the source item's <see cref="DemoDb.DbNumber"/>.
-    /// TODO Phase 2: replace with SelectedItems DP binding.
-    /// </summary>
-    private static void ApplySelectionByDbNumber(PillMultiSelect pill, int[] dbNumbers)
-    {
-        var state = GetInternalState(pill);
-        if (state == null) return;
-        var numSet = new HashSet<int>(dbNumbers);
-        foreach (var row in state.Items)
-        {
-            if (row.Source is DemoDb db && numSet.Contains(db.DbNumber))
-                row.IsSelected = true;
-        }
+        pill.SelectedItems = new ObservableCollection<object>(
+            employees.Where(e => abbrevSet.Contains(e.Abbrev)));
     }
 
     private static void SetIsOpen(PillMultiSelect pill, bool open)
     {
-        var state = GetInternalState(pill);
-        if (state != null) state.IsOpen = open;
-    }
-
-    /// <summary>
-    /// Retrieves the internal state via the InternalsVisibleTo access grant.
-    /// This is the only DevLauncher site that touches internals; it exists
-    /// solely because Phase 1 has no SelectedItems DP. Remove in Phase 2.
-    /// </summary>
-    private static PillMultiSelectInternalState? GetInternalState(PillMultiSelect pill)
-    {
-        // _internalState is a private field — accessible because BlockParam.csproj
-        // has InternalsVisibleTo("BlockParam.DevLauncher"), but field access
-        // still requires reflection here (the field is private, not internal).
+        // IsOpen lives on PillMultiSelectInternalState (internal). Access via
+        // InternalsVisibleTo — field is private so we still need reflection,
+        // but this is the only remaining internal touch-point in DevLauncher
+        // and it concerns popup display state, not selection. Left for Phase 3.
         var field = typeof(PillMultiSelect).GetField("_internalState",
             BindingFlags.Instance | BindingFlags.NonPublic);
-        return field?.GetValue(pill) as PillMultiSelectInternalState;
+        if (field?.GetValue(pill) is PillMultiSelectInternalState state)
+            state.IsOpen = open;
     }
 
     // ── Layout / render helpers ───────────────────────────────────────────────

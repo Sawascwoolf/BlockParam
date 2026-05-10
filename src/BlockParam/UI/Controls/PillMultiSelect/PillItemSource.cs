@@ -36,6 +36,21 @@ internal sealed class PillItemSource
     private string? _displayMemberPath;
     private string? _abbreviationMemberPath;
 
+    /// <summary>
+    /// Raised after a row is added to the internal state. Allows
+    /// <see cref="PillSelectionSync"/> to reconcile selection and subscribe
+    /// to <see cref="System.ComponentModel.INotifyPropertyChanged"/> on the
+    /// new source item without needing access to internal dictionaries.
+    /// </summary>
+    internal event Action<PillRowViewModel>? RowAdded;
+
+    /// <summary>
+    /// Raised after a row is removed from the internal state (including during
+    /// a Reset). Allows <see cref="PillSelectionSync"/> to unsubscribe from
+    /// the source item's <see cref="System.ComponentModel.INotifyPropertyChanged"/>.
+    /// </summary>
+    internal event Action<PillRowViewModel>? RowRemoved;
+
     internal PillItemSource(PillMultiSelectInternalState state, MemberPathResolver resolver)
     {
         _state = state;
@@ -105,6 +120,11 @@ internal sealed class PillItemSource
 
     private void RebuildRows()
     {
+        // Fire RowRemoved for every existing row before the state clears them,
+        // so PillSelectionSync can unsubscribe from source INotifyPropertyChanged.
+        foreach (var row in _rowBySource.Values)
+            RowRemoved?.Invoke(row);
+
         _state.ClearItems();
         _rowBySource.Clear();
 
@@ -121,6 +141,7 @@ internal sealed class PillItemSource
         var row = new PillRowViewModel(source, display, abbrev);
         _rowBySource[source] = row;
         _state.AddItem(row);
+        RowAdded?.Invoke(row);
     }
 
     private void RemoveRow(object source)
@@ -128,6 +149,7 @@ internal sealed class PillItemSource
         if (!_rowBySource.TryGetValue(source, out var row)) return;
         _rowBySource.Remove(source);
         _state.RemoveItem(row);
+        RowRemoved?.Invoke(row);
     }
 
     private void RefreshDisplayStrings()

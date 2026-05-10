@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
@@ -24,6 +25,7 @@ public partial class PillMultiSelect : UserControl
     private readonly PillMultiSelectInternalState _internalState;
     private readonly MemberPathResolver _memberPathResolver;
     private readonly PillItemSource _itemSource;
+    private readonly PillSelectionSync _selectionSync;
 
     public PillMultiSelect()
     {
@@ -32,6 +34,8 @@ public partial class PillMultiSelect : UserControl
         _internalState = new PillMultiSelectInternalState();
         _memberPathResolver = new MemberPathResolver();
         _itemSource = new PillItemSource(_internalState, _memberPathResolver);
+        _selectionSync = new PillSelectionSync(_internalState, _itemSource, _memberPathResolver);
+        _selectionSync.SelectionChanged += OnSyncSelectionChanged;
 
         // Set DataContext on the *content* so the existing XAML bindings
         // ({Binding IsOpen}, {Binding FilteredItems}, etc.) resolve against
@@ -39,6 +43,12 @@ public partial class PillMultiSelect : UserControl
         // host so bindings on the control element itself resolve against the
         // host's data context as expected.
         ((FrameworkElement)Content).DataContext = _internalState;
+
+        // Give every instance its own default SelectedItems collection.
+        // SetCurrentValue preserves any two-way binding the host applies later;
+        // SetValue would kill it. DP metadata default is null to avoid the
+        // "shared default across instances" trap for collection DPs.
+        SetCurrentValue(SelectedItemsProperty, new ObservableCollection<object>());
     }
 
     // ── DependencyProperties ─────────────────────────────────────────────────
@@ -195,6 +205,51 @@ public partial class PillMultiSelect : UserControl
         get => (string?)GetValue(SearchPlaceholderProperty);
         set => SetValue(SearchPlaceholderProperty, value);
     }
+
+    // ── Selection DPs + routed event ─────────────────────────────────────────
+    // Logic lives in PillSelectionSync; the code-behind just owns the DP
+    // declarations, forwards callbacks, and raises the routed event.
+
+    /// <summary>Two-way bindable selection. Per-instance default set in ctor via
+    /// SetCurrentValue — avoids the shared-reference trap of DP metadata defaults.</summary>
+    public static readonly DependencyProperty SelectedItemsProperty =
+        DependencyProperty.Register(nameof(SelectedItems), typeof(IList), typeof(PillMultiSelect),
+            new PropertyMetadata(null,
+                (d, e) => ((PillMultiSelect)d)._selectionSync.SetSelectedItems((IList?)e.NewValue)));
+
+    public IList? SelectedItems
+    {
+        get => (IList?)GetValue(SelectedItemsProperty);
+        set => SetValue(SelectedItemsProperty, value);
+    }
+
+    /// <summary>Path to a bool property on source items. Reads/writes it directly;
+    /// subscribes INotifyPropertyChanged for live updates (Edge B).</summary>
+    public static readonly DependencyProperty IsSelectedMemberPathProperty =
+        DependencyProperty.Register(nameof(IsSelectedMemberPath), typeof(string), typeof(PillMultiSelect),
+            new PropertyMetadata(null,
+                (d, e) => ((PillMultiSelect)d)._selectionSync.SetIsSelectedMemberPath((string?)e.NewValue)));
+
+    public string? IsSelectedMemberPath
+    {
+        get => (string?)GetValue(IsSelectedMemberPathProperty);
+        set => SetValue(IsSelectedMemberPathProperty, value);
+    }
+
+    /// <summary>Fires once per selection-set change (deduplicated across a full
+    /// reconciliation cycle). See <see cref="PillSelectionSync"/> for details.</summary>
+    public static readonly RoutedEvent SelectionChangedEvent =
+        EventManager.RegisterRoutedEvent(nameof(SelectionChanged),
+            RoutingStrategy.Bubble, typeof(RoutedEventHandler), typeof(PillMultiSelect));
+
+    public event RoutedEventHandler SelectionChanged
+    {
+        add => AddHandler(SelectionChangedEvent, value);
+        remove => RemoveHandler(SelectionChangedEvent, value);
+    }
+
+    private void OnSyncSelectionChanged(object? sender, EventArgs e) =>
+        RaiseEvent(new RoutedEventArgs(SelectionChangedEvent, this));
 
     // ── CLR escape hatches ────────────────────────────────────────────────────
     // Code-only hosts can set these for fully custom formatting without subclassing.
