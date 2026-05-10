@@ -334,64 +334,40 @@ public class BulkChangeViewModelInvariantTests
     }
 
     [Fact]
-    public void DropdownCancel_ThenChipCloseAnchor_PromptKeep_StashesAnchorAndClearsPendingList()
+    public void Remove_ChipCloseAnchor_AnchorHasEdits_PromptKeep_StashesAnchorAndClearsPendingList()
     {
-        // Row 12 — captures observed bug on PR #74 §B, stacked on top of
-        // Row 11's bug-1 state.
+        // Row 12 — chip-× on the anchor with pending edits, user picks Keep.
+        // Asserts the anchor's edits land in StashedDbs (not silently dropped)
+        // and that PendingEdits drops every entry that referenced the removed
+        // DB. Row 3 covers dropdown-uncheck + Stash on a companion; Row 5
+        // covers chip-close + Cancel; this row plugs the missing chip-close +
+        // Keep + anchor-role corner.
         //
-        // Sequence (matches the user-reported repro):
-        //   1. Single-DB session: anchor A (FlatDB) with 1 pending edit.
-        //   2. Open dropdown, toggle peer B (NestedStructDB) IsActive=true.
-        //      3-way prompt fires; user picks Cancel.
-        //      → Per Row 11, the active set ends up [A, B] (bug 1).
-        //   3. User then chip-×'s A. 3-way prompt fires; user picks Keep
-        //      (No / Stash).
-        //
-        // Expected: A leaves the active set, A's pending edit moves into
-        // StashedDbs, and PendingEdits drops every entry that referenced A.
-        //
-        // Observed VM-layer behaviour: A leaves the active set (good), but
-        // its pending edits are SILENTLY DROPPED — not migrated to the
-        // stash (HasStashedDbs == False) and not retained anywhere. The
-        // user-visible "pending edits still showing" is then a downstream
-        // UI binding that holds a stale snapshot of the inspector list;
-        // the VM-layer data-loss is the root cause.
-        //
-        // Note: when bug 1 is fixed (Cancel leaves the active set as [A]),
-        // step 3 becomes a chip-× on the only active DB, which is disabled
-        // (Row 4). At that point this test should be re-evaluated — the
-        // bug it captures may disappear as a consequence of fixing #1.
+        // Originally written as DropdownCancel_ThenChipCloseAnchor_… stacked
+        // on top of the dropdown-add-prompt bug (no prompt fired, set ended
+        // up [A, B]). Once the add path prompts correctly, that staged state
+        // is unreachable (chip-× on the lone anchor in [A] is refused by the
+        // ≥1 invariant), so the test was rewritten to its still-reachable
+        // shape — same data-loss class, no dependency on the prior bug.
         var env = new ActiveSetTestBuilder()
             .WithAnchor("flat-db.xml")
-            .WithDropdownPeer("nested-struct-db.xml")
+            .WithCompanion("nested-struct-db.xml")
             .WithPendingEditsOn("FlatDB", count: 1)
-            .WithPromptResults(
-                YesNoCancelResult.Cancel,   // Cancel the switch / add prompt
-                YesNoCancelResult.No)       // Then Keep on chip-close
+            .WithPromptResults(YesNoCancelResult.No)   // Keep on chip-close
             .Build();
 
         var anchorLeaf = FindFirstPendingLeaf(env.Vm, "FlatDB");
         var pendingValue = anchorLeaf.PendingValue;
 
-        // Step 2 — dropdown toggle + Cancel (bug 1 trigger).
-        env.Vm.OpenDataBlocksDropdownCommand.Execute(null);
-        var peerRow = env.Vm.FilteredDataBlockItems.First(i => i.Name == "NestedStructDB");
-        peerRow.IsActive = true;
-
-        // Step 3 — chip-× A. The state is corrupted from step 2 ([A, B]
-        // instead of [A]); A is still the anchor in this corrupted set.
         var anchorChip = env.Vm.ActiveDbChips.First(c => c.DisplayName == "FlatDB");
         anchorChip.CloseCommand.Execute(null);
 
         env.Vm.AllActiveDbs.Should().ContainSingle()
             .Which.Info.Name.Should().Be("NestedStructDB",
-                "Keep on chip-close removes A from the active set");
-        // The data-loss assertion: A's edits must end up SOMEWHERE — either
-        // in the stash (Keep) or applied (would not be Keep). Currently
-        // they're dropped on the floor.
+                "Keep on chip-close removes the anchor from the active set");
         env.Vm.HasStashedDbs.Should().BeTrue("Keep moves pending edits into the stash");
         env.Vm.StashedDbs.Should().ContainSingle(s => s.DbName == "FlatDB",
-            "A's pending edit must land in the stash dictionary, not be silently dropped");
+            "anchor's pending edit must land in the stash dictionary, not be silently dropped");
         env.Vm.PendingEdits.Should().BeEmpty(
             "removed DB's pending leaves must vacate the bound PendingEdits list");
         AssertInvariants(env.Vm);
