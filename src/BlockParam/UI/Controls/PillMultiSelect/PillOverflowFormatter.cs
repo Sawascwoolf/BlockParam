@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
@@ -7,22 +8,40 @@ namespace BlockParam.UI.Controls.PillMultiSelect;
 /// <summary>
 /// Pure function: a selected-item list + threshold options → the comma-joined
 /// string the trigger pill displays. Two independent overflow stages:
-/// (1) abbreviation — swap each item's Display for its Abbreviation when the
-/// list grows past either entry-count or char-count threshold;
+/// (1) abbreviation — swap each item's display string for its abbreviation
+/// when the list grows past either entry-count or char-count threshold;
 /// (2) collapse — keep the first N rendered tokens and append "+M more" for
 /// the rest. Both can apply to the same selection.
 /// </summary>
-internal static class PillOverflowFormatter
+/// <remarks>
+/// The generic overload works on any source type <c>T</c> — code-only hosts
+/// can call it directly with their own domain objects. The UserControl uses
+/// it internally with <see cref="PillRowViewModel"/> rows via
+/// <see cref="FormatRows"/>, which pre-binds the row-accessor lambdas so
+/// call sites in the code-behind remain concise.
+/// </remarks>
+public static class PillOverflowFormatter
 {
-    public static string Format(
-        IReadOnlyList<PillRowViewModel> selected,
+    /// <summary>
+    /// Formats <paramref name="selected"/> into a trigger-pill summary string
+    /// according to <paramref name="options"/>.
+    /// </summary>
+    /// <typeparam name="T">Any source-item type.</typeparam>
+    /// <param name="selected">The currently selected items (pre-filtered to selected only).</param>
+    /// <param name="display">Extracts the full display name from <typeparamref name="T"/>.</param>
+    /// <param name="abbreviation">Extracts the short-form abbreviation from <typeparamref name="T"/>.</param>
+    /// <param name="options">Threshold options that control abbreviation and collapse behaviour.</param>
+    public static string Format<T>(
+        IReadOnlyList<T> selected,
+        Func<T, string> display,
+        Func<T, string> abbreviation,
         PillOverflowOptions options)
     {
         if (selected.Count == 0) return string.Empty;
 
-        var useAbbrev = ShouldAbbreviate(selected, options);
+        var useAbbrev = ShouldAbbreviate(selected, display, options);
         var tokens = selected
-            .Select(i => useAbbrev ? i.Abbreviation : i.Display)
+            .Select(i => useAbbrev ? abbreviation(i) : display(i))
             .ToList();
 
         if (options.CollapseAfterEntries is int max && tokens.Count > max)
@@ -38,8 +57,19 @@ internal static class PillOverflowFormatter
         return string.Join(", ", tokens);
     }
 
-    private static bool ShouldAbbreviate(
+    /// <summary>
+    /// Convenience shim used internally by the UserControl. Adapts
+    /// <see cref="PillRowViewModel"/> rows to the generic overload without
+    /// forcing call sites to spell out the lambdas every time.
+    /// </summary>
+    internal static string FormatRows(
         IReadOnlyList<PillRowViewModel> selected,
+        PillOverflowOptions options)
+        => Format(selected, r => r.Display, r => r.Abbreviation, options);
+
+    private static bool ShouldAbbreviate<T>(
+        IReadOnlyList<T> selected,
+        Func<T, string> display,
         PillOverflowOptions options)
     {
         if (options.AbbreviateAfterEntries is int maxEntries && selected.Count > maxEntries)
@@ -52,7 +82,7 @@ internal static class PillOverflowFormatter
             var sum = (selected.Count - 1) * 2;
             foreach (var item in selected)
             {
-                sum += item.Display.Length;
+                sum += display(item).Length;
                 if (sum > maxChars) return true;
             }
         }

@@ -7,6 +7,13 @@ using Xunit;
 
 namespace BlockParam.Tests;
 
+/// <summary>
+/// Tests for <see cref="PillOverflowFormatter.Format{T}"/>.
+/// All cases use plain string-pair DTOs (not <see cref="PillRowViewModel"/>)
+/// to verify the generic implementation works on arbitrary source types — the
+/// spirit of the Phase 3 genericization. The internal <c>FormatRows</c> shim
+/// is exercised implicitly via the UserControl's OverflowOptions DP tests.
+/// </summary>
 public class PillOverflowFormatterTests
 {
     public PillOverflowFormatterTests()
@@ -19,24 +26,23 @@ public class PillOverflowFormatterTests
         Thread.CurrentThread.CurrentUICulture = en;
     }
 
-    private static PillRowViewModel Item(string display, string abbrev, bool selected = true)
-    {
-        var vm = new PillRowViewModel(new object(), display, abbrev);
-        vm.IsSelected = selected;
-        return vm;
-    }
+    // Simple source DTO — no coupling to PillRowViewModel.
+    private record Item(string Display, string Abbrev);
 
-    private static IReadOnlyList<PillRowViewModel> Items(params (string Display, string Abbrev)[] data)
+    private static IReadOnlyList<Item> Items(params (string Display, string Abbrev)[] data)
     {
-        var list = new List<PillRowViewModel>();
-        foreach (var (d, a) in data) list.Add(Item(d, a));
+        var list = new List<Item>();
+        foreach (var (d, a) in data) list.Add(new Item(d, a));
         return list;
     }
+
+    private static string Format(IReadOnlyList<Item> items, PillOverflowOptions options) =>
+        PillOverflowFormatter.Format(items, i => i.Display, i => i.Abbrev, options);
 
     [Fact]
     public void Empty_selection_yields_empty_string()
     {
-        var result = PillOverflowFormatter.Format(Items(), new PillOverflowOptions());
+        var result = Format(Items(), new PillOverflowOptions());
         result.Should().BeEmpty();
     }
 
@@ -46,7 +52,7 @@ public class PillOverflowFormatterTests
         var items = Items(
             ("DB_ProcessControl_HighPriority", "DB10"),
             ("DB_ConfigParams", "DB99"));
-        var result = PillOverflowFormatter.Format(items, new PillOverflowOptions());
+        var result = Format(items, new PillOverflowOptions());
         result.Should().Be("DB_ProcessControl_HighPriority, DB_ConfigParams");
     }
 
@@ -54,7 +60,7 @@ public class PillOverflowFormatterTests
     public void Below_entries_threshold_renders_full_displays()
     {
         var items = Items(("DB_A", "DB1"), ("DB_B", "DB2"));
-        var result = PillOverflowFormatter.Format(items, new PillOverflowOptions
+        var result = Format(items, new PillOverflowOptions
         {
             AbbreviateAfterEntries = 2, // 2 is NOT > 2
         });
@@ -65,7 +71,7 @@ public class PillOverflowFormatterTests
     public void Above_entries_threshold_switches_to_abbreviations()
     {
         var items = Items(("DB_A", "DB1"), ("DB_B", "DB2"), ("DB_C", "DB3"));
-        var result = PillOverflowFormatter.Format(items, new PillOverflowOptions
+        var result = Format(items, new PillOverflowOptions
         {
             AbbreviateAfterEntries = 2, // 3 > 2
         });
@@ -79,7 +85,7 @@ public class PillOverflowFormatterTests
         var items = Items(
             ("DB_ProcessControl_HighPriority", "DB10"),
             ("DB_ConfigParams", "DB99"));
-        var result = PillOverflowFormatter.Format(items, new PillOverflowOptions
+        var result = Format(items, new PillOverflowOptions
         {
             AbbreviateAfterChars = 30,
         });
@@ -91,7 +97,7 @@ public class PillOverflowFormatterTests
     {
         // Joined full = "A, B" = 4 chars
         var items = Items(("A", "X"), ("B", "Y"));
-        var result = PillOverflowFormatter.Format(items, new PillOverflowOptions
+        var result = Format(items, new PillOverflowOptions
         {
             AbbreviateAfterChars = 30,
         });
@@ -104,7 +110,7 @@ public class PillOverflowFormatterTests
         var items = Items(("DB_A", "DB1"), ("DB_B", "DB2"), ("DB_C", "DB3"));
         // Char threshold won't trip ("DB_A, DB_B, DB_C" = 16 chars), but
         // entries threshold will (3 > 2). Verifies OR semantics.
-        var result = PillOverflowFormatter.Format(items, new PillOverflowOptions
+        var result = Format(items, new PillOverflowOptions
         {
             AbbreviateAfterEntries = 2,
             AbbreviateAfterChars = 100,
@@ -117,7 +123,7 @@ public class PillOverflowFormatterTests
     {
         var items = Items(
             ("A", "X"), ("B", "Y"), ("C", "Z"), ("D", "W"), ("E", "V"));
-        var result = PillOverflowFormatter.Format(items, new PillOverflowOptions
+        var result = Format(items, new PillOverflowOptions
         {
             CollapseAfterEntries = 3,
         });
@@ -128,7 +134,7 @@ public class PillOverflowFormatterTests
     public void Collapse_does_not_trigger_when_count_equals_threshold()
     {
         var items = Items(("A", "X"), ("B", "Y"), ("C", "Z"));
-        var result = PillOverflowFormatter.Format(items, new PillOverflowOptions
+        var result = Format(items, new PillOverflowOptions
         {
             CollapseAfterEntries = 3, // 3 is NOT > 3
         });
@@ -148,7 +154,7 @@ public class PillOverflowFormatterTests
             ("DB_DiagnosticData", "DB100"),
             ("DB_TankSettings_3", "DB200"));
 
-        var result = PillOverflowFormatter.Format(items, PillOverflowOptions.DataBlockDefault());
+        var result = Format(items, PillOverflowOptions.DataBlockDefault());
         result.Should().Be("DB10, DB11, DB42, DB99, DB100, +1 more");
     }
 
@@ -156,7 +162,7 @@ public class PillOverflowFormatterTests
     public void DataBlockDefault_keeps_short_selection_as_full_names()
     {
         var items = Items(("DB_Short", "DB1"));
-        var result = PillOverflowFormatter.Format(items, PillOverflowOptions.DataBlockDefault());
+        var result = Format(items, PillOverflowOptions.DataBlockDefault());
         result.Should().Be("DB_Short");
     }
 
@@ -169,7 +175,7 @@ public class PillOverflowFormatterTests
             ("DB_PumpStation_001", "DB42"),
             ("DB_DiagnosticData", "DB100"));
 
-        var result = PillOverflowFormatter.Format(items, PillOverflowOptions.DataBlockDefault());
+        var result = Format(items, PillOverflowOptions.DataBlockDefault());
         result.Should().Be("DB10, DB42, DB100");
     }
 
@@ -180,9 +186,23 @@ public class PillOverflowFormatterTests
         // Threshold of 18 should trip; threshold of 20 should not.
         var items = Items(("AAAAA", "1"), ("BBBBB", "2"), ("CCCCC", "3"));
 
-        PillOverflowFormatter.Format(items, new PillOverflowOptions { AbbreviateAfterChars = 18 })
+        Format(items, new PillOverflowOptions { AbbreviateAfterChars = 18 })
             .Should().Be("1, 2, 3");
-        PillOverflowFormatter.Format(items, new PillOverflowOptions { AbbreviateAfterChars = 20 })
+        Format(items, new PillOverflowOptions { AbbreviateAfterChars = 20 })
             .Should().Be("AAAAA, BBBBB, CCCCC");
+    }
+
+    [Fact]
+    public void Generic_overload_works_on_arbitrary_source_type()
+    {
+        // Verify T is not coupled to PillRowViewModel — use an int[] where
+        // display is the number spelled out and abbrev is the digit string.
+        var items = new[] { 1, 2, 3 };
+        var result = PillOverflowFormatter.Format(
+            items,
+            display: i => i == 1 ? "One" : i == 2 ? "Two" : "Three",
+            abbreviation: i => i.ToString(),
+            options: new PillOverflowOptions { AbbreviateAfterEntries = 2 });
+        result.Should().Be("1, 2, 3");
     }
 }

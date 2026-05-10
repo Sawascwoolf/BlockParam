@@ -59,6 +59,7 @@ internal sealed class PillMultiSelectInternalState : ViewModelBase
     private bool _showFooterActions = true;
     private Func<IReadOnlyList<PillRowViewModel>, string>? _displayFormatter;
     private Func<IReadOnlyList<PillRowViewModel>, string?>? _tooltipFormatter;
+    private Func<PillRowViewModel, string, bool>? _customFilter;
 
     internal PillMultiSelectInternalState()
     {
@@ -411,10 +412,33 @@ internal sealed class PillMultiSelectInternalState : ViewModelBase
         }
     }
 
+    /// <summary>
+    /// Optional custom filter predicate. When set, replaces the default
+    /// Display/Abbreviation contains-check. Receives the row and current
+    /// search text; return true to keep the row visible.
+    /// <para>Set by the UserControl when the host provides a
+    /// <c>FilterPredicate</c> CLR escape hatch that operates on source items.
+    /// The UserControl wraps that delegate to project source → row before
+    /// forwarding it here.</para>
+    /// </summary>
+    internal Func<PillRowViewModel, string, bool>? CustomFilter
+    {
+        get => _customFilter;
+        set
+        {
+            _customFilter = value;
+            _filteredView.Refresh();
+        }
+    }
+
     private bool FilterPredicate(object obj)
     {
         if (string.IsNullOrEmpty(_searchText)) return true;
         if (obj is not PillRowViewModel item) return false;
+
+        if (_customFilter != null)
+            return _customFilter(item, _searchText);
+
         return item.Display.IndexOf(_searchText, StringComparison.OrdinalIgnoreCase) >= 0
             || item.Abbreviation.IndexOf(_searchText, StringComparison.OrdinalIgnoreCase) >= 0;
     }

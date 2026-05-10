@@ -373,8 +373,9 @@ internal static class PillMultiSelectCapture
         };
 
         // Hover the pill to recover the full DB names that overflow has
-        // collapsed/abbreviated.
-        pill.TooltipFormatter = PillTooltipFormatters.FullNames;
+        // collapsed/abbreviated. TooltipMode DP is the XAML-friendly way
+        // to get built-in FullNames tooltip without a custom Func.
+        pill.TooltipMode = PillTooltipMode.FullNames;
 
         // Pre-select items whose DbNumber is in the seed's chosen set.
         // Uses the SelectedItems DP directly — no reflection, no Loaded event.
@@ -440,14 +441,7 @@ internal static class PillMultiSelectCapture
 
     private static void SetIsOpen(PillMultiSelect pill, bool open)
     {
-        // IsOpen lives on PillMultiSelectInternalState (internal). Access via
-        // InternalsVisibleTo — field is private so we still need reflection,
-        // but this is the only remaining internal touch-point in DevLauncher
-        // and it concerns popup display state, not selection. Left for Phase 3.
-        var field = typeof(PillMultiSelect).GetField("_internalState",
-            BindingFlags.Instance | BindingFlags.NonPublic);
-        if (field?.GetValue(pill) is PillMultiSelectInternalState state)
-            state.IsOpen = open;
+        pill.IsOpen = open;
     }
 
     // ── Layout / render helpers ───────────────────────────────────────────────

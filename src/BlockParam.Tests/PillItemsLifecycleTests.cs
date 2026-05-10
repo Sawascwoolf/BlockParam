@@ -148,7 +148,7 @@ public class PillFormatterSetterTests
         var fired = new List<string?>();
         vm.PropertyChanged += (_, e) => fired.Add(e.PropertyName);
 
-        vm.TooltipFormatter = PillTooltipFormatters.FullNames;
+        vm.TooltipFormatter = rows => PillTooltipFormatters.FullNamesRows(rows);
 
         fired.Should().Contain(nameof(PillMultiSelectInternalState.TooltipFormatter));
         fired.Should().Contain(nameof(PillMultiSelectInternalState.SelectionTooltip));
@@ -214,7 +214,7 @@ public class PillOverridableStringsTests
             PlusMoreFormat = "and {0} others",
         };
 
-        var result = PillOverflowFormatter.Format(items, options);
+        var result = PillOverflowFormatter.Format(items, r => r.Display, r => r.Abbreviation, options);
 
         result.Should().Be("A, B, and 2 others");
     }

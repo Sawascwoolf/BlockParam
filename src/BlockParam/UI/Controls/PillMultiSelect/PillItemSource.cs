@@ -35,6 +35,8 @@ internal sealed class PillItemSource
     private IEnumerable? _itemsSource;
     private string? _displayMemberPath;
     private string? _abbreviationMemberPath;
+    private Func<object, string>? _displayOverride;
+    private Func<object, string>? _abbreviationOverride;
 
     /// <summary>
     /// Raised after a row is added to the internal state. Allows
@@ -116,6 +118,37 @@ internal sealed class PillItemSource
         }
     }
 
+    /// <summary>
+    /// Optional delegate that overrides <see cref="DisplayMemberPath"/> for
+    /// display-string resolution. When set, called instead of the member-path
+    /// reflection path. Set via the <c>DisplaySelector</c> CLR escape hatch.
+    /// </summary>
+    internal Func<object, string>? DisplayOverride
+    {
+        get => _displayOverride;
+        set
+        {
+            _displayOverride = value;
+            RefreshDisplayStrings();
+        }
+    }
+
+    /// <summary>
+    /// Optional delegate that overrides <see cref="AbbreviationMemberPath"/>
+    /// for abbreviation-string resolution. When set, called instead of the
+    /// member-path reflection path. Set via the <c>AbbreviationSelector</c>
+    /// CLR escape hatch.
+    /// </summary>
+    internal Func<object, string>? AbbreviationOverride
+    {
+        get => _abbreviationOverride;
+        set
+        {
+            _abbreviationOverride = value;
+            RefreshAbbreviationStrings();
+        }
+    }
+
     // ── Private helpers ──────────────────────────────────────────────────────
 
     private void RebuildRows()
@@ -164,11 +197,17 @@ internal sealed class PillItemSource
             kvp.Value.Abbreviation = ResolveAbbreviation(kvp.Key, kvp.Value.Display);
     }
 
-    private string ResolveDisplay(object source) =>
-        _resolver.Resolve(source, _displayMemberPath, s => s.ToString() ?? string.Empty);
+    private string ResolveDisplay(object source)
+    {
+        if (_displayOverride != null) return _displayOverride(source);
+        return _resolver.Resolve(source, _displayMemberPath, s => s.ToString() ?? string.Empty);
+    }
 
-    private string ResolveAbbreviation(object source, string displayFallback) =>
-        _resolver.Resolve(source, _abbreviationMemberPath, _ => displayFallback);
+    private string ResolveAbbreviation(object source, string displayFallback)
+    {
+        if (_abbreviationOverride != null) return _abbreviationOverride(source);
+        return _resolver.Resolve(source, _abbreviationMemberPath, _ => displayFallback);
+    }
 
     private void OnSourceCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
     {

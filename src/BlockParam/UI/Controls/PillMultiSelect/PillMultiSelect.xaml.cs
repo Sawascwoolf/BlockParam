@@ -2,6 +2,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.ComponentModel;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
@@ -15,10 +16,9 @@ namespace BlockParam.UI.Controls.PillMultiSelect;
 /// &lt;PillMultiSelect ItemsSource="{Binding Dbs}"
 ///                   DisplayMemberPath="Name"
 ///                   AbbreviationMemberPath="Number"
-///                   Label="Data blocks" /&gt;
+///                   Label="Data blocks"
+///                   TooltipMode="FullNames" /&gt;
 /// </code>
-/// Selection is managed through the popup checkboxes in Phase 1;
-/// <c>SelectedItems</c> / <c>IsSelectedMemberPath</c> arrive in Phase 2.
 /// </summary>
 public partial class PillMultiSelect : UserControl
 {
@@ -26,6 +26,11 @@ public partial class PillMultiSelect : UserControl
     private readonly MemberPathResolver _memberPathResolver;
     private readonly PillItemSource _itemSource;
     private readonly PillSelectionSync _selectionSync;
+    private readonly PillFormatterCoordinator _formatter;
+
+    // Guards the IsOpen DP ↔ _internalState.IsOpen two-way propagation
+    // from cycling indefinitely.
+    private bool _syncingIsOpen;
 
     public PillMultiSelect()
     {
@@ -35,7 +40,13 @@ public partial class PillMultiSelect : UserControl
         _memberPathResolver = new MemberPathResolver();
         _itemSource = new PillItemSource(_internalState, _memberPathResolver);
         _selectionSync = new PillSelectionSync(_internalState, _itemSource, _memberPathResolver);
+        _formatter = new PillFormatterCoordinator(_internalState, _itemSource);
+
         _selectionSync.SelectionChanged += OnSyncSelectionChanged;
+
+        // Subscribe to _internalState.IsOpen so user-driven popup opens/closes
+        // propagate back to the DP (two-way binding support).
+        _internalState.PropertyChanged += OnInternalStatePropertyChanged;
 
         // Set DataContext on the *content* so the existing XAML bindings
         // ({Binding IsOpen}, {Binding FilteredItems}, etc.) resolve against
@@ -103,9 +114,20 @@ public partial class PillMultiSelect : UserControl
         set => SetValue(IconProperty, value);
     }
 
+    /// <summary>
+    /// Overflow rules for the trigger pill's summary text. Controls when the
+    /// control switches from full display names to abbreviations (entry-count
+    /// or char-count threshold) and when it collapses to "+N more".
+    /// <para>
+    /// <b>Precedence</b>: overridden by the <see cref="DisplayFormatter"/> CLR
+    /// escape hatch when both are set — code hosts that supply a custom
+    /// formatter take priority over the DP.
+    /// </para>
+    /// </summary>
     public static readonly DependencyProperty OverflowOptionsProperty =
         DependencyProperty.Register(nameof(OverflowOptions), typeof(PillOverflowOptions), typeof(PillMultiSelect),
-            new PropertyMetadata(null, (d, e) => ((PillMultiSelect)d).OnOverflowOptionsChanged((PillOverflowOptions?)e.NewValue)));
+            new PropertyMetadata(null, (d, e) =>
+                ((PillMultiSelect)d)._formatter.OnOverflowOptionsChanged((PillOverflowOptions?)e.NewValue)));
 
     public PillOverflowOptions? OverflowOptions
     {
@@ -113,13 +135,61 @@ public partial class PillMultiSelect : UserControl
         set => SetValue(OverflowOptionsProperty, value);
     }
 
-    private void OnOverflowOptionsChanged(PillOverflowOptions? options)
+    /// <summary>
+    /// Built-in tooltip strategy for the trigger pill.
+    /// <list type="bullet">
+    /// <item><see cref="PillTooltipMode.None"/> — no tooltip (default).</item>
+    /// <item><see cref="PillTooltipMode.FullNames"/> — one full display name per line.</item>
+    /// <item><see cref="PillTooltipMode.AbbrevAndFullNames"/> — "Abbrev — Display" per line.</item>
+    /// </list>
+    /// <para>
+    /// <b>Precedence</b>: overridden by the <see cref="TooltipFormatter"/> CLR
+    /// escape hatch when both are set. Setting <c>TooltipFormatter</c> back to
+    /// <c>null</c> re-activates this DP.
+    /// </para>
+    /// </summary>
+    public static readonly DependencyProperty TooltipModeProperty =
+        DependencyProperty.Register(nameof(TooltipMode), typeof(PillTooltipMode), typeof(PillMultiSelect),
+            new PropertyMetadata(PillTooltipMode.None, (d, e) =>
+                ((PillMultiSelect)d)._formatter.OnTooltipModeChanged((PillTooltipMode)e.NewValue)));
+
+    public PillTooltipMode TooltipMode
     {
-        // Wire the formatter so the trigger summary uses the overflow rules.
-        // When options is null, revert to the default comma-join.
-        _internalState.DisplayFormatter = options != null
-            ? selected => PillOverflowFormatter.Format(selected, options)
-            : (Func<IReadOnlyList<PillRowViewModel>, string>?)null;
+        get => (PillTooltipMode)GetValue(TooltipModeProperty);
+        set => SetValue(TooltipModeProperty, value);
+    }
+
+    /// <summary>
+    /// Whether the popup is open. Two-way bindable; propagates to/from the
+    /// internal state so hosts can drive open/close programmatically without
+    /// reflection, and so the DP stays in sync when the user opens/closes the
+    /// popup by clicking the trigger.
+    /// </summary>
+    public static readonly DependencyProperty IsOpenProperty =
+        DependencyProperty.Register(nameof(IsOpen), typeof(bool), typeof(PillMultiSelect),
+            new PropertyMetadata(false, (d, e) => ((PillMultiSelect)d).OnIsOpenDpChanged((bool)e.NewValue)));
+
+    public bool IsOpen
+    {
+        get => (bool)GetValue(IsOpenProperty);
+        set => SetValue(IsOpenProperty, value);
+    }
+
+    private void OnIsOpenDpChanged(bool value)
+    {
+        if (_syncingIsOpen) return;
+        _syncingIsOpen = true;
+        try { _internalState.IsOpen = value; }
+        finally { _syncingIsOpen = false; }
+    }
+
+    private void OnInternalStatePropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName != nameof(PillMultiSelectInternalState.IsOpen)) return;
+        if (_syncingIsOpen) return;
+        _syncingIsOpen = true;
+        try { SetCurrentValue(IsOpenProperty, _internalState.IsOpen); }
+        finally { _syncingIsOpen = false; }
     }
 
     public static readonly DependencyProperty PopupWidthProperty =
@@ -253,30 +323,70 @@ public partial class PillMultiSelect : UserControl
 
     // ── CLR escape hatches ────────────────────────────────────────────────────
     // Code-only hosts can set these for fully custom formatting without subclassing.
-    // They take precedence over OverflowOptions when both are set.
+    // Precedence: CLR escape hatches always override the corresponding DP.
+    // To restore DP-driven behaviour, set the CLR property back to null.
 
     /// <summary>
-    /// Custom trigger-summary formatter. Overrides <see cref="OverflowOptions"/>
-    /// when both are set. Return value is the full text rendered between the
-    /// label and the count badge. Internal because the parameter type
-    /// <see cref="PillRowViewModel"/> is internal infrastructure; Phase 3
-    /// will genericize this or expose a <c>TooltipMode</c> DP for XAML hosts.
+    /// Custom trigger-summary formatter. Receives the source items (not wrapper
+    /// rows) of the currently selected entries.
+    /// <para>
+    /// <b>Precedence</b>: overrides <see cref="OverflowOptions"/> when both are
+    /// set. Setting back to <c>null</c> restores any <c>OverflowOptions</c> DP
+    /// value.
+    /// </para>
     /// </summary>
-    internal Func<IReadOnlyList<PillRowViewModel>, string>? DisplayFormatter
+    public Func<IReadOnlyList<object>, string>? DisplayFormatter
     {
-        get => _internalState.DisplayFormatter;
-        set => _internalState.DisplayFormatter = value;
+        get => _formatter.DisplayFormatter;
+        set => _formatter.DisplayFormatter = value;
     }
 
     /// <summary>
-    /// Custom tooltip formatter. Return null to suppress the tooltip
-    /// (e.g. when nothing is selected). Internal for the same reason as
-    /// <see cref="DisplayFormatter"/>; Phase 3 adds a <c>TooltipMode</c> DP.
+    /// Custom tooltip formatter. Receives the source items of selected entries;
+    /// return <c>null</c> to suppress the tooltip.
+    /// <para>
+    /// <b>Precedence</b>: overrides <see cref="TooltipMode"/> when both are set.
+    /// Setting back to <c>null</c> restores any <c>TooltipMode</c> DP value.
+    /// </para>
     /// </summary>
-    internal Func<IReadOnlyList<PillRowViewModel>, string?>? TooltipFormatter
+    public Func<IReadOnlyList<object>, string?>? TooltipFormatter
     {
-        get => _internalState.TooltipFormatter;
-        set => _internalState.TooltipFormatter = value;
+        get => _formatter.TooltipFormatter;
+        set => _formatter.TooltipFormatter = value;
+    }
+
+    /// <summary>
+    /// Per-item display-string selector. Overrides <see cref="DisplayMemberPath"/>
+    /// when set; falls back to <c>ToString()</c> when neither is set.
+    /// Existing rows are re-resolved immediately.
+    /// </summary>
+    public Func<object, string>? DisplaySelector
+    {
+        get => _formatter.DisplaySelector;
+        set => _formatter.DisplaySelector = value;
+    }
+
+    /// <summary>
+    /// Per-item abbreviation-string selector. Overrides <see cref="AbbreviationMemberPath"/>
+    /// when set; falls back to Display when neither is set.
+    /// Existing rows are re-resolved immediately.
+    /// </summary>
+    public Func<object, string>? AbbreviationSelector
+    {
+        get => _formatter.AbbreviationSelector;
+        set => _formatter.AbbreviationSelector = value;
+    }
+
+    /// <summary>
+    /// Custom search-filter predicate. Receives a source item and the current
+    /// search text; return <c>true</c> to include the item. Overrides the
+    /// default Display/Abbreviation contains-check when set. Setting back to
+    /// <c>null</c> restores the default.
+    /// </summary>
+    public Func<object, string, bool>? FilterPredicate
+    {
+        get => _formatter.FilterPredicate;
+        set => _formatter.FilterPredicate = value;
     }
 
     // ── Event handlers ────────────────────────────────────────────────────────
