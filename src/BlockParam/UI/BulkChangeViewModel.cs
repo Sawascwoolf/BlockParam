@@ -1338,15 +1338,29 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     /// <summary>
     /// Solo gesture (#58 peer-mode): replace the active set with just the
     /// target DB. Each dropped DB runs through the same Apply / Stash /
-    /// Cancel prompt RemoveActiveDb uses; if the user cancels on any one,
-    /// the remaining drops are aborted (the set ends up partially soloed).
+    /// Cancel prompt RemoveActiveDb uses.
+    ///
+    /// Cancel semantics:
+    ///   • Target was already in the active set → partial-set behaviour
+    ///     (current matches user choices: silently-dropped DBs stay dropped,
+    ///     cancelled-on DBs stay, target stays).
+    ///   • Target was newly built (soloed from the dropdown without first
+    ///     checking it) → any cancel reverts the entire gesture so the
+    ///     freshly-built target is NOT silently added alongside the DB the
+    ///     user explicitly refused to drop. Without this, Solo+Cancel from a
+    ///     single-DB session quietly mutates the active set into multi-DB
+    ///     shape, triggering a tree rebuild that orphans pending edits on
+    ///     the original DB.
+    ///
     /// Compound op (#78): builds the next snapshot in a local and commits
     /// once at the end → exactly one cascade per gesture.
     /// </summary>
     public void SoloActiveDb(DataBlockSummary target)
     {
-        var current = State;
+        var original = State;
+        var current = original;
         var targetDb = FindActiveDb(target);
+        bool targetWasNewlyBuilt = false;
         if (targetDb == null)
         {
             // The user soloed a row that wasn't already checked — append it
@@ -1360,9 +1374,25 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             }
             current = current.With(dbs: current.Dbs.Concat(new[] { built }).ToList());
             targetDb = built;
+            targetWasNewlyBuilt = true;
         }
 
-        State = ComposeRemoveOthers(current, targetDb);
+        var next = ComposeRemoveOthers(current, targetDb);
+
+        // If we just appended a fresh target and the prune loop bailed
+        // (next still carries DBs other than target), drop the whole
+        // composition: the user's Cancel applies to the entire gesture.
+        if (targetWasNewlyBuilt && next.Dbs.Count > 1)
+        {
+            Log.Information(
+                "Solo+Cancel reverted: target {Name} was newly built and a " +
+                "prune cancelled — restoring original active set",
+                target.Name);
+            IsDataBlocksDropdownOpen = false;
+            return;
+        }
+
+        State = next;
         IsDataBlocksDropdownOpen = false;
     }
 

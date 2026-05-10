@@ -334,6 +334,55 @@ public class BulkChangeViewModelInvariantTests
     }
 
     [Fact]
+    public void DropdownRow_SoloClick_AnchorHasEdits_PromptCancel_LeavesActiveSetUnchanged()
+    {
+        // Row 11b — sibling of Row 11 for the dropdown row-body click
+        // (SoloActiveDb path) instead of the checkbox toggle
+        // (AddActiveDbWithPendingEditPrompt path). Same scenario, different
+        // gesture. Captured from a v1.0.14 user-side TIA reproduction:
+        //
+        //   single-DB session (anchor with 1 pending inline edit)
+        //   → click "+" to open dropdown
+        //   → click the BODY of a peer row (Solo, not the checkbox)
+        //   → 3-way prompt fires for the anchor's pending edit
+        //   → user picks Cancel
+        //
+        // Pre-fix outcome: active set silently mutated to [anchor, peer]
+        // because SoloActiveDb appends the freshly-built target before
+        // ComposeRemoveOthers runs, and ComposeRemoveOthers's Cancel branch
+        // returns the partial composition. The cascade then rebuilt the
+        // tree to multi-DB shape, orphaning the anchor's pending VM, and
+        // the next chip-× silently removed the anchor with no prompt and
+        // no stash entry — pure data loss.
+        //
+        // Post-fix expectation: target was newly built + prune cancelled →
+        // SoloActiveDb reverts the whole gesture, leaving [anchor] intact
+        // with its pending edit on the original (still-live) tree.
+        var env = new ActiveSetTestBuilder()
+            .WithAnchor("flat-db.xml")
+            .WithDropdownPeer("nested-struct-db.xml")
+            .WithPendingEditsOn("FlatDB", count: 1)
+            .WithPromptResults(YesNoCancelResult.Cancel)
+            .Build();
+
+        var anchorLeaf = FindFirstPendingLeaf(env.Vm, "FlatDB");
+        var pendingValue = anchorLeaf.PendingValue;
+
+        env.Vm.SoloActiveDb(new DataBlockSummary("NestedStructDB", ""));
+
+        env.Vm.AllActiveDbs.Should().HaveCount(1,
+            "Solo+Cancel on a newly-built target must revert — no peer added");
+        env.Vm.AllActiveDbs[0].Info.Name.Should().Be("FlatDB");
+        env.Vm.HasStashedDbs.Should().BeFalse("Cancel does not stash");
+        anchorLeaf.PendingValue.Should().Be(pendingValue,
+            "tree never rebuilt → anchor's pending VM is still the same instance");
+        anchorLeaf.IsPendingInlineEdit.Should().BeTrue();
+        env.Mbx.AskYesNoCancelCallCount.Should().Be(1,
+            "exactly one prompt fired — the prune walks one DB");
+        AssertInvariants(env.Vm);
+    }
+
+    [Fact]
     public void Remove_ChipCloseAnchor_AnchorHasEdits_PromptKeep_StashesAnchorAndClearsPendingList()
     {
         // Row 12 — chip-× on the anchor with pending edits, user picks Keep.
