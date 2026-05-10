@@ -733,6 +733,17 @@ public class BulkChangeViewModelInvariantTests
             // Stage pending edits per requested DB. Rooted in each DB's
             // synthetic subtree (if multi-DB) or the flat tree (single-DB).
             // Each edit lands on a distinct leaf with a non-empty StartValue.
+            //
+            // Goes through the production inline-edit path
+            // (EditableStartValue setter → StartValueEdited event →
+            // OnSingleValueEdited → RefreshPendingAndPreview →
+            // RebuildPendingEdits) instead of poking PendingValue directly.
+            // The previous direct-assignment shortcut populated _pendingValue
+            // on the leaf VM but never fired the event chain that the UI
+            // relies on, so the bound PendingEdits collection — which the
+            // user actually sees — stayed empty in tests even though the
+            // tree thought it had pending edits. That divergence let the
+            // dropdown-add-Stash orphaning bug ship in v1.0.13 unflagged.
             foreach (var kvp in _pendingEditCounts)
             {
                 var dbName = kvp.Key;
@@ -754,7 +765,7 @@ public class BulkChangeViewModelInvariantTests
                     throw new System.InvalidOperationException(
                         $"WithPendingEditsOn: DB '{dbName}' has only {leaves.Count} primitive leaves with start values, requested {count}");
                 foreach (var leaf in leaves)
-                    leaf.PendingValue = leaf.StartValue == "0" ? "1" : "0";
+                    leaf.EditableStartValue = leaf.StartValue == "0" ? "1" : "0";
             }
 
             return new TestEnv(vm, mbx, appliedOrder);

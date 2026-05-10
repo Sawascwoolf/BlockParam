@@ -1081,6 +1081,11 @@ public partial class BulkChangeDialog : Window
     private void OnDbSwitcherButtonClick(object sender, RoutedEventArgs e)
     {
         if (DataContext is not BulkChangeViewModel vm) return;
+        Log.Information(
+            "[gesture] DbSwitcher + clicked (currently {OpenState}) | active=[{Active}] pending={Pending} stashed={Stashed}",
+            vm.IsDataBlocksDropdownOpen ? "open" : "closed",
+            string.Join(",", vm.AllActiveDbs.Select(d => d.Info.Name)),
+            vm.PendingEdits.Count, vm.StashedDbs.Count);
         if (vm.IsDataBlocksDropdownOpen)
         {
             vm.IsDataBlocksDropdownOpen = false;
@@ -1206,6 +1211,11 @@ public partial class BulkChangeDialog : Window
 
         // Defer so the popup absorbs the StaysOpen=False close cleanly
         // before we mutate the active set + rebuild the tree.
+        Log.Information(
+            "[gesture] Dropdown row solo-click → {Name} (active=[{Active}] pending={Pending} stashed={Stashed})",
+            item.Name,
+            string.Join(",", vm.AllActiveDbs.Select(d => d.Info.Name)),
+            vm.PendingEdits.Count, vm.StashedDbs.Count);
         Dispatcher.BeginInvoke(new Action(() =>
         {
             vm.SoloActiveDb(item.Summary);

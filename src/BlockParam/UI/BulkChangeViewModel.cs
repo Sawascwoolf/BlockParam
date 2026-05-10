@@ -1106,6 +1106,8 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     /// </summary>
     private void RequestRemoveActiveDb(ActiveDb db)
     {
+        Log.Information(
+            "[gesture] Chip × on {Name} | {State}", db.Info.Name, SnapshotState());
         if (State.Dbs.Count <= 1)
         {
             Log.Information(
@@ -1115,6 +1117,15 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         }
         RemoveActiveDb(db);
     }
+
+    /// <summary>
+    /// One-line dump of the gesture-relevant VM state for log breadcrumbs.
+    /// Reads the bound collections so the log matches what the user sees.
+    /// </summary>
+    private string SnapshotState() =>
+        $"active=[{string.Join(",", _activeDbs.Select(d => d.Info.Name))}] " +
+        $"pending={PendingEdits.Count} stashed={StashedDbs.Count} " +
+        $"treeShape={(_activeDbs.Count == 1 ? "single" : "multi")}";
 
     /// <summary>
     /// Owning PLC name for the active DB, surfaced as a dim prefix in the
@@ -1237,6 +1248,11 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         // through State, so the cascade fires exactly once per toggle (#78).
         var (wasActive, _) = GetActiveStatusFor(item.Summary);
         bool wantActive = item.IsActive;
+        Log.Information(
+            "[gesture] Dropdown row {Name} {Direction} (was={WasActive} now={WantActive}) | {State}",
+            item.Name,
+            wantActive ? "CHECKED" : "UNCHECKED",
+            wasActive, wantActive, SnapshotState());
 
         if (wantActive && !wasActive)
         {
@@ -1359,6 +1375,9 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     /// </summary>
     public void SoloActiveDbByReference(ActiveDb target)
     {
+        Log.Information(
+            "[gesture] Chip body click → solo {Name} | {State}",
+            target.Info.Name, SnapshotState());
         if (State.Dbs.Count <= 1)
         {
             // Already the only active DB — there's nothing to solo away. Use
@@ -1421,6 +1440,9 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     /// </summary>
     private void ReactivateStashedDb(StashedDbState stash)
     {
+        Log.Information(
+            "[gesture] Stash header click → reactivate {Name} | {State}",
+            stash.DbName, SnapshotState());
         var summary = stash.Summary;
         var current = State;
         var target = FindActiveDb(summary);
@@ -1473,6 +1495,9 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     /// </summary>
     private void RebuildAfterActiveSetChanged()
     {
+        Log.Information(
+            "[cascade] RebuildAfterActiveSetChanged → rebuilding tree | {State}",
+            SnapshotState());
         // Always re-sync the row checkbox states from the authoritative
         // active set so a refused toggle snaps back visually.
         RefreshFilteredDataBlockItemsActiveState();
@@ -1490,6 +1515,17 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         ApplyAllFilters();
         RefreshFlatList();
         RebuildActiveDbChips();
+        // PendingEdits / BulkPreview hold MemberNodeViewModel references —
+        // BuildRootMembersFromActiveDbs just minted fresh ones, so any
+        // surviving entries point at orphans from the prior tree. Without
+        // this refresh the inspector's "pending changes" list keeps showing
+        // edits whose DB just left the active set, and the chip-close /
+        // dropdown-add prompt machinery (which counts pending state on the
+        // *new* tree) silently disagrees with what the user sees. Same
+        // pattern as the _manualSelectedPaths.Clear() above — the cascade
+        // owns the cleanup of every collection that holds VM references.
+        RebuildPendingEdits();
+        BulkPreview.Clear();
         OnPropertyChanged(nameof(HasMultipleActiveDbs));
         OnPropertyChanged(nameof(SelectedFlatMember));
         OnPropertyChanged(nameof(SelectedScope));
@@ -1611,11 +1647,22 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     private PendingDecision PromptForPendingEditsOnRemove(ActiveDb db)
     {
         var pendingCount = CountPendingEditsForDb(db);
-        if (pendingCount == 0) return PendingDecision.NoEdits;
+        if (pendingCount == 0)
+        {
+            Log.Information(
+                "[prompt] no-prompt fast path on {Name} (CountPendingEditsForDb=0) | {State}",
+                db.Info.Name, SnapshotState());
+            return PendingDecision.NoEdits;
+        }
+        Log.Information(
+            "[prompt] Showing 3-way for {Name} (pending={Pending}) | {State}",
+            db.Info.Name, pendingCount, SnapshotState());
         var result = _messageBox.AskYesNoCancel(
             Res.Format("Dialog_SwitchDb_KeepConfirm_Text",
                 pendingCount, db.Info.Name),
             Res.Get("Dialog_SwitchDb_KeepConfirm_Title"));
+        Log.Information(
+            "[prompt] User picked {Result} for {Name}", result, db.Info.Name);
         return result switch
         {
             YesNoCancelResult.Yes => PendingDecision.Apply,
@@ -4019,6 +4066,9 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     /// </summary>
     private void OnSingleValueEdited(MemberNodeViewModel memberVm, string newValue)
     {
+        Log.Information(
+            "[gesture] Inline edit on {Path}: '{Old}' → '{New}' | {State}",
+            memberVm.Path, memberVm.StartValue ?? "", newValue, SnapshotState());
         if (string.IsNullOrEmpty(newValue))
         {
             // Inline revert / cleared field: drop any stale validation error
