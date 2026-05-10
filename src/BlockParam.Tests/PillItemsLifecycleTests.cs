@@ -8,13 +8,13 @@ namespace BlockParam.Tests;
 
 public class PillItemsLifecycleTests
 {
-    private static PillMultiSelectItemViewModel Item(string display, string abbrev, bool selected = false)
-        => new(display, abbrev) { IsSelected = selected };
+    private static PillRowViewModel Item(string display, string abbrev, bool selected = false)
+        => new(new object(), display, abbrev) { IsSelected = selected };
 
     [Fact]
     public void RemoveItem_unsubscribes_so_changes_no_longer_affect_aggregates()
     {
-        var vm = new PillMultiSelectViewModel();
+        var vm = new PillMultiSelectInternalState();
         var a = Item("A", "1", selected: true);
         vm.AddItem(a);
         vm.SelectedCount.Should().Be(1);
@@ -27,13 +27,13 @@ public class PillItemsLifecycleTests
         var notifications = new List<string?>();
         vm.PropertyChanged += (_, e) => notifications.Add(e.PropertyName);
         a.IsSelected = false;
-        notifications.Should().NotContain(nameof(PillMultiSelectViewModel.SelectedCount));
+        notifications.Should().NotContain(nameof(PillMultiSelectInternalState.SelectedCount));
     }
 
     [Fact]
     public void ClearItems_empties_collection_and_unsubscribes_from_remaining_items()
     {
-        var vm = new PillMultiSelectViewModel();
+        var vm = new PillMultiSelectInternalState();
         var a = Item("A", "1", selected: true);
         var b = Item("B", "2", selected: true);
         vm.AddItem(a);
@@ -51,20 +51,20 @@ public class PillItemsLifecycleTests
         vm.PropertyChanged += (_, e) => notifications.Add(e.PropertyName);
         a.IsSelected = false;
         b.IsSelected = false;
-        notifications.Should().NotContain(nameof(PillMultiSelectViewModel.SelectedCount));
+        notifications.Should().NotContain(nameof(PillMultiSelectInternalState.SelectedCount));
     }
 
     [Fact]
     public void Items_property_is_read_only_view_of_internal_collection()
     {
-        var vm = new PillMultiSelectViewModel();
+        var vm = new PillMultiSelectInternalState();
         vm.AddItem(Item("A", "1"));
         vm.AddItem(Item("B", "2"));
         vm.Items.Count.Should().Be(2);
         // Compile-time guarantee: vm.Items is IReadOnlyList<...> so
         // callers can't bypass AddItem/RemoveItem/ClearItems and corrupt
         // the PropertyChanged subscription bookkeeping.
-        vm.Items.Should().BeAssignableTo<IReadOnlyList<PillMultiSelectItemViewModel>>();
+        vm.Items.Should().BeAssignableTo<IReadOnlyList<PillRowViewModel>>();
     }
 }
 
@@ -73,7 +73,7 @@ public class PillConfigDefaultsTests
     [Fact]
     public void Defaults_match_reference_design()
     {
-        var vm = new PillMultiSelectViewModel();
+        var vm = new PillMultiSelectInternalState();
         vm.PopupWidth.Should().Be(280);
         vm.PopupMaxListHeight.Should().Be(280);
         vm.ShowSearchBox.Should().BeTrue();
@@ -81,25 +81,25 @@ public class PillConfigDefaultsTests
     }
 
     [Theory]
-    [InlineData(nameof(PillMultiSelectViewModel.PopupWidth))]
-    [InlineData(nameof(PillMultiSelectViewModel.PopupMaxListHeight))]
-    [InlineData(nameof(PillMultiSelectViewModel.ShowSearchBox))]
-    [InlineData(nameof(PillMultiSelectViewModel.ShowFooterActions))]
+    [InlineData(nameof(PillMultiSelectInternalState.PopupWidth))]
+    [InlineData(nameof(PillMultiSelectInternalState.PopupMaxListHeight))]
+    [InlineData(nameof(PillMultiSelectInternalState.ShowSearchBox))]
+    [InlineData(nameof(PillMultiSelectInternalState.ShowFooterActions))]
     public void Config_setters_raise_property_changed(string propertyName)
     {
-        var vm = new PillMultiSelectViewModel();
+        var vm = new PillMultiSelectInternalState();
         var fired = new List<string?>();
         vm.PropertyChanged += (_, e) => fired.Add(e.PropertyName);
 
         switch (propertyName)
         {
-            case nameof(PillMultiSelectViewModel.PopupWidth):
+            case nameof(PillMultiSelectInternalState.PopupWidth):
                 vm.PopupWidth = 400; break;
-            case nameof(PillMultiSelectViewModel.PopupMaxListHeight):
+            case nameof(PillMultiSelectInternalState.PopupMaxListHeight):
                 vm.PopupMaxListHeight = 400; break;
-            case nameof(PillMultiSelectViewModel.ShowSearchBox):
+            case nameof(PillMultiSelectInternalState.ShowSearchBox):
                 vm.ShowSearchBox = false; break;
-            case nameof(PillMultiSelectViewModel.ShowFooterActions):
+            case nameof(PillMultiSelectInternalState.ShowFooterActions):
                 vm.ShowFooterActions = false; break;
         }
 
@@ -109,13 +109,13 @@ public class PillConfigDefaultsTests
     [Fact]
     public void Setting_same_value_skips_redundant_notification()
     {
-        var vm = new PillMultiSelectViewModel { PopupWidth = 400 };
+        var vm = new PillMultiSelectInternalState { PopupWidth = 400 };
         var fired = new List<string?>();
         vm.PropertyChanged += (_, e) => fired.Add(e.PropertyName);
 
         vm.PopupWidth = 400;
 
-        fired.Should().NotContain(nameof(PillMultiSelectViewModel.PopupWidth));
+        fired.Should().NotContain(nameof(PillMultiSelectInternalState.PopupWidth));
     }
 }
 
@@ -124,10 +124,10 @@ public class PillFormatterSetterTests
     [Fact]
     public void DisplayFormatter_setter_uses_equality_check_to_skip_redundant_updates()
     {
-        var vm = new PillMultiSelectViewModel();
-        vm.AddItem(new PillMultiSelectItemViewModel("A", "1") { IsSelected = true });
+        var vm = new PillMultiSelectInternalState();
+        vm.AddItem(new PillRowViewModel("src", "A", "1") { IsSelected = true });
 
-        Func<IReadOnlyList<PillMultiSelectItemViewModel>, string> fmt = _ => "x";
+        Func<IReadOnlyList<PillRowViewModel>, string> fmt = _ => "x";
         vm.DisplayFormatter = fmt;
 
         var fired = new List<string?>();
@@ -135,23 +135,23 @@ public class PillFormatterSetterTests
 
         vm.DisplayFormatter = fmt;
 
-        fired.Should().NotContain(nameof(PillMultiSelectViewModel.DisplayFormatter));
-        fired.Should().NotContain(nameof(PillMultiSelectViewModel.SelectedAbbreviationsText));
+        fired.Should().NotContain(nameof(PillMultiSelectInternalState.DisplayFormatter));
+        fired.Should().NotContain(nameof(PillMultiSelectInternalState.SelectedAbbreviationsText));
     }
 
     [Fact]
     public void TooltipFormatter_setter_raises_both_formatter_and_derived_property_changes()
     {
-        var vm = new PillMultiSelectViewModel();
-        vm.AddItem(new PillMultiSelectItemViewModel("A", "1") { IsSelected = true });
+        var vm = new PillMultiSelectInternalState();
+        vm.AddItem(new PillRowViewModel("src", "A", "1") { IsSelected = true });
 
         var fired = new List<string?>();
         vm.PropertyChanged += (_, e) => fired.Add(e.PropertyName);
 
         vm.TooltipFormatter = PillTooltipFormatters.FullNames;
 
-        fired.Should().Contain(nameof(PillMultiSelectViewModel.TooltipFormatter));
-        fired.Should().Contain(nameof(PillMultiSelectViewModel.SelectionTooltip));
+        fired.Should().Contain(nameof(PillMultiSelectInternalState.TooltipFormatter));
+        fired.Should().Contain(nameof(PillMultiSelectInternalState.SelectionTooltip));
     }
 }
 
@@ -167,7 +167,7 @@ public class PillOverridableStringsTests
     [Fact]
     public void Default_strings_resolve_to_resx_values()
     {
-        var vm = new PillMultiSelectViewModel();
+        var vm = new PillMultiSelectInternalState();
         vm.SearchPlaceholder.Should().Be("Search...");
         vm.ClearTooltip.Should().Be("Clear");
         vm.SelectAllText.Should().Be("Select all");
@@ -177,7 +177,7 @@ public class PillOverridableStringsTests
     [Fact]
     public void Setter_overrides_resx_default_so_host_apps_can_skip_the_localization_dependency()
     {
-        var vm = new PillMultiSelectViewModel
+        var vm = new PillMultiSelectInternalState
         {
             SearchPlaceholder = "Find tag…",
             ClearTooltip = "Wipe",
@@ -201,12 +201,12 @@ public class PillOverridableStringsTests
     [Fact]
     public void PlusMoreFormat_override_changes_collapse_suffix()
     {
-        var items = new List<PillMultiSelectItemViewModel>
+        var items = new List<PillRowViewModel>
         {
-            new("A", "1") { IsSelected = true },
-            new("B", "2") { IsSelected = true },
-            new("C", "3") { IsSelected = true },
-            new("D", "4") { IsSelected = true },
+            new("src1", "A", "1") { IsSelected = true },
+            new("src2", "B", "2") { IsSelected = true },
+            new("src3", "C", "3") { IsSelected = true },
+            new("src4", "D", "4") { IsSelected = true },
         };
         var options = new PillOverflowOptions
         {

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Reflection;
 using System.Threading;
 using System.Windows;
 using System.Windows.Controls;
@@ -25,18 +26,44 @@ namespace BlockParam.DevLauncher;
 /// </summary>
 internal static class PillMultiSelectCapture
 {
-    private static readonly (string Display, string Abbrev)[] DemoEmployees =
+    // ── Demo data DTOs ────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Demo employee row. Exposed as a public property set so
+    /// <see cref="PillMultiSelect.DisplayMemberPath"/> and
+    /// <see cref="PillMultiSelect.AbbreviationMemberPath"/> can resolve them.
+    /// </summary>
+    private sealed class DemoEmployee
     {
-        ("A. Kowalski", "AKO"),
-        ("B. Schäfer", "BSC"),
-        ("C. Hoffmann", "CHO"),
-        ("D. Lang", "DLN"),
-        ("E. Krüger", "EKR"),
-        ("F. Baumann", "FBM"),
-        ("G. Weber", "GWE"),
-        ("H. Roth", "HRT"),
-        ("I. Zentner", "IZN"),
-        ("J. Fischer", "JFR"),
+        public string Name { get; set; } = string.Empty;
+        public string Abbrev { get; set; } = string.Empty;
+    }
+
+    /// <summary>
+    /// Demo data-block row bound via <see cref="PillMultiSelect.DisplayMemberPath"/>
+    /// and <see cref="PillMultiSelect.AbbreviationMemberPath"/>.
+    /// </summary>
+    private sealed class DemoDb
+    {
+        public string Name { get; set; } = string.Empty;
+        public string Number { get; set; } = string.Empty;
+        public int DbNumber { get; set; }
+    }
+
+    // ── Fixtures ──────────────────────────────────────────────────────────────
+
+    private static readonly DemoEmployee[] DemoEmployees =
+    {
+        new() { Name = "A. Kowalski",  Abbrev = "AKO" },
+        new() { Name = "B. Schäfer",   Abbrev = "BSC" },
+        new() { Name = "C. Hoffmann",  Abbrev = "CHO" },
+        new() { Name = "D. Lang",      Abbrev = "DLN" },
+        new() { Name = "E. Krüger",    Abbrev = "EKR" },
+        new() { Name = "F. Baumann",   Abbrev = "FBM" },
+        new() { Name = "G. Weber",     Abbrev = "GWE" },
+        new() { Name = "H. Roth",      Abbrev = "HRT" },
+        new() { Name = "I. Zentner",   Abbrev = "IZN" },
+        new() { Name = "J. Fischer",   Abbrev = "JFR" },
     };
 
     // Material person icon (24x24).
@@ -92,6 +119,8 @@ internal static class PillMultiSelectCapture
         ("DB_WaterChiller", 51),
     };
 
+    // ── Public entry points ───────────────────────────────────────────────────
+
     public static void Run(string outDir)
     {
         var sceneData = new (string File, string[] Selected, bool Open)[]
@@ -103,16 +132,13 @@ internal static class PillMultiSelectCapture
         var scenes = new List<CaptureScene>();
         foreach (var (file, selected, open) in sceneData)
         {
-            // Build creates the window AND captures the inner control into
-            // a closure variable; Capture then reads that variable to do
-            // the composite render. Each iteration gets its own `control`.
             PillMultiSelect? control = null;
             scenes.Add(new CaptureScene(
                 Build: () =>
                 {
-                    var (window, c, vm) = BuildSceneWindow();
-                    ApplySelection(vm, selected);
-                    vm.IsOpen = open;
+                    var (window, c) = BuildSceneWindow();
+                    ApplySelectionByAbbrev(c, selected);
+                    SetIsOpen(c, open);
                     control = c;
                     return window;
                 },
@@ -133,18 +159,12 @@ internal static class PillMultiSelectCapture
     /// <summary>
     /// Interactive demo: opens a normal (chromed, resizable) window hosting
     /// the multi-PLC pill row pre-seeded with the same fixtures as the
-    /// capture scenes. The window stays up so the user can click pills,
-    /// toggle selections, type in the search box, and watch the overflow
-    /// rules engage in real time.
+    /// capture scenes.
     /// </summary>
     public static void RunDbInteractive()
     {
         UiZoomService.ReplaceShared(UiZoomService.CreateEphemeral());
 
-        // Application MUST be constructed before any Window/UserControl —
-        // XAML markup extensions (loc:Loc, StaticResource on theme keys)
-        // resolve against Application.Current. Building the visual tree
-        // first leaves you with un-resolved bindings: blank white window.
         var app = new Application();
         app.DispatcherUnhandledException += (_, e) =>
         {
@@ -198,36 +218,30 @@ internal static class PillMultiSelectCapture
     }
 
     /// <summary>
-    /// Multi-PLC datablock demo. Renders four scenes that exercise the
-    /// overflow rules (full names below threshold, DB-numbers above, "+N more"
-    /// collapse) and the WrapPanel layout for projects with many PLCs.
+    /// Multi-PLC datablock demo. Renders scenes exercising the overflow rules
+    /// and the WrapPanel layout for projects with many PLCs.
     /// </summary>
     public static void RunDb(string outDir)
     {
         var sceneData = new (string File, PlcSeed[] Plcs)[]
         {
-            // Below thresholds: full DB names rendered.
             ("03_db_short.png", new[]
             {
                 new PlcSeed("PLC_PowerStation", PlcASample, new[] { 99 }),
             }),
-            // Char-threshold trip: 3 long names → switch to DB-numbers.
             ("04_db_chars_overflow.png", new[]
             {
                 new PlcSeed("PLC_PowerStation", PlcASample, new[] { 10, 42, 100 }),
             }),
-            // Count + collapse trip: 6 selected → DB-numbers AND "+N more".
             ("05_db_count_overflow.png", new[]
             {
                 new PlcSeed("PLC_PowerStation", PlcASample, new[] { 10, 11, 42, 99, 100, 200 }),
             }),
-            // Two PLCs side by side, each carrying its own selection.
             ("06_db_multi_plc.png", new[]
             {
                 new PlcSeed("PLC_PowerStation", PlcASample, new[] { 10, 99 }),
                 new PlcSeed("PLC_FillerLine", PlcBSample, new[] { 5, 21 }),
             }),
-            // Four PLCs — WrapPanel demonstrates row-2 wrap on a narrower host.
             ("07_db_wrap.png", new[]
             {
                 new PlcSeed("PLC_PowerStation", PlcASample, new[] { 10, 11, 42, 99, 100, 200 }),
@@ -240,7 +254,6 @@ internal static class PillMultiSelectCapture
         var scenes = new List<CaptureScene>();
         foreach (var (file, plcs) in sceneData)
         {
-            // Wrap scenario uses a narrower host so the second row actually appears.
             var width = file.Contains("wrap") ? 720.0 : double.NaN;
             scenes.Add(new CaptureScene(
                 Build: () => BuildPlcRowWindow(plcs, width),
@@ -255,15 +268,8 @@ internal static class PillMultiSelectCapture
         RunCaptureScenes(outDir, scenes);
     }
 
-    /// <summary>
-    /// Shared headless-capture orchestration. Pins en-US so screenshots are
-    /// language-stable, sets up an explicit-shutdown <see cref="Application"/>
-    /// with a logging exception handler, then drives each scene through the
-    /// dispatcher: build → wait for ContentRendered → pump layout → capture →
-    /// close → next. Each scene encapsulates the one-off bits (which window
-    /// to build, where the PNG goes) so this method is the only place the
-    /// boilerplate lives.
-    /// </summary>
+    // ── Private orchestration ─────────────────────────────────────────────────
+
     private static void RunCaptureScenes(string outDir, IReadOnlyList<CaptureScene> scenes)
     {
         var en = new CultureInfo("en-US");
@@ -306,16 +312,11 @@ internal static class PillMultiSelectCapture
         app.Run();
     }
 
-    /// <summary>
-    /// Builds a chromeless host whose content is a WrapPanel of one
-    /// <see cref="PillMultiSelect"/> per supplied PLC seed. Each pill carries
-    /// the PLC name as its label and a <see cref="PillOverflowFormatter"/>
-    /// configured for the DB defaults.
-    /// </summary>
+    // ── Builder helpers ───────────────────────────────────────────────────────
+
     private static Window BuildPlcRowWindow(IReadOnlyList<PlcSeed> plcs, double widthOrNaN)
     {
         var wrap = new WrapPanel { Orientation = Orientation.Horizontal };
-
         foreach (var seed in plcs)
             wrap.Children.Add(BuildPlcPill(seed));
 
@@ -336,9 +337,7 @@ internal static class PillMultiSelectCapture
             Background = Brushes.Transparent,
         };
         if (double.IsNaN(widthOrNaN))
-        {
             window.SizeToContent = SizeToContent.WidthAndHeight;
-        }
         else
         {
             window.Width = widthOrNaN;
@@ -349,58 +348,58 @@ internal static class PillMultiSelectCapture
 
     /// <summary>
     /// Constructs one configured <see cref="PillMultiSelect"/> from a PLC
-    /// seed. Used by both the headless capture scenes and the interactive
-    /// demo so the layout, fixtures, and overflow rules stay in sync.
+    /// seed using the new DP API. Used by both headless captures and the
+    /// interactive demo so fixtures stay in sync.
     /// </summary>
     private static PillMultiSelect BuildPlcPill(PlcSeed seed)
     {
-        var vm = new PillMultiSelectViewModel
-        {
-            Label = seed.Plc,
-            Icon = Geometry.Parse(DatabaseIconPath),
-        };
-        foreach (var (name, num) in seed.Dbs)
-            vm.AddItem(new PillMultiSelectItemViewModel(name, $"DB{num}", num));
-        foreach (var num in seed.SelectedDbNumbers)
-        {
-            var item = vm.Items.FirstOrDefault(i => (int?)i.Payload == num);
-            if (item != null) item.IsSelected = true;
-        }
+        var dbs = seed.Dbs
+            .Select(d => new DemoDb { Name = d.Name, Number = $"DB{d.Number}", DbNumber = d.Number })
+            .ToList();
 
         var options = PillOverflowOptions.DataBlockDefault();
-        vm.DisplayFormatter = selected => PillOverflowFormatter.Format(selected, options);
-        // Hover the pill to recover the full DB names that overflow has
-        // collapsed/abbreviated — opt-in via TooltipFormatter so callers
-        // who don't want hover hints simply leave it null.
-        vm.TooltipFormatter = PillTooltipFormatters.FullNames;
 
-        return new PillMultiSelect
+        var pill = new PillMultiSelect
         {
-            DataContext = vm,
+            ItemsSource = dbs,
+            DisplayMemberPath = nameof(DemoDb.Name),
+            AbbreviationMemberPath = nameof(DemoDb.Number),
+            Label = seed.Plc,
+            Icon = Geometry.Parse(DatabaseIconPath),
+            OverflowOptions = options,
             HorizontalAlignment = HorizontalAlignment.Left,
             Margin = new Thickness(0, 0, 8, 8),
         };
+
+        // Hover the pill to recover the full DB names that overflow has
+        // collapsed/abbreviated.
+        pill.TooltipFormatter = PillTooltipFormatters.FullNames;
+
+        // TODO Phase 2: replace this internal access with SelectedItems DP.
+        // Phase 1 has no SelectedItems DP, so we walk the internal rows to
+        // pre-select items that match the seed's chosen DB numbers.
+        pill.Loaded += (_, _) => ApplySelectionByDbNumber(pill, seed.SelectedDbNumbers);
+
+        return pill;
     }
 
-    private static (Window window, PillMultiSelect control, PillMultiSelectViewModel vm) BuildSceneWindow()
+    private static (Window window, PillMultiSelect control) BuildSceneWindow()
     {
-        var vm = new PillMultiSelectViewModel
-        {
-            Label = "Mitarbeiter",
-            Icon = Geometry.Parse(PersonIconPath),
-        };
-        foreach (var (display, abbrev) in DemoEmployees)
-            vm.AddItem(new PillMultiSelectItemViewModel(display, abbrev));
+        var employees = DemoEmployees
+            .Select(e => new DemoEmployee { Name = e.Name, Abbrev = e.Abbrev })
+            .ToList();
 
         var control = new PillMultiSelect
         {
-            DataContext = vm,
+            ItemsSource = employees,
+            DisplayMemberPath = nameof(DemoEmployee.Name),
+            AbbreviationMemberPath = nameof(DemoEmployee.Abbrev),
+            Label = "Mitarbeiter",
+            Icon = Geometry.Parse(PersonIconPath),
             HorizontalAlignment = HorizontalAlignment.Left,
             VerticalAlignment = VerticalAlignment.Top,
         };
 
-        // Outer host: light page background to mimic an embedded usage,
-        // generous padding so the pill + popup don't kiss the edges.
         var host = new Border
         {
             Background = new SolidColorBrush(Color.FromRgb(0xF6, 0xF7, 0xF9)),
@@ -418,68 +417,94 @@ internal static class PillMultiSelectCapture
             AllowsTransparency = true,
             Background = Brushes.Transparent,
         };
-        return (window, control, vm);
+        return (window, control);
     }
 
-    private static void ApplySelection(PillMultiSelectViewModel vm, string[] abbrevs)
+    // ── Selection helpers (use InternalsVisibleTo until Phase 2 SelectedItems DP) ──
+
+    /// <summary>
+    /// Pre-selects rows by matching their Abbreviation string. Used for the
+    /// employee scenes where abbreviations are stable keys.
+    /// TODO Phase 2: replace with SelectedItems DP binding.
+    /// </summary>
+    private static void ApplySelectionByAbbrev(PillMultiSelect pill, string[] abbrevs)
     {
-        foreach (var abbrev in abbrevs)
+        var state = GetInternalState(pill);
+        if (state == null) return;
+        var abbrevSet = new HashSet<string>(abbrevs, StringComparer.Ordinal);
+        foreach (var row in state.Items)
         {
-            foreach (var item in vm.Items)
-            {
-                if (item.Abbreviation == abbrev)
-                {
-                    item.IsSelected = true;
-                    break;
-                }
-            }
+            if (abbrevSet.Contains(row.Abbreviation))
+                row.IsSelected = true;
         }
     }
 
+    /// <summary>
+    /// Pre-selects rows by matching the source item's <see cref="DemoDb.DbNumber"/>.
+    /// TODO Phase 2: replace with SelectedItems DP binding.
+    /// </summary>
+    private static void ApplySelectionByDbNumber(PillMultiSelect pill, int[] dbNumbers)
+    {
+        var state = GetInternalState(pill);
+        if (state == null) return;
+        var numSet = new HashSet<int>(dbNumbers);
+        foreach (var row in state.Items)
+        {
+            if (row.Source is DemoDb db && numSet.Contains(db.DbNumber))
+                row.IsSelected = true;
+        }
+    }
+
+    private static void SetIsOpen(PillMultiSelect pill, bool open)
+    {
+        var state = GetInternalState(pill);
+        if (state != null) state.IsOpen = open;
+    }
+
+    /// <summary>
+    /// Retrieves the internal state via the InternalsVisibleTo access grant.
+    /// This is the only DevLauncher site that touches internals; it exists
+    /// solely because Phase 1 has no SelectedItems DP. Remove in Phase 2.
+    /// </summary>
+    private static PillMultiSelectInternalState? GetInternalState(PillMultiSelect pill)
+    {
+        // _internalState is a private field — accessible because BlockParam.csproj
+        // has InternalsVisibleTo("BlockParam.DevLauncher"), but field access
+        // still requires reflection here (the field is private, not internal).
+        var field = typeof(PillMultiSelect).GetField("_internalState",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        return field?.GetValue(pill) as PillMultiSelectInternalState;
+    }
+
+    // ── Layout / render helpers ───────────────────────────────────────────────
+
     private static void PumpLayout(Window window)
     {
-        // Make sure the popup (if open) has fully arranged before we snap.
-        // ContextIdle drains every higher-priority queue, then Render flushes
-        // the final visual update.
         CommandManager.InvalidateRequerySuggested();
         window.UpdateLayout();
         window.Dispatcher.Invoke(() => { }, DispatcherPriority.ContextIdle);
         window.Dispatcher.Invoke(() => { }, DispatcherPriority.Render);
     }
 
-    /// <summary>
-    /// Renders the host window (containing the trigger pill) and the open
-    /// popup's child element into a single composite PNG. The Popup lives in
-    /// its own HWND so a window-level RenderTargetBitmap would miss it; we
-    /// render both pieces independently and stitch them onto a transparent
-    /// canvas, with the popup placed flush under the trigger.
-    /// </summary>
     private static void CompositeTriggerAndPopupToPng(
         Window window, PillMultiSelect control, string outputPath, double scale)
     {
         var popupChild = FindPopupChild(control)
             ?? throw new InvalidOperationException("Popup child not found.");
-        // Force the popup's own visual tree to measure/arrange at its natural size.
         popupChild.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
         popupChild.Arrange(new Rect(popupChild.DesiredSize));
         popupChild.UpdateLayout();
 
-        // The trigger lives inside Border > UserControl > Grid > ToggleButton.
-        // Its origin relative to the host window's content root determines
-        // where the popup should sit in the composite.
         var trigger = FindToggleTrigger(control)
             ?? throw new InvalidOperationException("Pill trigger not found.");
         var triggerOrigin = trigger.TranslatePoint(new Point(0, 0), window);
 
         var triggerHeight = trigger.RenderSize.Height;
         var popupSize = popupChild.RenderSize;
-        // Popup's VerticalOffset in XAML is 4 — match it visually.
         const double popupVerticalGap = 4;
 
-        // Final composite size: tall enough to fit window + popup tail; wide
-        // enough to fit either the window or the popup's right edge.
         var popupRight = triggerOrigin.X + popupSize.Width;
-        var totalWidth = Math.Max(window.ActualWidth, popupRight + 24);   // +24 padding
+        var totalWidth = Math.Max(window.ActualWidth, popupRight + 24);
         var totalHeight = triggerOrigin.Y + triggerHeight + popupVerticalGap + popupSize.Height + 24;
 
         var dpi = 96.0 * scale;
@@ -490,15 +515,12 @@ internal static class PillMultiSelectCapture
         var dv = new DrawingVisual();
         using (var dc = dv.RenderOpen())
         {
-            // Page background under everything (matches host Border).
             dc.DrawRectangle(new SolidColorBrush(Color.FromRgb(0xF6, 0xF7, 0xF9)),
                 null, new Rect(0, 0, totalWidth, totalHeight));
 
-            // Render the host window's visual tree (trigger pill + padding).
             var winBmp = RenderToBitmap(window, window.ActualWidth, window.ActualHeight, scale);
             dc.DrawImage(winBmp, new Rect(0, 0, window.ActualWidth, window.ActualHeight));
 
-            // Render the popup child below the trigger.
             var popBmp = RenderToBitmap(popupChild, popupSize.Width, popupSize.Height, scale);
             var popX = triggerOrigin.X;
             var popY = triggerOrigin.Y + triggerHeight + popupVerticalGap;
@@ -525,9 +547,8 @@ internal static class PillMultiSelectCapture
 
     private static FrameworkElement? FindPopupChild(PillMultiSelect control)
     {
-        // The popup's named in XAML as PillPopup.
         var field = typeof(PillMultiSelect).GetField("PillPopup",
-            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+            BindingFlags.Instance | BindingFlags.NonPublic);
         if (field?.GetValue(control) is System.Windows.Controls.Primitives.Popup popup)
             return popup.Child as FrameworkElement;
         return null;
@@ -536,7 +557,7 @@ internal static class PillMultiSelectCapture
     private static FrameworkElement? FindToggleTrigger(PillMultiSelect control)
     {
         var field = typeof(PillMultiSelect).GetField("PillTrigger",
-            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+            BindingFlags.Instance | BindingFlags.NonPublic);
         return field?.GetValue(control) as FrameworkElement;
     }
 }

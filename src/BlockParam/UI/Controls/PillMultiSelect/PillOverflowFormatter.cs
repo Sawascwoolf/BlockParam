@@ -12,10 +12,10 @@ namespace BlockParam.UI.Controls.PillMultiSelect;
 /// (2) collapse — keep the first N rendered tokens and append "+M more" for
 /// the rest. Both can apply to the same selection.
 /// </summary>
-public static class PillOverflowFormatter
+internal static class PillOverflowFormatter
 {
     public static string Format(
-        IReadOnlyList<PillMultiSelectItemViewModel> selected,
+        IReadOnlyList<PillRowViewModel> selected,
         PillOverflowOptions options)
     {
         if (selected.Count == 0) return string.Empty;
@@ -39,7 +39,7 @@ public static class PillOverflowFormatter
     }
 
     private static bool ShouldAbbreviate(
-        IReadOnlyList<PillMultiSelectItemViewModel> selected,
+        IReadOnlyList<PillRowViewModel> selected,
         PillOverflowOptions options)
     {
         if (options.AbbreviateAfterEntries is int maxEntries && selected.Count > maxEntries)

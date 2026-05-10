@@ -15,8 +15,8 @@ public class PillOverflowOptions
     private string? _plusMoreFormat;
 
     /// <summary>
-    /// Switch from full <see cref="PillMultiSelectItemViewModel.Display"/>
-    /// to short <see cref="PillMultiSelectItemViewModel.Abbreviation"/>
+    /// Switch from full <see cref="PillRowViewModel.Display"/>
+    /// to short <see cref="PillRowViewModel.Abbreviation"/>
     /// when the selection has more than this many entries. Null disables
     /// the count-based switch.
     /// </summary>

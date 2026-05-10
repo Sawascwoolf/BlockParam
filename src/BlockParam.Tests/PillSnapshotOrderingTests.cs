@@ -6,12 +6,12 @@ namespace BlockParam.Tests;
 
 public class PillSnapshotOrderingTests
 {
-    private static PillMultiSelectItemViewModel Item(string display, string abbrev, bool selected = false)
-        => new(display, abbrev) { IsSelected = selected };
+    private static PillRowViewModel Item(string display, string abbrev, bool selected = false)
+        => new(new object(), display, abbrev) { IsSelected = selected };
 
-    private static PillMultiSelectViewModel BuildVm(params PillMultiSelectItemViewModel[] items)
+    private static PillMultiSelectInternalState BuildVm(params PillRowViewModel[] items)
     {
-        var vm = new PillMultiSelectViewModel();
+        var vm = new PillMultiSelectInternalState();
         foreach (var item in items) vm.AddItem(item);
         return vm;
     }
@@ -19,7 +19,7 @@ public class PillSnapshotOrderingTests
     [Fact]
     public void SortSelectedFirst_defaults_to_true()
     {
-        var vm = new PillMultiSelectViewModel();
+        var vm = new PillMultiSelectInternalState();
         vm.SortSelectedFirst.Should().BeTrue();
     }
 

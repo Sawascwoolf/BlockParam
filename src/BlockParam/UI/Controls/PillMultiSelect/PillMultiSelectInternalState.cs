@@ -12,14 +12,20 @@ using BlockParam.Localization;
 namespace BlockParam.UI.Controls.PillMultiSelect;
 
 /// <summary>
-/// View model for <see cref="PillMultiSelect"/>. Owns the item collection,
-/// the open/closed state of the popup, the search text, and the derived
-/// trigger summary (joined abbreviations + count). Items track their own
-/// selection — the VM aggregates by listening for <see cref="PillMultiSelectItemViewModel.IsSelected"/>
-/// changes — so callers can drive selection from outside without going
-/// through the VM (e.g. by setting <c>IsSelected</c> on a known item).
+/// Presentation state for the <see cref="PillMultiSelect"/> UserControl.
+/// Owns the row collection, the open/closed state of the popup, the search
+/// text, and the derived trigger summary (joined abbreviations + count).
+/// Rows track their own selection state; this class aggregates by subscribing
+/// to <see cref="PillRowViewModel.IsSelected"/> changes.
 /// </summary>
 /// <remarks>
+/// This class is internal infrastructure — hosts use the UserControl's
+/// DependencyProperties and never instantiate this directly. The UserControl
+/// creates one instance in its constructor and sets the content's
+/// <c>DataContext</c> to it so the existing XAML bindings (
+/// <c>{Binding IsOpen}</c>, <c>{Binding FilteredItems}</c>, etc.) resolve
+/// here unchanged.
+///
 /// Known v1 scope limit: no keyboard navigation inside the popup — users
 /// toggle by click and dismiss by clicking outside. There is no Tab-into-
 /// list, arrow-walk, Space/Enter-toggle, or Escape-to-close. Wire those up
@@ -27,16 +33,16 @@ namespace BlockParam.UI.Controls.PillMultiSelect;
 /// on the search box and ListBox when a host app needs them.
 ///
 /// Localization: every user-facing string the control renders is exposed
-/// as an overridable VM property (<see cref="SearchPlaceholder"/>,
+/// as an overridable property (<see cref="SearchPlaceholder"/>,
 /// <see cref="ClearTooltip"/>, <see cref="SelectAllText"/>,
 /// <see cref="ResetText"/>) plus <see cref="PillOverflowOptions.PlusMoreFormat"/>
 /// for the "+N more" suffix. Defaults pull from BlockParam's resx so the
 /// in-tree app stays unchanged; host apps that don't ship that resx can
 /// set the properties directly without dragging in <c>BlockParam.Localization</c>.
 /// </remarks>
-public class PillMultiSelectViewModel : ViewModelBase
+internal sealed class PillMultiSelectInternalState : ViewModelBase
 {
-    private readonly ObservableCollection<PillMultiSelectItemViewModel> _items;
+    private readonly ObservableCollection<PillRowViewModel> _items;
     private readonly ListCollectionView _filteredView;
     private string _searchText = string.Empty;
     private bool _isOpen;
@@ -51,12 +57,12 @@ public class PillMultiSelectViewModel : ViewModelBase
     private double _popupMaxListHeight = 280;
     private bool _showSearchBox = true;
     private bool _showFooterActions = true;
-    private Func<IReadOnlyList<PillMultiSelectItemViewModel>, string>? _displayFormatter;
-    private Func<IReadOnlyList<PillMultiSelectItemViewModel>, string?>? _tooltipFormatter;
+    private Func<IReadOnlyList<PillRowViewModel>, string>? _displayFormatter;
+    private Func<IReadOnlyList<PillRowViewModel>, string?>? _tooltipFormatter;
 
-    public PillMultiSelectViewModel()
+    internal PillMultiSelectInternalState()
     {
-        _items = new ObservableCollection<PillMultiSelectItemViewModel>();
+        _items = new ObservableCollection<PillRowViewModel>();
         _items.CollectionChanged += OnItemsCollectionChanged;
 
         _filteredView = (ListCollectionView)CollectionViewSource.GetDefaultView(_items);
@@ -93,7 +99,7 @@ public class PillMultiSelectViewModel : ViewModelBase
     /// <summary>
     /// Placeholder text shown inside the popup's search box when empty.
     /// Defaults to the localized "Search..." string; callers can override
-    /// for context-specific phrasing (e.g. "Search employees...").
+    /// for context-specific phrasing.
     /// </summary>
     public string SearchPlaceholder
     {
@@ -132,12 +138,12 @@ public class PillMultiSelectViewModel : ViewModelBase
     }
 
     /// <summary>
-    /// All items the control knows about, regardless of search/sort. Read-only
-    /// — callers add and remove through <see cref="AddItem"/>,
-    /// <see cref="RemoveItem"/>, and <see cref="ClearItems"/> so the VM can
-    /// keep its internal <c>PropertyChanged</c> subscriptions in sync.
+    /// All rows the control knows about, regardless of search/sort. Read-only
+    /// — mutate through <see cref="AddItem"/>, <see cref="RemoveItem"/>, and
+    /// <see cref="ClearItems"/> so the internal <c>PropertyChanged</c>
+    /// subscriptions stay consistent.
     /// </summary>
-    public IReadOnlyList<PillMultiSelectItemViewModel> Items => _items;
+    public IReadOnlyList<PillRowViewModel> Items => _items;
 
     public ICollectionView FilteredItems => _filteredView;
 
@@ -173,8 +179,7 @@ public class PillMultiSelectViewModel : ViewModelBase
 
     /// <summary>
     /// Whether the popup footer (Select all / Reset links + n/N counter) is
-    /// shown. Set false when bulk actions and counts aren't useful to the
-    /// host application.
+    /// shown. Set false when bulk actions and counts aren't useful.
     /// </summary>
     public bool ShowFooterActions
     {
@@ -216,7 +221,7 @@ public class PillMultiSelectViewModel : ViewModelBase
     /// <summary>
     /// When true (default), items selected at the moment the popup opens
     /// are shown at the top, separated from the rest by a 1px divider.
-    /// The grouping is *frozen* while the popup is open so toggling a
+    /// The grouping is frozen while the popup is open so toggling a
     /// checkbox doesn't make the row jump out from under the cursor.
     /// Disable to keep strict source order.
     /// </summary>
@@ -226,9 +231,7 @@ public class PillMultiSelectViewModel : ViewModelBase
         set
         {
             if (SetProperty(ref _sortSelectedFirst, value))
-            {
                 SnapshotOrdering();
-            }
         }
     }
 
@@ -239,11 +242,10 @@ public class PillMultiSelectViewModel : ViewModelBase
     /// <summary>
     /// Custom display strategy for the trigger pill's middle-text region.
     /// Default (when null) is "comma-joined abbreviations of selected items".
-    /// Callers with overflow concerns (long DB names, many entries) set this
-    /// to <see cref="PillOverflowFormatter.Format"/> bound to a configured
-    /// <see cref="PillOverflowOptions"/>.
+    /// Set to <see cref="PillOverflowFormatter.Format"/> bound to a configured
+    /// <see cref="PillOverflowOptions"/> when overflow handling is needed.
     /// </summary>
-    public Func<IReadOnlyList<PillMultiSelectItemViewModel>, string>? DisplayFormatter
+    public Func<IReadOnlyList<PillRowViewModel>, string>? DisplayFormatter
     {
         get => _displayFormatter;
         set
@@ -273,13 +275,12 @@ public class PillMultiSelectViewModel : ViewModelBase
     /// Optional tooltip strategy for the trigger pill. When null (default),
     /// the pill has no tooltip. When set, the delegate is invoked on each
     /// selection change to produce the tooltip text — common use is showing
-    /// full <see cref="PillMultiSelectItemViewModel.Display"/> names of all
-    /// selected items, one per line, so users can recover from the
-    /// abbreviation/collapse overflow without opening the popup.
-    /// Returning null from the formatter also suppresses the tooltip
-    /// (e.g. when nothing is selected).
+    /// full <see cref="PillRowViewModel.Display"/> names of all selected items,
+    /// one per line, so users can recover from abbreviation/collapse overflow
+    /// without opening the popup. Returning null from the formatter also
+    /// suppresses the tooltip.
     /// </summary>
-    public Func<IReadOnlyList<PillMultiSelectItemViewModel>, string?>? TooltipFormatter
+    public Func<IReadOnlyList<PillRowViewModel>, string?>? TooltipFormatter
     {
         get => _tooltipFormatter;
         set
@@ -291,8 +292,7 @@ public class PillMultiSelectViewModel : ViewModelBase
 
     /// <summary>
     /// Bound to the trigger pill's <c>ToolTip</c>. Null when the formatter
-    /// is unset or the formatter returns null, which WPF interprets as
-    /// "no tooltip" (no popup, no hover delay penalty).
+    /// is unset or returns null, which WPF interprets as "no tooltip".
     /// </summary>
     public string? SelectionTooltip
     {
@@ -310,12 +310,12 @@ public class PillMultiSelectViewModel : ViewModelBase
     public ICommand ResetCommand { get; }
     public ICommand ClearCommand { get; }
 
-    public void AddItem(PillMultiSelectItemViewModel item)
+    public void AddItem(PillRowViewModel item)
     {
         _items.Add(item);
     }
 
-    public bool RemoveItem(PillMultiSelectItemViewModel item)
+    public bool RemoveItem(PillRowViewModel item)
     {
         return _items.Remove(item);
     }
@@ -339,11 +339,11 @@ public class PillMultiSelectViewModel : ViewModelBase
         // handled here — the collection is already empty and OldItems is
         // null). Add/Remove paths still need to (un)subscribe.
         if (e.NewItems != null)
-            foreach (PillMultiSelectItemViewModel item in e.NewItems)
+            foreach (PillRowViewModel item in e.NewItems)
                 item.PropertyChanged += OnItemPropertyChanged;
 
         if (e.OldItems != null)
-            foreach (PillMultiSelectItemViewModel item in e.OldItems)
+            foreach (PillRowViewModel item in e.OldItems)
                 item.PropertyChanged -= OnItemPropertyChanged;
 
         RaiseAggregatesChanged();
@@ -351,7 +351,7 @@ public class PillMultiSelectViewModel : ViewModelBase
 
     private void OnItemPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (e.PropertyName == nameof(PillMultiSelectItemViewModel.IsSelected))
+        if (e.PropertyName == nameof(PillRowViewModel.IsSelected))
             RaiseAggregatesChanged();
     }
 
@@ -366,10 +366,9 @@ public class PillMultiSelectViewModel : ViewModelBase
 
     /// <summary>
     /// Captures the current selection state into each item's
-    /// <see cref="PillMultiSelectItemViewModel.WasSelectedAtSort"/> field
-    /// and re-applies the sort/group descriptions on the filtered view.
-    /// Called when the popup opens or when <see cref="SortSelectedFirst"/>
-    /// changes.
+    /// <see cref="PillRowViewModel.WasSelectedAtSort"/> field and re-applies
+    /// the sort/group descriptions on the filtered view. Called when the
+    /// popup opens or when <see cref="SortSelectedFirst"/> changes.
     /// </summary>
     private void SnapshotOrdering()
     {
@@ -405,30 +404,30 @@ public class PillMultiSelectViewModel : ViewModelBase
             if (!(anyIn && anyOut)) return;
 
             _filteredView.SortDescriptions.Add(
-                new SortDescription(nameof(PillMultiSelectItemViewModel.WasSelectedAtSort),
+                new SortDescription(nameof(PillRowViewModel.WasSelectedAtSort),
                                     ListSortDirection.Descending));
             _filteredView.GroupDescriptions.Add(
-                new PropertyGroupDescription(nameof(PillMultiSelectItemViewModel.WasSelectedAtSort)));
+                new PropertyGroupDescription(nameof(PillRowViewModel.WasSelectedAtSort)));
         }
     }
 
     private bool FilterPredicate(object obj)
     {
         if (string.IsNullOrEmpty(_searchText)) return true;
-        if (obj is not PillMultiSelectItemViewModel item) return false;
-        return item.Display.IndexOf(_searchText, System.StringComparison.OrdinalIgnoreCase) >= 0
-            || item.Abbreviation.IndexOf(_searchText, System.StringComparison.OrdinalIgnoreCase) >= 0;
+        if (obj is not PillRowViewModel item) return false;
+        return item.Display.IndexOf(_searchText, StringComparison.OrdinalIgnoreCase) >= 0
+            || item.Abbreviation.IndexOf(_searchText, StringComparison.OrdinalIgnoreCase) >= 0;
     }
 
     /// <summary>
     /// Selects every item currently passing the filter. Items hidden by the
     /// active search aren't touched — matches the convention of "Select all"
     /// in filterable list UIs (Linear, Notion, Figma) where it means
-    /// "all *visible*", not "all in dataset".
+    /// "all visible", not "all in dataset".
     /// </summary>
     private void SelectAllVisible()
     {
-        foreach (var item in _filteredView.Cast<PillMultiSelectItemViewModel>())
+        foreach (var item in _filteredView.Cast<PillRowViewModel>())
             item.IsSelected = true;
     }
 

@@ -19,16 +19,16 @@ public class PillOverflowFormatterTests
         Thread.CurrentThread.CurrentUICulture = en;
     }
 
-    private static PillMultiSelectItemViewModel Item(string display, string abbrev, bool selected = true)
+    private static PillRowViewModel Item(string display, string abbrev, bool selected = true)
     {
-        var vm = new PillMultiSelectItemViewModel(display, abbrev);
+        var vm = new PillRowViewModel(new object(), display, abbrev);
         vm.IsSelected = selected;
         return vm;
     }
 
-    private static IReadOnlyList<PillMultiSelectItemViewModel> Items(params (string Display, string Abbrev)[] data)
+    private static IReadOnlyList<PillRowViewModel> Items(params (string Display, string Abbrev)[] data)
     {
-        var list = new List<PillMultiSelectItemViewModel>();
+        var list = new List<PillRowViewModel>();
         foreach (var (d, a) in data) list.Add(Item(d, a));
         return list;
     }

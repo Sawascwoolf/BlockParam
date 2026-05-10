@@ -6,11 +6,8 @@ namespace BlockParam.Tests;
 
 public class PillTooltipTests
 {
-    private static PillMultiSelectItemViewModel Item(string display, string abbrev, bool selected = true)
-    {
-        var vm = new PillMultiSelectItemViewModel(display, abbrev) { IsSelected = selected };
-        return vm;
-    }
+    private static PillRowViewModel Item(string display, string abbrev, bool selected = true)
+        => new(new object(), display, abbrev) { IsSelected = selected };
 
     [Fact]
     public void FullNames_joins_displays_one_per_line()
@@ -30,7 +27,7 @@ public class PillTooltipTests
     [Fact]
     public void SelectionTooltip_is_null_when_no_formatter_set()
     {
-        var vm = new PillMultiSelectViewModel();
+        var vm = new PillMultiSelectInternalState();
         vm.AddItem(Item("DB_A", "DB1"));
         vm.SelectionTooltip.Should().BeNull();
     }
@@ -38,7 +35,7 @@ public class PillTooltipTests
     [Fact]
     public void SelectionTooltip_is_null_when_nothing_selected()
     {
-        var vm = new PillMultiSelectViewModel { TooltipFormatter = PillTooltipFormatters.FullNames };
+        var vm = new PillMultiSelectInternalState { TooltipFormatter = PillTooltipFormatters.FullNames };
         vm.AddItem(Item("DB_A", "DB1", selected: false));
         vm.AddItem(Item("DB_B", "DB2", selected: false));
         vm.SelectionTooltip.Should().BeNull();
@@ -47,7 +44,7 @@ public class PillTooltipTests
     [Fact]
     public void SelectionTooltip_runs_formatter_and_excludes_unselected_items()
     {
-        var vm = new PillMultiSelectViewModel { TooltipFormatter = PillTooltipFormatters.FullNames };
+        var vm = new PillMultiSelectInternalState { TooltipFormatter = PillTooltipFormatters.FullNames };
         vm.AddItem(Item("DB_A", "DB1", selected: true));
         vm.AddItem(Item("DB_B", "DB2", selected: false));
         vm.AddItem(Item("DB_C", "DB3", selected: true));
@@ -57,7 +54,7 @@ public class PillTooltipTests
     [Fact]
     public void SelectionTooltip_updates_when_selection_changes()
     {
-        var vm = new PillMultiSelectViewModel { TooltipFormatter = PillTooltipFormatters.FullNames };
+        var vm = new PillMultiSelectInternalState { TooltipFormatter = PillTooltipFormatters.FullNames };
         var a = Item("DB_A", "DB1", selected: true);
         var b = Item("DB_B", "DB2", selected: false);
         vm.AddItem(a);
