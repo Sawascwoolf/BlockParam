@@ -389,6 +389,15 @@ public partial class PillMultiSelect : UserControl
         set => _formatter.FilterPredicate = value;
     }
 
+    // ── Internals exposed for headless screenshot composition ────────────────
+    // The Popup lives in its own HWND, so a window-level RenderTargetBitmap
+    // misses it — the DevLauncher capture tool composites the trigger and the
+    // popup's child element manually. These properties hand it the two named
+    // XAML elements without needing reflection.
+
+    internal System.Windows.Controls.Primitives.Popup PopupElement => PillPopup;
+    internal FrameworkElement TriggerElement => PillTrigger;
+
     // ── Event handlers ────────────────────────────────────────────────────────
 
     private void OnPopupOpened(object sender, EventArgs e)

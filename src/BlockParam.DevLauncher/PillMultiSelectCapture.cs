@@ -4,7 +4,6 @@ using System.Collections.ObjectModel;
 using System.Globalization;
 using System.IO;
 using System.Linq;
-using System.Reflection;
 using System.Threading;
 using System.Windows;
 using System.Windows.Controls;
@@ -463,8 +462,7 @@ internal static class PillMultiSelectCapture
         popupChild.Arrange(new Rect(popupChild.DesiredSize));
         popupChild.UpdateLayout();
 
-        var trigger = FindToggleTrigger(control)
-            ?? throw new InvalidOperationException("Pill trigger not found.");
+        var trigger = FindToggleTrigger(control);
         var triggerOrigin = trigger.TranslatePoint(new Point(0, 0), window);
 
         var triggerHeight = trigger.RenderSize.Height;
@@ -513,19 +511,9 @@ internal static class PillMultiSelectCapture
         return rtb;
     }
 
-    private static FrameworkElement? FindPopupChild(PillMultiSelect control)
-    {
-        var field = typeof(PillMultiSelect).GetField("PillPopup",
-            BindingFlags.Instance | BindingFlags.NonPublic);
-        if (field?.GetValue(control) is System.Windows.Controls.Primitives.Popup popup)
-            return popup.Child as FrameworkElement;
-        return null;
-    }
+    private static FrameworkElement? FindPopupChild(PillMultiSelect control) =>
+        control.PopupElement.Child as FrameworkElement;
 
-    private static FrameworkElement? FindToggleTrigger(PillMultiSelect control)
-    {
-        var field = typeof(PillMultiSelect).GetField("PillTrigger",
-            BindingFlags.Instance | BindingFlags.NonPublic);
-        return field?.GetValue(control) as FrameworkElement;
-    }
+    private static FrameworkElement FindToggleTrigger(PillMultiSelect control) =>
+        control.TriggerElement;
 }
