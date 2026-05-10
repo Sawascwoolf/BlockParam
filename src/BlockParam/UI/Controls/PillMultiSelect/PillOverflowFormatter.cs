@@ -1,6 +1,6 @@
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
-using BlockParam.Localization;
 
 namespace BlockParam.UI.Controls.PillMultiSelect;
 
@@ -29,8 +29,10 @@ public static class PillOverflowFormatter
         {
             var visible = tokens.Take(max);
             var hidden = tokens.Count - max;
-            // Localized "+{0} more" so DE renders as "+3 weitere".
-            return string.Join(", ", visible) + ", " + Res.Format("PillMultiSelect_PlusMore", hidden);
+            // Format string is host-overridable — see PillOverflowOptions.PlusMoreFormat.
+            // Default pulls localized "+{0} more" / "+{0} weitere" from BlockParam's resx.
+            return string.Join(", ", visible) + ", "
+                + string.Format(CultureInfo.CurrentCulture, options.PlusMoreFormat, hidden);
         }
 
         return string.Join(", ", tokens);

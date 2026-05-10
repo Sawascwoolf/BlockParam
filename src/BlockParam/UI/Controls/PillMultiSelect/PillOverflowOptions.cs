@@ -1,3 +1,5 @@
+using BlockParam.Localization;
+
 namespace BlockParam.UI.Controls.PillMultiSelect;
 
 /// <summary>
@@ -10,6 +12,8 @@ namespace BlockParam.UI.Controls.PillMultiSelect;
 /// </summary>
 public class PillOverflowOptions
 {
+    private string? _plusMoreFormat;
+
     /// <summary>
     /// Switch from full <see cref="PillMultiSelectItemViewModel.Display"/>
     /// to short <see cref="PillMultiSelectItemViewModel.Abbreviation"/>
@@ -33,6 +37,19 @@ public class PillOverflowOptions
     /// rendered.
     /// </summary>
     public int? CollapseAfterEntries { get; set; }
+
+    /// <summary>
+    /// Format string for the suffix appended once <see cref="CollapseAfterEntries"/>
+    /// trips. Must contain a single <c>{0}</c> placeholder for the hidden-
+    /// item count. Defaults to the localized "+{0} more" pulled from
+    /// BlockParam's resx; host apps not shipping that resx can set this
+    /// directly (e.g. <c>"and {0} others"</c>) to avoid the dependency.
+    /// </summary>
+    public string PlusMoreFormat
+    {
+        get => _plusMoreFormat ?? Res.Get("PillMultiSelect_PlusMore");
+        set => _plusMoreFormat = value;
+    }
 
     /// <summary>
     /// Sensible defaults for the data-block use case: switch to DB-numbers
