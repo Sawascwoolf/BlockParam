@@ -109,10 +109,10 @@ public class HierarchyAnalyzer
             foreach (var m in db.AllMembers())
             {
                 if (m.Name != name || m.Datatype != datatype) continue;
-                // Match descendants by path-prefix. Each DB shares the same
-                // path strings for shared-shape companions, so ancestorPath
-                // resolved within selectedDb is the right prefix to apply
-                // across every active DB.
+                // Match descendants by path-prefix. DBs that share the same
+                // shape share the same path strings, so ancestorPath resolved
+                // within selectedDb is the right prefix to apply across every
+                // active DB.
                 if (string.Equals(m.Path, ancestorPath, StringComparison.Ordinal)
                     || m.Path.StartsWith(prefix, StringComparison.Ordinal))
                 {

@@ -13,8 +13,8 @@ namespace BlockParam.Services;
 /// reference.
 ///
 /// Replaces the inline closure-chains in <see cref="BlockParam.AddIn.BulkChangeContextMenu"/>
-/// (#81) — both the focused-DB factory shape and the companion-DB factory used
-/// to live there as ~120 lines of nested lambdas.
+/// (#81) — every active DB is built through the same factory now; before
+/// extraction this lived there as ~120 lines of nested lambdas.
 /// </summary>
 public interface IActiveDbFactory
 {

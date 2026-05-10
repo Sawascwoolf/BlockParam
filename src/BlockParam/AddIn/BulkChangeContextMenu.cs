@@ -113,7 +113,8 @@ public class BulkChangeContextMenu : ContextMenuAddIn
         var prompt = new MessageBoxUserPrompt();
         try
         {
-            // Multi-DB selection (#58). Index 0 is the focused DB; 1+ are companions.
+            // Multi-DB selection (#58). Index 0 is the anchor (display role
+            // for title / scope label); the rest are peer active DBs.
             var allSelected = provider.GetSelection<DataBlock>().ToList();
             if (allSelected.Count == 0) return;
 
@@ -122,7 +123,7 @@ public class BulkChangeContextMenu : ContextMenuAddIn
 
             Log.Information("Bulk Change v{Version} clicked on DB: {DbName}{Extra}",
                 typeof(BulkChangeContextMenu).Assembly.GetName().Version, allSelected[0].Name,
-                allSelected.Count > 1 ? $" (+{allSelected.Count - 1} companion DB(s))" : "");
+                allSelected.Count > 1 ? $" (+{allSelected.Count - 1} additional DB(s))" : "");
             Log.Information("UI culture: {Culture} (ResourceManager picks Strings.<lang>.resx satellite)",
                 System.Threading.Thread.CurrentThread.CurrentUICulture.Name);
 
@@ -172,8 +173,8 @@ public class BulkChangeContextMenu : ContextMenuAddIn
                 ? ProjectDiscovery.SafeGetPlcName(plcSoftware)
                 : "";
 
-            // Active DB factory. Encapsulates export + parse + OnApply closure for
-            // every DB (focused + companions) so OnClick no longer carries that logic.
+            // Active DB factory. Encapsulates export + parse + OnApply closure
+            // for every selected DB so OnClick no longer carries that logic.
             var dbFactory = new ActiveDbFactory(
                 blockExporter, adapter, tempDir,
                 constantResolver, udtResolver, commentResolver);
@@ -185,16 +186,17 @@ public class BulkChangeContextMenu : ContextMenuAddIn
             if (focused == null) return;
             var currentFocused = focused;
 
-            // Companion DBs (#58). Skipped if export fails (declined compile, etc.).
-            var companions = new List<ActiveDb>();
+            // Additional active DBs (#58). Skipped if export fails (declined
+            // compile, etc.).
+            var additionalDbs = new List<ActiveDb>();
             for (int i = 1; i < allSelected.Count; i++)
             {
                 var c = dbFactory.Build(allSelected[i], displayPlcName);
-                if (c != null) companions.Add(c);
+                if (c != null) additionalDbs.Add(c);
             }
-            if (companions.Count > 0)
-                Log.Information("Multi-DB session: {N} companion DB(s) active alongside {Primary}",
-                    companions.Count, focused.Info.Name);
+            if (additionalDbs.Count > 0)
+                Log.Information("Multi-DB session: {N} additional DB(s) active alongside {Primary}",
+                    additionalDbs.Count, focused.Info.Name);
 
             // Build the rest of the VM dependencies (config / project languages /
             // licensing / update check). Pure construction — no TIA tree walks.
@@ -259,7 +261,7 @@ public class BulkChangeContextMenu : ContextMenuAddIn
                         return newActive.Xml;
                     })
                     : null,
-                additionalActiveDbs: companions,
+                additionalActiveDbs: additionalDbs,
                 buildActiveDbForSummary: plcSoftware != null
                     ? new Func<DataBlockSummary, ActiveDb?>(summary =>
                     {

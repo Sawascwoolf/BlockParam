@@ -70,7 +70,7 @@ public class HierarchyAnalyzerMultiDbTests
         // When the focused DB has the selected member only once (no
         // within-DB scopes to lift, no cross-DB siblings), the
         // "All selected DBs" mega-scope is the only way to reach
-        // matching members in companion DBs — so the analyzer emits
+        // matching members in the other active DBs — so the analyzer emits
         // it via the combined.Count == 0 branch.
         var db1 = _parser.Parse(TestFixtures.LoadXml("flat-db.xml"));
         var db2 = _parser.Parse(TestFixtures.LoadXml("flat-db.xml"));

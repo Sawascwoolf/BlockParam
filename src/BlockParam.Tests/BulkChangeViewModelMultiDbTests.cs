@@ -14,7 +14,7 @@ namespace BlockParam.Tests;
 /// Coverage for #58 — bulk edit across multiple Data Blocks. Asserts the VM
 /// contract that the host (context menu / dropdown) relies on:
 /// <list type="bullet">
-///   <item>companion DBs land in the active set;</item>
+///   <item>peer DBs land in the active set;</item>
 ///   <item>the tree gains a synthetic per-DB layer when |active|&gt;1;</item>
 ///   <item>multi-DB Apply iterates every active DB once;</item>
 ///   <item>the freemium counter charges the SUM across all DBs (single
@@ -24,15 +24,15 @@ namespace BlockParam.Tests;
 public class BulkChangeViewModelMultiDbTests
 {
     private static (BulkChangeViewModel vm, IUsageTracker tracker,
-                    string focusedXml, string companionXml,
+                    string focusedXml, string peerXml,
                     List<string> applyOrder)
         CreateMultiDbVm()
     {
         var focusedXml = TestFixtures.LoadXml("flat-db.xml");
-        var companionXml = TestFixtures.LoadXml("nested-struct-db.xml");
+        var peerXml = TestFixtures.LoadXml("nested-struct-db.xml");
         var parser = new SimaticMLParser();
         var focused = parser.Parse(focusedXml);
-        var companion = parser.Parse(companionXml);
+        var peer = parser.Parse(peerXml);
 
         var configLoader = new ConfigLoader(null);
         var bulkService = new BulkChangeService(new ChangeLogger(), configLoader);
@@ -42,22 +42,22 @@ public class BulkChangeViewModelMultiDbTests
 
         var applyOrder = new List<string>();
 
-        var companionDb = new ActiveDb(
-            companion,
-            companionXml,
-            onApply: xml => applyOrder.Add(companion.Name));
+        var peerDb = new ActiveDb(
+            peer,
+            peerXml,
+            onApply: xml => applyOrder.Add(peer.Name));
 
         var vm = new BulkChangeViewModel(
             focused, focusedXml,
             new HierarchyAnalyzer(), bulkService, tracker, configLoader,
             onApply: xml => applyOrder.Add(focused.Name),
-            additionalActiveDbs: new[] { companionDb });
+            additionalActiveDbs: new[] { peerDb });
 
-        return (vm, tracker, focusedXml, companionXml, applyOrder);
+        return (vm, tracker, focusedXml, peerXml, applyOrder);
     }
 
     [Fact]
-    public void HasMultipleActiveDbs_TrueWhenCompanionPresent()
+    public void HasMultipleActiveDbs_TrueWhenPeerPresent()
     {
         var (vm, _, _, _, _) = CreateMultiDbVm();
         vm.HasMultipleActiveDbs.Should().BeTrue();
@@ -92,7 +92,7 @@ public class BulkChangeViewModelMultiDbTests
         var (vm, _, _, _, _) = CreateMultiDbVm();
 
         vm.RootMembers.Should().HaveCount(2,
-            "one synthetic group per active DB (focused + 1 companion)");
+            "one synthetic group per active DB (focused + 1 peer)");
         vm.RootMembers.Should().AllSatisfy(r =>
             r.Datatype.Should().Be("DB",
                 "synthetic groups carry Datatype='DB' so the tree template can render distinct chrome"));
@@ -134,11 +134,11 @@ public class BulkChangeViewModelMultiDbTests
 
         // Stage one inline edit on each DB so both have something to apply.
         var focusedSyntheticRoot = vm.RootMembers[0];
-        var companionSyntheticRoot = vm.RootMembers[1];
+        var peerSyntheticRoot = vm.RootMembers[1];
         var focusedLeaf = focusedSyntheticRoot.AllDescendants().First(n => n.IsLeaf);
-        var companionLeaf = companionSyntheticRoot.AllDescendants().First(n => n.IsLeaf);
+        var peerLeaf = peerSyntheticRoot.AllDescendants().First(n => n.IsLeaf);
         focusedLeaf.PendingValue = focusedLeaf.StartValue == "0" ? "1" : "0";
-        companionLeaf.PendingValue = companionLeaf.StartValue == "0" ? "1" : "0";
+        peerLeaf.PendingValue = peerLeaf.StartValue == "0" ? "1" : "0";
 
         vm.ApplyCommand.Execute(null);
 
@@ -155,9 +155,9 @@ public class BulkChangeViewModelMultiDbTests
         var (vm, tracker, _, _, _) = CreateMultiDbVm();
 
         var focusedLeaf = vm.RootMembers[0].AllDescendants().First(n => n.IsLeaf);
-        var companionLeaf = vm.RootMembers[1].AllDescendants().First(n => n.IsLeaf);
+        var peerLeaf = vm.RootMembers[1].AllDescendants().First(n => n.IsLeaf);
         focusedLeaf.PendingValue = focusedLeaf.StartValue == "0" ? "1" : "0";
-        companionLeaf.PendingValue = companionLeaf.StartValue == "0" ? "1" : "0";
+        peerLeaf.PendingValue = peerLeaf.StartValue == "0" ? "1" : "0";
 
         vm.ApplyCommand.Execute(null);
 
@@ -172,10 +172,10 @@ public class BulkChangeViewModelMultiDbTests
         // user has 1 quota left and 2 DBs each have 1 pending edit, Apply
         // is blocked — partial Apply across DBs would leave a half-state.
         var focusedXml = TestFixtures.LoadXml("flat-db.xml");
-        var companionXml = TestFixtures.LoadXml("nested-struct-db.xml");
+        var peerXml = TestFixtures.LoadXml("nested-struct-db.xml");
         var parser = new SimaticMLParser();
         var focused = parser.Parse(focusedXml);
-        var companion = parser.Parse(companionXml);
+        var peer = parser.Parse(peerXml);
 
         var configLoader = new ConfigLoader(null);
         var bulkService = new BulkChangeService(new ChangeLogger(), configLoader);
@@ -183,26 +183,26 @@ public class BulkChangeViewModelMultiDbTests
         tracker.GetStatus().Returns(new UsageStatus(0, 1));   // only 1 unit left
 
         bool focusedApplied = false;
-        bool companionApplied = false;
+        bool peerApplied = false;
 
-        var companionDb = new ActiveDb(companion, companionXml,
-            onApply: _ => companionApplied = true);
+        var peerDb = new ActiveDb(peer, peerXml,
+            onApply: _ => peerApplied = true);
 
         var vm = new BulkChangeViewModel(
             focused, focusedXml,
             new HierarchyAnalyzer(), bulkService, tracker, configLoader,
             onApply: _ => focusedApplied = true,
-            additionalActiveDbs: new[] { companionDb });
+            additionalActiveDbs: new[] { peerDb });
 
         var focusedLeaf = vm.RootMembers[0].AllDescendants().First(n => n.IsLeaf);
-        var companionLeaf = vm.RootMembers[1].AllDescendants().First(n => n.IsLeaf);
+        var peerLeaf = vm.RootMembers[1].AllDescendants().First(n => n.IsLeaf);
         focusedLeaf.PendingValue = focusedLeaf.StartValue == "0" ? "1" : "0";
-        companionLeaf.PendingValue = companionLeaf.StartValue == "0" ? "1" : "0";
+        peerLeaf.PendingValue = peerLeaf.StartValue == "0" ? "1" : "0";
 
         vm.ApplyCommand.Execute(null);
 
         focusedApplied.Should().BeFalse("pre-check blocks the whole batch");
-        companionApplied.Should().BeFalse("pre-check blocks the whole batch");
+        peerApplied.Should().BeFalse("pre-check blocks the whole batch");
         tracker.DidNotReceive().RecordUsage(Arg.Any<int>());
     }
 
@@ -212,10 +212,10 @@ public class BulkChangeViewModelMultiDbTests
         // Dropdown wrapper layer (#58): each row carries its IsActive / IsAnchor
         // flags so the multi-select UI can render the right checkbox / chrome.
         var focusedXml = TestFixtures.LoadXml("flat-db.xml");
-        var companionXml = TestFixtures.LoadXml("nested-struct-db.xml");
+        var peerXml = TestFixtures.LoadXml("nested-struct-db.xml");
         var parser = new SimaticMLParser();
         var focused = parser.Parse(focusedXml);
-        var companion = parser.Parse(companionXml);
+        var peer = parser.Parse(peerXml);
 
         var configLoader = new ConfigLoader(null);
         var bulkService = new BulkChangeService(new ChangeLogger(), configLoader);
@@ -225,18 +225,18 @@ public class BulkChangeViewModelMultiDbTests
         var enumerated = new[]
         {
             new DataBlockSummary(focused.Name, ""),
-            new DataBlockSummary(companion.Name, "Recipe"),
+            new DataBlockSummary(peer.Name, "Recipe"),
             new DataBlockSummary("DB_OtherUnused", "Misc"),
         };
 
-        var companionDb = new ActiveDb(companion, companionXml);
+        var peerDb = new ActiveDb(peer, peerXml);
 
         var vm = new BulkChangeViewModel(
             focused, focusedXml,
             new HierarchyAnalyzer(), bulkService, tracker, configLoader,
             enumerateDataBlocks: () => enumerated,
-            switchToDataBlock: s => s.Name == focused.Name ? focusedXml : companionXml,
-            additionalActiveDbs: new[] { companionDb });
+            switchToDataBlock: s => s.Name == focused.Name ? focusedXml : peerXml,
+            additionalActiveDbs: new[] { peerDb });
 
         // Open the dropdown to populate the wrapper list.
         vm.OpenDataBlocksDropdownCommand.Execute(null);
@@ -248,9 +248,9 @@ public class BulkChangeViewModelMultiDbTests
         focusedRow.IsActive.Should().BeTrue();
         focusedRow.IsAnchor.Should().BeTrue();
 
-        var companionRow = items.First(i => i.Name == companion.Name);
-        companionRow.IsActive.Should().BeTrue();
-        companionRow.IsAnchor.Should().BeFalse();
+        var peerRow = items.First(i => i.Name == peer.Name);
+        peerRow.IsActive.Should().BeTrue();
+        peerRow.IsAnchor.Should().BeFalse();
 
         var unusedRow = items.First(i => i.Name == "DB_OtherUnused");
         unusedRow.IsActive.Should().BeFalse();
@@ -261,17 +261,17 @@ public class BulkChangeViewModelMultiDbTests
     public void Phase2Cancel_ChargesPartialSum_AndClearsPendingOnCommittedDbsOnly()
     {
         // #58 review: verify the partial-commit accounting added in 3e530a0.
-        // Setup: focused + companion each have one staged inline edit; the
-        // companion's OnApply throws OperationCanceledException to simulate
+        // Setup: focused + peer each have one staged inline edit; the
+        // peer's OnApply throws OperationCanceledException to simulate
         // a TIA compile-prompt user-cancel. Expectation: focused DB commits
-        // (tracker charged for 1), companion is not double-committed,
-        // companion's pending edit stays (so the user can retry), focused
+        // (tracker charged for 1), peer is not double-committed,
+        // peer's pending edit stays (so the user can retry), focused
         // DB's pending flag clears.
         var focusedXml = TestFixtures.LoadXml("flat-db.xml");
-        var companionXml = TestFixtures.LoadXml("nested-struct-db.xml");
+        var peerXml = TestFixtures.LoadXml("nested-struct-db.xml");
         var parser = new SimaticMLParser();
         var focused = parser.Parse(focusedXml);
-        var companion = parser.Parse(companionXml);
+        var peer = parser.Parse(peerXml);
 
         var configLoader = new ConfigLoader(null);
         var bulkService = new BulkChangeService(new ChangeLogger(), configLoader);
@@ -280,8 +280,8 @@ public class BulkChangeViewModelMultiDbTests
         tracker.RecordUsage(Arg.Any<int>()).Returns(true);
 
         var focusedApplied = false;
-        var companionDb = new ActiveDb(
-            companion, companionXml,
+        var peerDb = new ActiveDb(
+            peer, peerXml,
             onApply: _ => throw new OperationCanceledException(
                 "simulated compile-prompt cancel"));
 
@@ -289,7 +289,7 @@ public class BulkChangeViewModelMultiDbTests
             focused, focusedXml,
             new HierarchyAnalyzer(), bulkService, tracker, configLoader,
             onApply: _ => focusedApplied = true,
-            additionalActiveDbs: new[] { companionDb });
+            additionalActiveDbs: new[] { peerDb });
 
         // Stage one leaf edit in each DB.
         var focusedLeaf = vm.RootMembers
@@ -297,15 +297,15 @@ public class BulkChangeViewModelMultiDbTests
             .AllDescendants().First(n => n.IsLeaf);
         focusedLeaf.PendingValue = focusedLeaf.StartValue == "0" ? "1" : "0";
 
-        var companionLeaf = vm.RootMembers
-            .First(r => r.Name == companion.Name)
+        var peerLeaf = vm.RootMembers
+            .First(r => r.Name == peer.Name)
             .AllDescendants().First(n => n.IsLeaf);
-        companionLeaf.PendingValue = companionLeaf.StartValue == "0" ? "1" : "0";
+        peerLeaf.PendingValue = peerLeaf.StartValue == "0" ? "1" : "0";
 
         vm.ApplyCommand.Execute(null);
 
-        // Focused DB committed; companion's OnApply threw. We can't re-assert
-        // companionApplied because OnApply is invoked even though it throws.
+        // Focused DB committed; peer's OnApply threw. We can't re-assert
+        // peerApplied because OnApply is invoked even though it throws.
         focusedApplied.Should().BeTrue("focused DB Apply must have run");
 
         // Quota: charged for the 1 committed change, not 2 — the cancelled
@@ -314,11 +314,11 @@ public class BulkChangeViewModelMultiDbTests
         tracker.DidNotReceive().RecordUsage(2);
 
         // Pending state: focused DB's pending value cleared (committed),
-        // companion's stays (user can retry after fixing whatever caused
+        // peer's stays (user can retry after fixing whatever caused
         // the cancel).
         focusedLeaf.IsPendingInlineEdit.Should().BeFalse(
             "committed DB's pending value should be cleared");
-        companionLeaf.IsPendingInlineEdit.Should().BeTrue(
+        peerLeaf.IsPendingInlineEdit.Should().BeTrue(
             "cancelled DB's pending value should remain for retry");
     }
 
@@ -326,7 +326,7 @@ public class BulkChangeViewModelMultiDbTests
     public void CommitChanges_InvokesEveryActiveDbsOnApply()
     {
         // The dialog-close auto-commit (CommitChanges) used to call only
-        // the focused DB's OnApply, silently dropping companion edits on
+        // the focused DB's OnApply, silently dropping peer edits on
         // close. Verify the multi-DB fix invokes every active DB.
         var (vm, _, _, _, applyOrder) = CreateMultiDbVm();
         vm.HasPendingChanges = true;
@@ -338,17 +338,17 @@ public class BulkChangeViewModelMultiDbTests
     }
 
     [Fact]
-    public void RemoveCompanion_PendingEdits_PromptsBeforeDropping()
+    public void RemovePeer_PendingEdits_PromptsBeforeDropping()
     {
-        // Unchecking a row whose companion has pending edits must surface
+        // Unchecking a row whose peer has pending edits must surface
         // the 3-way Apply / Stash / Cancel prompt (#58 / #59 stash semantics).
-        // Cancel branch: the companion stays, edits stay, no prompt is silently
+        // Cancel branch: the peer stays, edits stay, no prompt is silently
         // dropped.
         var focusedXml = TestFixtures.LoadXml("flat-db.xml");
-        var companionXml = TestFixtures.LoadXml("nested-struct-db.xml");
+        var peerXml = TestFixtures.LoadXml("nested-struct-db.xml");
         var parser = new SimaticMLParser();
         var focused = parser.Parse(focusedXml);
-        var companion = parser.Parse(companionXml);
+        var peer = parser.Parse(peerXml);
 
         var configLoader = new ConfigLoader(null);
         var bulkService = new BulkChangeService(new ChangeLogger(), configLoader);
@@ -357,37 +357,37 @@ public class BulkChangeViewModelMultiDbTests
         tracker.RecordUsage(Arg.Any<int>()).Returns(true);
 
         var mbx = new FakeMessageBox(YesNoCancelResult.Cancel);
-        bool companionApplied = false;
+        bool peerApplied = false;
 
-        var companionDb = new ActiveDb(companion, companionXml,
-            onApply: _ => companionApplied = true);
+        var peerDb = new ActiveDb(peer, peerXml,
+            onApply: _ => peerApplied = true);
 
         var vm = new BulkChangeViewModel(
             focused, focusedXml,
             new HierarchyAnalyzer(), bulkService, tracker, configLoader,
             messageBox: mbx,
-            additionalActiveDbs: new[] { companionDb });
+            additionalActiveDbs: new[] { peerDb });
 
-        // Stage one edit on the companion's tree.
-        var companionLeaf = vm.RootMembers
-            .First(r => r.Name == companion.Name)
+        // Stage one edit on the peer's tree.
+        var peerLeaf = vm.RootMembers
+            .First(r => r.Name == peer.Name)
             .AllDescendants().First(n => n.IsLeaf);
-        companionLeaf.PendingValue = companionLeaf.StartValue == "0" ? "1" : "0";
+        peerLeaf.PendingValue = peerLeaf.StartValue == "0" ? "1" : "0";
 
         // Open the popup so FilteredDataBlockItems is populated, then toggle
-        // off the companion row.
+        // off the peer row.
         vm.OpenDataBlocksDropdownCommand.Execute(null);
-        var companionRow = vm.FilteredDataBlockItems
-            .FirstOrDefault(i => i.Name == companion.Name);
-        if (companionRow == null) return; // dropdown didn't have the row — environment-dependent
+        var peerRow = vm.FilteredDataBlockItems
+            .FirstOrDefault(i => i.Name == peer.Name);
+        if (peerRow == null) return; // dropdown didn't have the row — environment-dependent
 
-        companionRow.IsActive = false;
+        peerRow.IsActive = false;
 
-        // Cancel branch: companion is still present, OnApply not called,
+        // Cancel branch: peer is still present, OnApply not called,
         // user's pending edit not silently lost.
         vm.HasMultipleActiveDbs.Should().BeTrue(
-            "Cancel must keep the companion in the active set");
-        companionApplied.Should().BeFalse();
+            "Cancel must keep the peer in the active set");
+        peerApplied.Should().BeFalse();
         mbx.AskYesNoCancelCallCount.Should().BeGreaterOrEqualTo(1,
             "the 3-way prompt was shown");
     }
@@ -396,21 +396,21 @@ public class BulkChangeViewModelMultiDbTests
     public void Search_HitCount_SumsAcrossAllActiveDbs()
     {
         // #58 multi-DB: a query that matches in BOTH the focused DB and a
-        // companion DB should report the combined hit count, not just the
+        // peer DB should report the combined hit count, not just the
         // focused DB's. Pre-fix, _searchService.Search ran against
-        // _active.Info only and silently missed companion-DB hits.
+        // _active.Info only and silently missed peer-DB hits.
         var (vm, _, _, _, _) = CreateMultiDbVm();
 
         // Both fixtures contain primitive members; pick a query that matches
         // common substring in member names. "speed" appears in flat-db.xml.
-        // Even if it doesn't match in the companion, the multi-DB code path
+        // Even if it doesn't match in the peer, the multi-DB code path
         // still has to run against it without crashing.
         vm.SearchQuery = "speed";
 
         // No assertion on a specific number — the test asserts the wiring
         // (no crash, hit count is consistent with the AND-over-DBs result).
         // The pre-fix bug would silently report only focused-DB hits even
-        // if the companion DB had matching members.
+        // if the peer DB had matching members.
         vm.SearchHitCount.Should().BeGreaterOrEqualTo(0);
     }
 
@@ -425,34 +425,34 @@ public class BulkChangeViewModelMultiDbTests
 
         // Find a leaf in each DB.
         var focusedRoot = vm.RootMembers.First();
-        var companionRoot = vm.RootMembers.Last();
+        var peerRoot = vm.RootMembers.Last();
         var focusedLeaf = focusedRoot.AllDescendants().First(n => n.IsLeaf);
-        var companionLeaf = companionRoot.AllDescendants().First(n => n.IsLeaf);
+        var peerLeaf = peerRoot.AllDescendants().First(n => n.IsLeaf);
 
         // Drive selection through the VM's onSelectionChanged so we don't
         // depend on a private setter.
         vm.UpdateManualSelection(
-            added: new[] { focusedLeaf, companionLeaf },
+            added: new[] { focusedLeaf, peerLeaf },
             removed: System.Array.Empty<MemberNodeViewModel>(),
             isFilterRehydration: false);
 
         vm.ManualSelectedPaths.Should().Contain(focusedLeaf,
             "focused-DB selection routes to its own VM reference");
-        vm.ManualSelectedPaths.Should().Contain(companionLeaf,
-            "companion-DB selection is a distinct entry, not aliased on path");
+        vm.ManualSelectedPaths.Should().Contain(peerLeaf,
+            "peer-DB selection is a distinct entry, not aliased on path");
     }
 
     [Fact]
     public void DropdownToggle_AddingDb_RebuildsTreeToMultiDbShape()
     {
         // Single-DB session with a dropdown that knows about a second DB.
-        // Toggling its row to IsActive=true must (a) add the companion to the
+        // Toggling its row to IsActive=true must (a) add the peer to the
         // active set and (b) rebuild RootMembers from a flat list (single-DB
         // shape) into two synthetic group nodes (multi-DB shape).
         var focusedXml = TestFixtures.LoadXml("flat-db.xml");
-        var companionXml = TestFixtures.LoadXml("nested-struct-db.xml");
+        var peerXml = TestFixtures.LoadXml("nested-struct-db.xml");
         var focused = new SimaticMLParser().Parse(focusedXml);
-        var companion = new SimaticMLParser().Parse(companionXml);
+        var peer = new SimaticMLParser().Parse(peerXml);
 
         var configLoader = new ConfigLoader(null);
         var bulkService = new BulkChangeService(new ChangeLogger(), configLoader);
@@ -460,16 +460,16 @@ public class BulkChangeViewModelMultiDbTests
         tracker.GetStatus().Returns(new UsageStatus(0, 100));
 
         var focusedSummary = new DataBlockSummary(focused.Name, "");
-        var companionSummary = new DataBlockSummary(companion.Name, "");
-        var available = new[] { focusedSummary, companionSummary };
+        var peerSummary = new DataBlockSummary(peer.Name, "");
+        var available = new[] { focusedSummary, peerSummary };
 
         var vm = new BulkChangeViewModel(
             focused, focusedXml,
             new HierarchyAnalyzer(), bulkService, tracker, configLoader,
             enumerateDataBlocks: () => available,
-            switchToDataBlock: s => s.Name == companion.Name ? companionXml : focusedXml,
-            buildActiveDbForSummary: s => s.Name == companion.Name
-                ? new ActiveDb(companion, companionXml, onApply: null)
+            switchToDataBlock: s => s.Name == peer.Name ? peerXml : focusedXml,
+            buildActiveDbForSummary: s => s.Name == peer.Name
+                ? new ActiveDb(peer, peerXml, onApply: null)
                 : null);
 
         // Single-DB shape pre-toggle: top-level members are flat, no synthetic
@@ -481,14 +481,14 @@ public class BulkChangeViewModelMultiDbTests
         var preFlat = vm.FlatMembers.Count;
 
         // Open dropdown so FilteredDataBlockItems gets populated, then toggle
-        // the companion row on.
+        // the peer row on.
         vm.OpenDataBlocksDropdownCommand.Execute(null);
-        var companionRow = vm.FilteredDataBlockItems
-            .First(i => i.Name == companion.Name);
-        companionRow.IsActive = true;
+        var peerRow = vm.FilteredDataBlockItems
+            .First(i => i.Name == peer.Name);
+        peerRow.IsActive = true;
 
         vm.AllActiveDbs.Should().HaveCount(2,
-            "the dropdown toggle should add the companion DB to the active set");
+            "the dropdown toggle should add the peer DB to the active set");
         vm.HasMultipleActiveDbs.Should().BeTrue();
         vm.RootMembers.Should().HaveCount(2,
             "tree must rebuild as two synthetic per-DB group nodes");
@@ -496,7 +496,7 @@ public class BulkChangeViewModelMultiDbTests
             r.Datatype.Should().Be("DB",
                 "multi-DB shape wraps each DB's members in a synthetic group"));
         vm.FlatMembers.Count.Should().BeGreaterThan(preFlat,
-            "the flat list must include nodes from the newly added companion");
+            "the flat list must include nodes from the newly added peer");
     }
 
     [Fact]
@@ -504,9 +504,9 @@ public class BulkChangeViewModelMultiDbTests
     {
         // Single-DB session with a dropdown source so we can toggle a peer in.
         var focusedXml = TestFixtures.LoadXml("flat-db.xml");
-        var companionXml = TestFixtures.LoadXml("nested-struct-db.xml");
+        var peerXml = TestFixtures.LoadXml("nested-struct-db.xml");
         var focused = new SimaticMLParser().Parse(focusedXml);
-        var companion = new SimaticMLParser().Parse(companionXml);
+        var peer = new SimaticMLParser().Parse(peerXml);
 
         var configLoader = new ConfigLoader(null);
         var bulkService = new BulkChangeService(new ChangeLogger(), configLoader);
@@ -516,15 +516,15 @@ public class BulkChangeViewModelMultiDbTests
         var available = new[]
         {
             new DataBlockSummary(focused.Name, ""),
-            new DataBlockSummary(companion.Name, ""),
+            new DataBlockSummary(peer.Name, ""),
         };
 
         var vm = new BulkChangeViewModel(
             focused, focusedXml,
             new HierarchyAnalyzer(), bulkService, tracker, configLoader,
             enumerateDataBlocks: () => available,
-            buildActiveDbForSummary: s => s.Name == companion.Name
-                ? new ActiveDb(companion, companionXml, onApply: null)
+            buildActiveDbForSummary: s => s.Name == peer.Name
+                ? new ActiveDb(peer, peerXml, onApply: null)
                 : null);
 
         // Single-DB: one chip, × disabled (must keep ≥1 active DB).
@@ -533,20 +533,20 @@ public class BulkChangeViewModelMultiDbTests
         vm.ActiveDbChips[0].CanClose.Should().BeFalse(
             "the last remaining DB cannot be removed");
 
-        // Add the companion via the dropdown checkbox path.
+        // Add the peer via the dropdown checkbox path.
         vm.OpenDataBlocksDropdownCommand.Execute(null);
-        vm.FilteredDataBlockItems.First(i => i.Name == companion.Name).IsActive = true;
+        vm.FilteredDataBlockItems.First(i => i.Name == peer.Name).IsActive = true;
 
         // Both chips appear and × is now enabled on each.
         vm.ActiveDbChips.Should().HaveCount(2);
         vm.ActiveDbChips.Select(c => c.DisplayName).Should().BeEquivalentTo(
-            new[] { focused.Name, companion.Name });
+            new[] { focused.Name, peer.Name });
         vm.ActiveDbChips.Should().AllSatisfy(c =>
             c.CanClose.Should().BeTrue(
                 "every chip is closeable while ≥2 DBs are active"));
 
-        // Close the companion chip → back to one chip, × disabled again.
-        vm.ActiveDbChips.First(c => c.DisplayName == companion.Name)
+        // Close the peer chip → back to one chip, × disabled again.
+        vm.ActiveDbChips.First(c => c.DisplayName == peer.Name)
             .CloseCommand.Execute(null);
 
         vm.ActiveDbChips.Should().HaveCount(1);
@@ -558,25 +558,25 @@ public class BulkChangeViewModelMultiDbTests
     public void ChipSolo_ReplacesActiveSetWithJustThisDb()
     {
         // Two active DBs from the start (no pending edits). Clicking the
-        // companion chip's body should solo it — drop the focused DB and
-        // leave only the companion active. One-click switch from the
+        // peer chip's body should solo it — drop the focused DB and
+        // leave only the peer active. One-click switch from the
         // toolbar without touching the popup.
         var (vm, _, _, _, _) = CreateMultiDbVm();
         vm.AllActiveDbs.Should().HaveCount(2);
         vm.ActiveDbChips.Should().HaveCount(2);
 
         var anchorName = vm.AllActiveDbs[0].Info.Name;
-        var companionName = vm.AllActiveDbs[1].Info.Name;
-        var companionChip = vm.ActiveDbChips.First(c => c.DisplayName == companionName);
+        var peerName = vm.AllActiveDbs[1].Info.Name;
+        var peerChip = vm.ActiveDbChips.First(c => c.DisplayName == peerName);
 
-        companionChip.SoloCommand.Execute(null);
+        peerChip.SoloCommand.Execute(null);
 
         vm.AllActiveDbs.Should().HaveCount(1,
             "solo collapses the active set to a single DB");
-        vm.AllActiveDbs[0].Info.Name.Should().Be(companionName,
+        vm.AllActiveDbs[0].Info.Name.Should().Be(peerName,
             "the soloed DB stays; the others are dropped");
         vm.ActiveDbChips.Should().HaveCount(1);
-        vm.ActiveDbChips[0].DisplayName.Should().Be(companionName);
+        vm.ActiveDbChips[0].DisplayName.Should().Be(peerName);
         vm.ActiveDbChips[0].CanClose.Should().BeFalse(
             "back to single-DB → × disabled again");
     }
@@ -589,24 +589,24 @@ public class BulkChangeViewModelMultiDbTests
         // dropdown started enumerating across the whole project, not just
         // the launch PLC.
         var focusedXml = TestFixtures.LoadXml("flat-db.xml");
-        var companionXml = TestFixtures.LoadXml("nested-struct-db.xml");
+        var peerXml = TestFixtures.LoadXml("nested-struct-db.xml");
         var focused = new SimaticMLParser().Parse(focusedXml);
-        var companion = new SimaticMLParser().Parse(companionXml);
+        var peer = new SimaticMLParser().Parse(peerXml);
 
         var configLoader = new ConfigLoader(null);
         var bulkService = new BulkChangeService(new ChangeLogger(), configLoader);
         var tracker = Substitute.For<IUsageTracker>();
         tracker.GetStatus().Returns(new UsageStatus(0, 100));
 
-        // Companion declares a different PLC than the anchor.
-        var companionDb = new ActiveDb(
-            companion, companionXml, onApply: null, plcName: "PLC_Other");
+        // Peer declares a different PLC than the anchor.
+        var peerDb = new ActiveDb(
+            peer, peerXml, onApply: null, plcName: "PLC_Other");
 
         var vm = new BulkChangeViewModel(
             focused, focusedXml,
             new HierarchyAnalyzer(), bulkService, tracker, configLoader,
             currentPlcName: "PLC_Anchor",
-            additionalActiveDbs: new[] { companionDb });
+            additionalActiveDbs: new[] { peerDb });
 
         // Two distinct PLCs → two groups, headers visible on each.
         vm.ActiveDbChipGroups.Should().HaveCount(2);
@@ -618,7 +618,7 @@ public class BulkChangeViewModelMultiDbTests
 
         // Each group carries its own DB(s) — never bleeding across PLCs.
         vm.ActiveDbChipGroups[0].Chips.Single().DisplayName.Should().Be(focused.Name);
-        vm.ActiveDbChipGroups[1].Chips.Single().DisplayName.Should().Be(companion.Name);
+        vm.ActiveDbChipGroups[1].Chips.Single().DisplayName.Should().Be(peer.Name);
     }
 
     [Fact]
@@ -699,16 +699,16 @@ public class BulkChangeViewModelMultiDbTests
         // key separator ('|') than RestoreStashFor ('') so the
         // dictionary lookup missed and the inspector's "PENDING IN <DB>"
         // section lingered after reactivation. This test locks in:
-        //   1. closing the companion chip with pending edits stashes them;
+        //   1. closing the peer chip with pending edits stashes them;
         //   2. the inspector lists the stashed DB;
         //   3. clicking the stash header reactivates AND restores the edits;
         //   4. the stash entry is removed (HasStashedDbs == false);
         //   5. the gesture also soloes — the previously-active anchor DB is
         //      dropped, leaving only the reactivated DB in the active set.
         var focusedXml = TestFixtures.LoadXml("flat-db.xml");
-        var companionXml = TestFixtures.LoadXml("nested-struct-db.xml");
+        var peerXml = TestFixtures.LoadXml("nested-struct-db.xml");
         var focused = new SimaticMLParser().Parse(focusedXml);
-        var companion = new SimaticMLParser().Parse(companionXml);
+        var peer = new SimaticMLParser().Parse(peerXml);
 
         var configLoader = new ConfigLoader(null);
         var bulkService = new BulkChangeService(new ChangeLogger(), configLoader);
@@ -718,42 +718,42 @@ public class BulkChangeViewModelMultiDbTests
 
         var mbx = new FakeMessageBox(YesNoCancelResult.No); // Keep on close prompt
 
-        var companionDb = new ActiveDb(
-            companion, companionXml, onApply: _ => { });
+        var peerDb = new ActiveDb(
+            peer, peerXml, onApply: _ => { });
 
         var vm = new BulkChangeViewModel(
             focused, focusedXml,
             new HierarchyAnalyzer(), bulkService, tracker, configLoader,
             onApply: _ => { },
             messageBox: mbx,
-            additionalActiveDbs: new[] { companionDb },
-            // Reactivation needs a factory or the companion can't be
+            additionalActiveDbs: new[] { peerDb },
+            // Reactivation needs a factory or the peer can't be
             // re-added after chip-close → restoring the stash would silently
             // drop every edit because FindNodeByPath has no live tree to
             // resolve against.
             buildActiveDbForSummary: s =>
-                s.Name == companion.Name
-                    ? new ActiveDb(companion, companionXml, onApply: _ => { })
+                s.Name == peer.Name
+                    ? new ActiveDb(peer, peerXml, onApply: _ => { })
                     : null);
 
         vm.AllActiveDbs.Should().HaveCount(2);
 
-        // Stage a pending edit on the companion's tree.
-        var companionLeaf = vm.RootMembers
-            .First(r => r.Name == companion.Name)
+        // Stage a pending edit on the peer's tree.
+        var peerLeaf = vm.RootMembers
+            .First(r => r.Name == peer.Name)
             .AllDescendants().First(n => n.IsLeaf);
-        var original = companionLeaf.StartValue ?? "0";
+        var original = peerLeaf.StartValue ?? "0";
         var pending = original == "0" ? "1" : "0";
-        companionLeaf.PendingValue = pending;
+        peerLeaf.PendingValue = pending;
 
-        // Close the companion chip — pending edit triggers the 3-way prompt;
+        // Close the peer chip — pending edit triggers the 3-way prompt;
         // FakeMessageBox returns "No" so the edits get stashed.
-        var companionChip = vm.ActiveDbChips.First(c => c.DisplayName == companion.Name);
-        companionChip.CloseCommand.Execute(null);
+        var peerChip = vm.ActiveDbChips.First(c => c.DisplayName == peer.Name);
+        peerChip.CloseCommand.Execute(null);
 
-        vm.AllActiveDbs.Should().HaveCount(1, "companion was removed from active set");
+        vm.AllActiveDbs.Should().HaveCount(1, "peer was removed from active set");
         vm.HasStashedDbs.Should().BeTrue("Keep branch must stash edits for restore");
-        vm.StashedDbs.Should().ContainSingle(s => s.DbName == companion.Name);
+        vm.StashedDbs.Should().ContainSingle(s => s.DbName == peer.Name);
 
         // Reactivate via the stash header click.
         var stash = vm.StashedDbs[0];
@@ -768,7 +768,7 @@ public class BulkChangeViewModelMultiDbTests
         // reactivated DB remains active.
         vm.AllActiveDbs.Should().HaveCount(1,
             "switch-back from the inspector header should solo to the reactivated DB");
-        vm.AllActiveDbs[0].Info.Name.Should().Be(companion.Name);
+        vm.AllActiveDbs[0].Info.Name.Should().Be(peer.Name);
 
         // The pending edit landed on the live tree. After solo, the active
         // set is single-DB so RootMembers is flat (no synthetic group root)

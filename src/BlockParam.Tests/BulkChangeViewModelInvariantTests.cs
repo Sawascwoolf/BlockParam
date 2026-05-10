@@ -77,20 +77,20 @@ public class BulkChangeViewModelInvariantTests
     [Fact]
     public void Remove_DropdownUncheck_TargetHasEdits_PromptStash_CreatesStashEntry()
     {
-        // Row 3: two active DBs, companion has pending edits. Unchecking the
-        // companion row prompts; user picks "Stash" (No). Companion drops out
-        // of the active set, edits land in the stash dictionary keyed by
+        // Row 3: two active DBs, the peer has pending edits. Unchecking the
+        // peer row prompts; user picks "Stash" (No). Peer drops out of the
+        // active set, edits land in the stash dictionary keyed by
         // (PlcName, FolderPath, Name).
         var env = new ActiveSetTestBuilder()
             .WithAnchor("flat-db.xml")
-            .WithCompanion("nested-struct-db.xml")
+            .WithPeer("nested-struct-db.xml")
             .WithPendingEditsOn("NestedStructDB", count: 1)
             .WithPromptResults(YesNoCancelResult.No)
             .Build();
 
         env.Vm.OpenDataBlocksDropdownCommand.Execute(null);
-        var companionRow = env.Vm.FilteredDataBlockItems.First(i => i.Name == "NestedStructDB");
-        companionRow.IsActive = false;
+        var peerRow = env.Vm.FilteredDataBlockItems.First(i => i.Name == "NestedStructDB");
+        peerRow.IsActive = false;
 
         env.Vm.AllActiveDbs.Should().HaveCount(1);
         env.Vm.AllActiveDbs[0].Info.Name.Should().Be("FlatDB");
@@ -127,21 +127,21 @@ public class BulkChangeViewModelInvariantTests
         // stash entry was created. Cancel must be inert.
         var env = new ActiveSetTestBuilder()
             .WithAnchor("flat-db.xml")
-            .WithCompanion("nested-struct-db.xml")
+            .WithPeer("nested-struct-db.xml")
             .WithPendingEditsOn("NestedStructDB", count: 1)
             .WithPromptResults(YesNoCancelResult.Cancel)
             .Build();
 
-        var companionLeaf = FindFirstPendingLeaf(env.Vm, "NestedStructDB");
-        var pendingValue = companionLeaf.PendingValue;
+        var peerLeaf = FindFirstPendingLeaf(env.Vm, "NestedStructDB");
+        var pendingValue = peerLeaf.PendingValue;
 
-        var companionChip = env.Vm.ActiveDbChips.First(c => c.DisplayName == "NestedStructDB");
-        companionChip.CloseCommand.Execute(null);
+        var peerChip = env.Vm.ActiveDbChips.First(c => c.DisplayName == "NestedStructDB");
+        peerChip.CloseCommand.Execute(null);
 
-        env.Vm.AllActiveDbs.Should().HaveCount(2, "Cancel keeps the companion in place");
+        env.Vm.AllActiveDbs.Should().HaveCount(2, "Cancel keeps the peer in place");
         env.Vm.HasStashedDbs.Should().BeFalse("Cancel does not stash");
-        companionLeaf.PendingValue.Should().Be(pendingValue, "edit was not lost");
-        companionLeaf.IsPendingInlineEdit.Should().BeTrue();
+        peerLeaf.PendingValue.Should().Be(pendingValue, "edit was not lost");
+        peerLeaf.IsPendingInlineEdit.Should().BeTrue();
         env.Mbx.AskYesNoCancelCallCount.Should().Be(1);
         AssertInvariants(env.Vm);
     }
@@ -155,8 +155,8 @@ public class BulkChangeViewModelInvariantTests
         // it's removed from the active set. The target stays.
         var env = new ActiveSetTestBuilder()
             .WithAnchor("flat-db.xml")
-            .WithCompanion("nested-struct-db.xml")
-            .WithCompanion("array-db.xml")
+            .WithPeer("nested-struct-db.xml")
+            .WithPeer("array-db.xml")
             .WithPendingEditsOn("FlatDB", count: 1)
             .WithPendingEditsOn("NestedStructDB", count: 1)
             .WithPromptResults(YesNoCancelResult.Yes, YesNoCancelResult.Yes)
@@ -185,8 +185,8 @@ public class BulkChangeViewModelInvariantTests
         // remove-loop bails. Active set is {target, middle}.
         var env = new ActiveSetTestBuilder()
             .WithAnchor("flat-db.xml")              // no edits — silent remove
-            .WithCompanion("nested-struct-db.xml")  // has edits — prompt fires
-            .WithCompanion("array-db.xml")          // target — stays
+            .WithPeer("nested-struct-db.xml")  // has edits — prompt fires
+            .WithPeer("array-db.xml")          // target — stays
             .WithPendingEditsOn("NestedStructDB", count: 1)
             .WithPromptResults(YesNoCancelResult.Cancel)
             .Build();
@@ -211,12 +211,12 @@ public class BulkChangeViewModelInvariantTests
         // other since no edits → no prompt), and restores the stash's edits
         // onto the new live tree. The stash entry pops.
         //
-        // We bootstrap the stash by closing a companion's chip with edits
+        // We bootstrap the stash by closing a peer's chip with edits
         // pending and the message-box returning Stash (No), then asserting
         // the stash exists, *then* exercising the reactivate gesture.
         var env = new ActiveSetTestBuilder()
             .WithAnchor("flat-db.xml")
-            .WithCompanion("nested-struct-db.xml")
+            .WithPeer("nested-struct-db.xml")
             .WithPendingEditsOn("NestedStructDB", count: 1)
             // First prompt = stash on close; second prompt would fire if the
             // anchor had edits during reactivate (it doesn't, so unused).
@@ -226,7 +226,7 @@ public class BulkChangeViewModelInvariantTests
         var pendingLeaf = FindFirstPendingLeaf(env.Vm, "NestedStructDB");
         var pendingValue = pendingLeaf.PendingValue!;
 
-        // Close the companion to create the stash.
+        // Close the peer to create the stash.
         env.Vm.ActiveDbChips.First(c => c.DisplayName == "NestedStructDB")
             .CloseCommand.Execute(null);
         env.Vm.HasStashedDbs.Should().BeTrue("setup: stash created via chip-close");
@@ -264,7 +264,7 @@ public class BulkChangeViewModelInvariantTests
         // created.
         var env = new ActiveSetTestBuilder()
             .WithAnchor("flat-db.xml", plc: "PLC_A")
-            .WithCompanion("nested-struct-db.xml", plc: "PLC_A")
+            .WithPeer("nested-struct-db.xml", plc: "PLC_A")
             .WithPendingEditsOn("NestedStructDB", count: 1)
             .WithPromptResults(
                 YesNoCancelResult.No,   // stash NestedStructDB on chip-close
@@ -278,12 +278,12 @@ public class BulkChangeViewModelInvariantTests
         env.Vm.StashedDbs.Should().ContainSingle(s => s.DbName == "NestedStructDB");
 
         // Stage a pending edit on FlatDB (the still-active anchor) after the
-        // companion drop, i.e. while we're in single-DB shape.
+        // peer drop, i.e. while we're in single-DB shape.
         var anchorLeaf = env.Vm.RootMembers.SelectMany(r => new[] { r }.Concat(r.AllDescendants()))
             .First(n => n.IsLeaf && !string.IsNullOrEmpty(n.StartValue));
         anchorLeaf.PendingValue = anchorLeaf.StartValue == "0" ? "1" : "0";
 
-        // Reactivate the stashed companion via header click.
+        // Reactivate the stashed peer via header click.
         var promptsBefore = env.Mbx.AskYesNoCancelCallCount;
         var stash = env.Vm.StashedDbs.Single();
         env.Vm.SwitchToStashedDbCommand.Execute(stash);
@@ -339,7 +339,7 @@ public class BulkChangeViewModelInvariantTests
         // Row 12 — chip-× on the anchor with pending edits, user picks Keep.
         // Asserts the anchor's edits land in StashedDbs (not silently dropped)
         // and that PendingEdits drops every entry that referenced the removed
-        // DB. Row 3 covers dropdown-uncheck + Stash on a companion; Row 5
+        // DB. Row 3 covers dropdown-uncheck + Stash on a peer; Row 5
         // covers chip-close + Cancel; this row plugs the missing chip-close +
         // Keep + anchor-role corner.
         //
@@ -351,7 +351,7 @@ public class BulkChangeViewModelInvariantTests
         // shape — same data-loss class, no dependency on the prior bug.
         var env = new ActiveSetTestBuilder()
             .WithAnchor("flat-db.xml")
-            .WithCompanion("nested-struct-db.xml")
+            .WithPeer("nested-struct-db.xml")
             .WithPendingEditsOn("FlatDB", count: 1)
             .WithPromptResults(YesNoCancelResult.No)   // Keep on chip-close
             .Build();
@@ -388,7 +388,7 @@ public class BulkChangeViewModelInvariantTests
         // title showing PLC_A even after the anchor moved to PLC_B's DB.
         var env = new ActiveSetTestBuilder()
             .WithAnchor("flat-db.xml", plc: "PLC_A")
-            .WithCompanion("nested-struct-db.xml", plc: "PLC_B")
+            .WithPeer("nested-struct-db.xml", plc: "PLC_B")
             .Build();
 
         env.Vm.AllActiveDbs[0].Info.Name.Should().Be("FlatDB", "setup: anchor is FlatDB");
@@ -425,7 +425,7 @@ public class BulkChangeViewModelInvariantTests
         // wouldn't trip until the user noticed the count was off.
         var env = new ActiveSetTestBuilder()
             .WithAnchor("flat-db.xml")
-            .WithCompanion("nested-struct-db.xml")
+            .WithPeer("nested-struct-db.xml")
             .Build();
 
         // Multi-DB shape: pick 2 leaves from FlatDB's synthetic subtree.
@@ -623,7 +623,7 @@ public class BulkChangeViewModelInvariantTests
             return this;
         }
 
-        public ActiveSetTestBuilder WithCompanion(string fixture, string plc = "")
+        public ActiveSetTestBuilder WithPeer(string fixture, string plc = "")
         {
             _activeDbs.Add(new DbSpec(fixture, plc, IsAnchor: false));
             return this;
@@ -678,7 +678,7 @@ public class BulkChangeViewModelInvariantTests
             var anchorSpec = _activeDbs[0];
             var (anchorInfo, anchorXml, _) = loaded[anchorSpec.Fixture];
 
-            var companionDbs = _activeDbs.Skip(1)
+            var peerDbs = _activeDbs.Skip(1)
                 .Select(spec =>
                 {
                     var (info, xml, plc) = loaded[spec.Fixture];
@@ -688,8 +688,8 @@ public class BulkChangeViewModelInvariantTests
                 })
                 .ToList();
 
-            // Dropdown enumerates the union of (active anchor + active companions
-            // + dropdown peers), each with its declared PLC.
+            // Dropdown enumerates the union of (every active DB + dropdown
+            // peers), each with its declared PLC.
             var summaries = _activeDbs.Concat(_dropdownPeers)
                 .Select(spec =>
                 {
@@ -727,7 +727,7 @@ public class BulkChangeViewModelInvariantTests
                 enumerateDataBlocks: () => summaries,
                 switchToDataBlock: SwitchTo,
                 currentPlcName: _anchorPlc,
-                additionalActiveDbs: companionDbs,
+                additionalActiveDbs: peerDbs,
                 buildActiveDbForSummary: BuildForSummary);
 
             // Stage pending edits per requested DB. Rooted in each DB's

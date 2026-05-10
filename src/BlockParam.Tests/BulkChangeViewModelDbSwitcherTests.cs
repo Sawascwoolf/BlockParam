@@ -186,16 +186,16 @@ public class BulkChangeViewModelDbSwitcherTests
         usageTracker.RecordUsage(Arg.Any<int>()).Returns(true);
         var mbx = new FakeMessageBox(YesNoCancelResult.No);   // Keep on chip-close
 
-        // Anchor on PLC_Line1 + companion on PLC_Line2 from the start so the
-        // chip-close gesture has a peer to fall back on.
-        var companion = new ActiveDb(bInfo, bXml, onApply: null, plcName: "PLC_Line2");
+        // Anchor on PLC_Line1 + peer on PLC_Line2 from the start so the
+        // chip-close gesture has another DB to fall back on.
+        var peer = new ActiveDb(bInfo, bXml, onApply: null, plcName: "PLC_Line2");
 
         var vm = new BulkChangeViewModel(
             aInfo, aXml,
             new HierarchyAnalyzer(), bulkService, usageTracker, configLoader,
             messageBox: mbx,
             currentPlcName: "PLC_Line1",
-            additionalActiveDbs: new[] { companion });
+            additionalActiveDbs: new[] { peer });
 
         // Stage on the anchor (PLC_Line1).
         var anchorRoot = vm.RootMembers.First(r => r.Name == aInfo.Name);
@@ -217,7 +217,7 @@ public class BulkChangeViewModelDbSwitcherTests
     {
         // Stash key includes folder path so two DBs with the same name in
         // different folders don't alias. Driven via chip-close + Keep on a
-        // 2-DB session where the anchor lives at "" and the companion at
+        // 2-DB session where the anchor lives at "" and the peer at
         // "Recipe".
         var aXml = TestFixtures.LoadXml("flat-db.xml");
         var bXml = TestFixtures.LoadXml("nested-struct-db.xml");
@@ -232,13 +232,13 @@ public class BulkChangeViewModelDbSwitcherTests
         usageTracker.RecordUsage(Arg.Any<int>()).Returns(true);
 
         var mbx = new FakeMessageBox(YesNoCancelResult.No);   // Keep on chip-close
-        var companion = new ActiveDb(bInfo, bXml, onApply: null, plcName: "");
+        var peer = new ActiveDb(bInfo, bXml, onApply: null, plcName: "");
 
         var vm = new BulkChangeViewModel(
             aInfo, aXml,
             new HierarchyAnalyzer(), bulkService, usageTracker, configLoader,
             messageBox: mbx,
-            additionalActiveDbs: new[] { companion });
+            additionalActiveDbs: new[] { peer });
 
         // Stage on the anchor.
         var anchorRoot = vm.RootMembers.First(r => r.Name == aInfo.Name);
@@ -277,7 +277,7 @@ public class BulkChangeViewModelDbSwitcherTests
 
         int applyCount = 0;
         var mbx = new FakeMessageBox(YesNoCancelResult.No);   // Keep on chip-close
-        var companion = new ActiveDb(bInfo, bXml,
+        var peer = new ActiveDb(bInfo, bXml,
             onApply: _ => applyCount++,
             plcName: "");
 
@@ -286,7 +286,7 @@ public class BulkChangeViewModelDbSwitcherTests
             new HierarchyAnalyzer(), bulkService, usageTracker, configLoader,
             onApply: _ => applyCount++,
             messageBox: mbx,
-            additionalActiveDbs: new[] { companion });
+            additionalActiveDbs: new[] { peer });
 
         // 1. Stage on A (anchor).
         var anchorRoot = vm.RootMembers.First(r => r.Name == aInfo.Name);

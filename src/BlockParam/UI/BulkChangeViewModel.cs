@@ -102,7 +102,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     // ActiveDb for an arbitrary DB picked in the dropdown — including a
     // per-DB OnApply that re-imports the modified xml back into TIA. Null
     // when the host couldn't supply it (DevLauncher, tests); the VM falls
-    // back to a read-only companion in that case (see AddCompanionFromSummary).
+    // back to a read-only ActiveDb in that case (see AddActiveDbFromSummary).
     private readonly Func<DataBlockSummary, ActiveDb?>? _buildActiveDbForSummary;
     private IReadOnlyList<DataBlockSummary>? _availableDataBlocks;
     private IReadOnlyList<DataBlockSummary> _filteredDataBlocks = Array.Empty<DataBlockSummary>();
@@ -147,8 +147,8 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     private string _newValue = "";
     // Multi-DB safe (#58): keyed by MemberNodeViewModel reference, not path
     // string. Two leaves in different DBs that happen to share a Path would
-    // alias under string keying — Ctrl+click selection on companion DB
-    // members would silently target the focused DB's same-path leaf.
+    // alias under string keying — Ctrl+click selection on a leaf in one
+    // active DB would silently target a same-path leaf in another.
     private readonly HashSet<MemberNodeViewModel> _manualSelectedPaths = new();
     private readonly HashSet<string> _bulkErrorPaths = new(StringComparer.Ordinal);
     // True once the user has typed in the NewValue textbox. Prefills from the
@@ -277,9 +277,9 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         ExistingIssues = new ObservableCollection<ExistingIssueEntry>();
         StashedDbs = new ObservableCollection<StashedDbState>();
 
-        // Build tree view models. Multi-DB workflow (#58): when companions
-        // exist, every DB (focused + each companion) becomes a synthetic
-        // top-level "DB" group whose children are that DB's actual members.
+        // Build tree view models. Multi-DB workflow (#58): when more than
+        // one DB is active, every active DB becomes a synthetic top-level
+        // "DB" group whose children are that DB's actual members.
         // The user picked this shape over a flat union so each match in the
         // tree carries a visible DB-of-origin label, and scope walks
         // naturally extend one level deeper.
@@ -510,10 +510,10 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         try
         {
             // Multi-DB-safe (#58): invoke OnApply on every active DB, not
-            // just the focused one. Single-DB sessions iterate exactly the
-            // focused DB so behavior is unchanged. A null OnApply
-            // (dropdown-added companion before per-DB host wiring) is a
-            // skip — Apply for that DB is read-only.
+            // just the first one. Single-DB sessions iterate exactly that
+            // DB so behavior is unchanged. A null OnApply (dropdown-added
+            // ActiveDb before per-DB host wiring) is a skip — Apply for
+            // that DB is read-only.
             foreach (var db in AllActiveDbs)
             {
                 db.OnApply?.Invoke(db.Xml);
@@ -871,8 +871,8 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     public string CurrentDataBlockName => _active.Info.Name;
 
     /// <summary>
-    /// Populates <see cref="RootMembers"/> from the focused DB plus any
-    /// companions (#58). Single-DB sessions get a flat list of the DB's
+    /// Populates <see cref="RootMembers"/> from every active DB (#58).
+    /// Single-DB sessions get a flat list of the DB's
     /// top-level members (unchanged behavior); multi-DB sessions get one
     /// synthetic <see cref="MemberNode"/> per DB at the top level, whose
     /// children are that DB's actual members. Synthetic roots are tagged
@@ -936,8 +936,8 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             children: info.Members);
         var groupVm = new MemberNodeViewModel(synthetic, null, _commentLanguagePolicy);
         // Subscribe edited-value events on every leaf descendant so inline
-        // edits inside a companion DB still bubble up to the VM the same
-        // way single-DB edits do.
+        // edits in any active DB bubble up to the VM the same way
+        // single-DB edits do.
         foreach (var descendant in groupVm.AllDescendants())
             SubscribeStartValueEdited(descendant);
         groupVm.IsExpanded = true;
@@ -993,8 +993,10 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
 
     /// <summary>
     /// All DBs currently being edited in this dialog session (#58). Always
-    /// non-empty — index 0 is the focused DB; indices 1+ are companions
-    /// added via multi-select. Bulk preview / Apply iterate the whole list.
+    /// non-empty. The DBs are peers — bulk preview / Apply iterate the
+    /// whole list. The DB at index 0 holds the "anchor" display role
+    /// (default title / scope label, see <see cref="DataBlockListItem.IsAnchor"/>);
+    /// it has no privilege over removability or Apply ordering.
     /// </summary>
     public IReadOnlyList<ActiveDb> AllActiveDbs => _activeDbs.AsReadOnly();
 
@@ -1049,7 +1051,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         // within a group (chips appear in active-set order) and across groups
         // (the first PLC seen anchors the leftmost group, matching the
         // anchor's owner). Stable order keeps the layout from jumping when
-        // companions on the same PLC are added/removed.
+        // peer DBs on the same PLC are added/removed.
         var orderedPlcs = new List<string>();
         var perPlc = new Dictionary<string, List<ActiveDbChipViewModel>>(
             StringComparer.Ordinal);
@@ -1238,7 +1240,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
 
         if (wantActive && !wasActive)
         {
-            AddCompanionWithPendingEditPrompt(item);
+            AddActiveDbWithPendingEditPrompt(item);
         }
         else if (!wantActive && wasActive)
         {
@@ -1270,7 +1272,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     /// active DB with edits before committing the add. Compose one
     /// snapshot so the cascade fires exactly once.
     /// </summary>
-    private void AddCompanionWithPendingEditPrompt(DataBlockListItem item)
+    private void AddActiveDbWithPendingEditPrompt(DataBlockListItem item)
     {
         var next = State;
         foreach (var db in State.Dbs.ToList())
@@ -1287,7 +1289,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             }
             if (decision == PendingDecision.Apply)
             {
-                if (!TryApplyCompanionInPlace(db))
+                if (!TryApplyActiveDbInPlace(db))
                 {
                     Log.Information(
                         "DB add aborted: pending Apply did not succeed for {Name}",
@@ -1307,7 +1309,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
                 }
             }
         }
-        var built = BuildCompanionFromSummary(item.Summary);
+        var built = BuildActiveDbFromSummary(item.Summary);
         if (built == null)
         {
             RefreshFilteredDataBlockItemsActiveState();
@@ -1334,7 +1336,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             // The user soloed a row that wasn't already checked — append it
             // to the snapshot before pruning so the "leave only this one"
             // invariant always holds.
-            var built = BuildCompanionFromSummary(target);
+            var built = BuildActiveDbFromSummary(target);
             if (built == null)
             {
                 IsDataBlocksDropdownOpen = false;
@@ -1425,7 +1427,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
 
         if (target == null)
         {
-            var built = BuildCompanionFromSummary(summary);
+            var built = BuildActiveDbFromSummary(summary);
             if (built == null) return;
             current = current.With(dbs: current.Dbs.Concat(new[] { built }).ToList());
             target = built;
@@ -1504,29 +1506,29 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     /// Compound mutations (Solo, Reactivate) call this directly and
     /// fold the result into their composed snapshot; the simple
     /// "checkbox checked" path goes through
-    /// <see cref="AddCompanionFromSummary"/>, which builds + assigns.
+    /// <see cref="AddActiveDbFromSummary"/>, which builds + assigns.
     /// </summary>
-    private ActiveDb? BuildCompanionFromSummary(DataBlockSummary summary)
+    private ActiveDb? BuildActiveDbFromSummary(DataBlockSummary summary)
     {
         try
         {
             // Preferred path (#58): host supplies a fully-wired ActiveDb,
             // including a per-DB OnApply that re-imports the modified xml
             // back into TIA. This is symmetric with the context-menu's
-            // BuildCompanionActiveDb so dropdown-added companions are
-            // first-class for Apply, not read-only.
+            // ActiveDbFactory so dropdown-added DBs are first-class for
+            // Apply, not read-only.
             if (_buildActiveDbForSummary != null)
             {
                 var built = _buildActiveDbForSummary(summary);
                 if (built == null)
-                    Log.Information("Companion build returned null for {Name}", summary.Name);
+                    Log.Information("ActiveDb build returned null for {Name}", summary.Name);
                 return built;
             }
 
             // Fallback (DevLauncher / tests): no host factory wired. Use
             // the older _switchToDataBlock(summary) → xml callback to
-            // build a READ-ONLY companion. Apply on this companion will
-            // be a no-op (OnApply is null); the multi-DB Apply path skips
+            // build a READ-ONLY ActiveDb. Apply on this DB will be a
+            // no-op (OnApply is null); the multi-DB Apply path skips
             // null callbacks rather than throwing, and the
             // remove-with-stash-prompt's 'Apply, then remove' branch
             // refuses to charge a quota unit for a write that never
@@ -1550,21 +1552,21 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         }
         catch (Exception ex)
         {
-            Log.Warning(ex, "Failed to build companion DB {Name}", summary.Name);
+            Log.Warning(ex, "Failed to build ActiveDb {Name}", summary.Name);
             StatusText = Res.Format("Status_DbSwitchFailed", summary.Name, ex.Message);
             return null;
         }
     }
 
     /// <summary>
-    /// Single-step add (dropdown checkbox-on). Builds the companion and
+    /// Single-step add (dropdown checkbox-on). Builds the ActiveDb and
     /// commits to <see cref="State"/> in one shot — the cascade fires
     /// once on the resulting snapshot. Compound paths build directly via
-    /// <see cref="BuildCompanionFromSummary"/> and skip this wrapper.
+    /// <see cref="BuildActiveDbFromSummary"/> and skip this wrapper.
     /// </summary>
-    private void AddCompanionFromSummary(DataBlockSummary summary)
+    private void AddActiveDbFromSummary(DataBlockSummary summary)
     {
-        var built = BuildCompanionFromSummary(summary);
+        var built = BuildActiveDbFromSummary(summary);
         if (built == null) return;
         State = State.With(dbs: State.Dbs.Concat(new[] { built }).ToList());
         Log.Information("DB enabled via dropdown: {Name}", built.Info.Name);
@@ -1671,7 +1673,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         }
         if (decision == PendingDecision.Apply)
         {
-            if (!TryApplyCompanionInPlace(db))
+            if (!TryApplyActiveDbInPlace(db))
             {
                 Log.Information(
                     "DB remove aborted: pending Apply did not succeed for {Name}",
@@ -1740,7 +1742,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     /// Top-level VMs of the named DB, regardless of single-DB (flat) or
     /// multi-DB (synthetic-wrapped) tree shape. Empty when the DB's tree
     /// isn't currently rendered. The flat-tree branch matters for #78
-    /// reactivate-with-anchor-edits: between the AddCompanionFromSummary
+    /// reactivate-with-anchor-edits: between the AddActiveDbFromSummary
     /// step and the SoloActiveDbByReference walk, the live tree is still
     /// in single-DB shape with _activeDbs[0] as the displayed DB, so
     /// _dbToSynthetic is empty — every helper that gates pending-edit work
@@ -1797,17 +1799,17 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         => CountPendingInlineEdits(WalkDbTopLevels(db));
 
     /// <summary>
-    /// Best-effort "apply this companion's edits before we remove it"
-    /// (#58 remove-prompt → Yes branch). Iterates the companion's pending
-    /// edits, writes them into its xml, calls its OnApply once, then
-    /// charges the counter. Returns false if the daily cap or a null
-    /// OnApply blocks the write — caller leaves the companion in place.
+    /// Best-effort "apply this DB's edits before we remove it" (#58
+    /// remove-prompt → Yes branch). Iterates the DB's pending edits,
+    /// writes them into its xml, calls its OnApply once, then charges
+    /// the counter. Returns false if the daily cap or a null OnApply
+    /// blocks the write — caller leaves the DB in place.
     /// </summary>
-    private bool TryApplyCompanionInPlace(ActiveDb db)
+    private bool TryApplyActiveDbInPlace(ActiveDb db)
     {
         if (db.OnApply == null)
         {
-            // Read-only companion (dropdown-added with no host callback).
+            // Read-only ActiveDb (dropdown-added with no host callback).
             // The user picked "Apply, then remove" but there's nothing to
             // apply against, so refuse rather than silently drop.
             StatusText = Res.Format("Status_DbSwitch_ApplyBlocked");
@@ -1851,7 +1853,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         }
         catch (Exception ex)
         {
-            Log.Error(ex, "TryApplyCompanionInPlace failed for {Name}", db.Info.Name);
+            Log.Error(ex, "TryApplyActiveDbInPlace failed for {Name}", db.Info.Name);
             return false;
         }
     }
@@ -2425,11 +2427,12 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
 
         ReloadSuggestions();
 
-        // Multi-DB scope generation (#58): when companions exist, every
-        // within-DB scope gains a cross-DB sibling matching the same paths
-        // across all active DBs, plus an "All selected DBs" mega-scope.
-        // The selected member's owning DB drives the within-DB analysis;
-        // companions contribute only to the cross-DB lifts.
+        // Multi-DB scope generation (#58): when more than one DB is
+        // active, every within-DB scope gains a cross-DB sibling matching
+        // the same paths across all active DBs, plus an "All selected
+        // DBs" mega-scope. The selected member's owning DB drives the
+        // within-DB analysis; the other active DBs contribute only to
+        // the cross-DB lifts.
         AnalysisResult result;
         if (HasMultipleActiveDbs)
         {
@@ -2498,8 +2501,8 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             // Multi-DB safe (#58 review must-fix #2): resolve scope members
             // to their owning DB's tree VMs by reference, not by path string.
             // The previous HashSet<string>+full-tree-walk would mark same-named
-            // paths in companion DBs as Affected even when the user picked a
-            // within-DB scope on a single DB.
+            // paths in other active DBs as Affected even when the user picked
+            // a within-DB scope on a single DB.
             var affectedVms = ResolveScopeVms(_selectedScope.MatchingMembers);
 
             foreach (var vm in affectedVms)
@@ -2816,7 +2819,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         // them to each synthetic root via _dbToSynthetic. Path strings are
         // unique within a DB but identical across DBs that share the
         // structure, so a single shared HashSet<string> would mis-mark same-
-        // path leaves in companion DBs as search hits.
+        // path leaves in other active DBs as search hits.
         var perDbSearchPaths = new Dictionary<ActiveDb, HashSet<string>>();
         int totalSearchHits = 0;
         if (!string.IsNullOrWhiteSpace(_searchQuery))
@@ -2901,7 +2904,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         if (HasMultipleActiveDbs)
         {
             // Per-DB search so a path that's a hit in one DB doesn't smart-
-            // expand the same path in companion DBs that don't have a hit.
+            // expand the same path in other active DBs that don't have a hit.
             foreach (var kvp in _dbToSynthetic)
             {
                 var db = kvp.Key;
@@ -3359,9 +3362,9 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
 
         // Multi-DB safe (#58 review must-fix #2): resolve scope members to
         // their owning DB's tree VMs by reference. Path-string staging used
-        // to bleed pending values into companion DBs that happened to have
-        // the same path; this routes each scope member to exactly its own
-        // tree node.
+        // to bleed pending values into other active DBs that happened to
+        // have the same path; this routes each scope member to exactly its
+        // own tree node.
         var affectedVms = ResolveScopeVms(_selectedScope.MatchingMembers);
         int count = 0;
 
@@ -3533,12 +3536,12 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     /// </summary>
     private void ExecuteApply()
     {
-        // Multi-DB Apply (#58): when companions exist, iterate every active
-        // DB, write each one's pending edits into its own xml, charge the
-        // total against the daily quota once, and call each DB's OnApply
-        // inside the same dialog tick. Host wires all OnApply invocations
-        // into a single ExclusiveAccess block so multi-DB Apply is one TIA
-        // undo step (matches issue #58 decision).
+        // Multi-DB Apply (#58): when more than one DB is active, iterate
+        // every active DB, write each one's pending edits into its own xml,
+        // charge the total against the daily quota once, and call each DB's
+        // OnApply inside the same dialog tick. Host wires all OnApply
+        // invocations into a single ExclusiveAccess block so multi-DB Apply
+        // is one TIA undo step (matches issue #58 decision).
         if (_activeDbs.Count > 1)
         {
             ExecuteApplyMultiDb();
@@ -3835,8 +3838,9 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             // Phase 4: re-parse each DB from its post-import XML and rebuild
             // the synthetic-rooted tree so subsequent edits target the
             // canonical structure. The simplest correct approach is to
-            // RefreshTree using the focused DB's xml — companions get
-            // re-parsed inside RefreshTree's BuildRootMembersFromActiveDbs.
+            // RefreshTree using the anchor DB's xml — every other active
+            // DB gets re-parsed inside RefreshTree's
+            // BuildRootMembersFromActiveDbs.
             for (int i = 0; i < perDb.Count; i++)
             {
                 var (db, _) = perDb[i];
@@ -4068,7 +4072,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     /// Builds the exclude-from-setpoints path set for a specific DB (#58).
     /// Multi-DB ApplyAllFilters calls this once per active DB to keep each
     /// DB's path set distinct — a single shared set would mis-mark same-
-    /// path leaves in companion DBs as excluded.
+    /// path leaves in other active DBs as excluded.
     /// </summary>
     private HashSet<string>? BuildExcludeSetFor(DataBlockInfo info, BulkChangeConfig? config)
     {
