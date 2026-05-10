@@ -1740,24 +1740,26 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
-    /// Snapshots pending inline edits inside a DB's live subtree into an
+    /// Snapshots pending inline edits for <paramref name="db"/> into an
     /// inert <see cref="StashedDbState"/> ready to be added to a new
     /// <see cref="ActiveSetState"/>. Returns null when the DB has no
-    /// pending edits to capture. Pure read of the live tree — does NOT
-    /// mutate <c>_stashedDbs</c> (the snapshot setter does).
+    /// pending edits to capture. Reads from the store — unambiguous in
+    /// multi-DB sessions where the same Path can exist in multiple DBs,
+    /// and correct even if the tree hasn't rebuilt yet. Pure read —
+    /// does NOT mutate <c>_stashedDbs</c> (the snapshot setter does).
     /// </summary>
     private StashedDbState? CaptureStashForDb(ActiveDb db)
     {
         var entries = new List<StashedEditEntry>();
-        foreach (var node in WalkDbAllNodes(db))
+        foreach (var (node, pendingValue) in _pendingEditStore.GetForDb(db, _modelToDb))
         {
-            if (node.IsPendingInlineEdit && node.PendingValue != null)
-            {
-                entries.Add(new StashedEditEntry(
-                    node.Path,
-                    node.StartValue ?? "",
-                    node.PendingValue));
-            }
+            // Resolve to the VM to read StartValue (which is model-derived
+            // and stable). If the VM can't be found the model is still valid.
+            var vm = FindVmByModel(node);
+            entries.Add(new StashedEditEntry(
+                node.Path,
+                vm?.StartValue ?? node.StartValue ?? "",
+                pendingValue));
         }
         if (entries.Count == 0) return null;
         var summary = new DataBlockSummary(
@@ -1911,10 +1913,12 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
 
     /// <summary>
     /// Counts pending inline edits inside a DB's subtree. Used by the
-    /// remove-with-stash-prompt flow (#58, #78).
+    /// remove-with-stash-prompt flow (#58, #78). Reads from the store
+    /// rather than walking the VM tree — O(store.Count) instead of
+    /// O(subtree size), and correct even when the tree hasn't rebuilt yet.
     /// </summary>
     private int CountPendingEditsForDb(ActiveDb db)
-        => CountPendingInlineEdits(WalkDbTopLevels(db));
+        => _pendingEditStore.CountForDb(db, _modelToDb);
 
     /// <summary>
     /// Best-effort "apply this DB's edits before we remove it" (#58
