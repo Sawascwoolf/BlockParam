@@ -1856,45 +1856,6 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
-    /// Top-level VMs of the named DB, regardless of single-DB (flat) or
-    /// multi-DB (synthetic-wrapped) tree shape. Empty when the DB's tree
-    /// isn't currently rendered. The flat-tree branch matters for #78
-    /// reactivate-with-anchor-edits: between the AddActiveDbFromSummary
-    /// step and the SoloActiveDbByReference walk, the live tree is still
-    /// in single-DB shape with _activeDbs[0] as the displayed DB, so
-    /// _dbToSynthetic is empty — every helper that gates pending-edit work
-    /// behind that dictionary used to silently no-op for the anchor and
-    /// drop edits without prompting.
-    /// </summary>
-    private IEnumerable<MemberNodeViewModel> WalkDbTopLevels(ActiveDb db)
-    {
-        bool flatTree = RootMembers.Count > 0 && RootMembers[0].Datatype != "DB";
-        if (flatTree && _activeDbs.Count > 0 && ReferenceEquals(db, _activeDbs[0]))
-        {
-            return RootMembers;
-        }
-        return _dbToSynthetic.TryGetValue(db, out var root)
-            ? (IEnumerable<MemberNodeViewModel>)root.Children
-            : Enumerable.Empty<MemberNodeViewModel>();
-    }
-
-    /// <summary>
-    /// Top-levels + all their descendants for the named DB. Mirrors
-    /// <c>synthetic.AllDescendants()</c> in multi-DB shape; in single-DB
-    /// shape it walks <see cref="RootMembers"/> plus each top-level's
-    /// descendants.
-    /// </summary>
-    private IEnumerable<MemberNodeViewModel> WalkDbAllNodes(ActiveDb db)
-    {
-        foreach (var top in WalkDbTopLevels(db))
-        {
-            yield return top;
-            foreach (var node in top.AllDescendants())
-                yield return node;
-        }
-    }
-
-    /// <summary>
     /// Clears pending inline edits inside a specific DB's subtree (#58).
     /// Used by multi-DB Apply's partial-commit branch: when DB#1 committed
     /// but DB#2 cancelled, DB#1's tree must drop its pending flags (the
@@ -1902,12 +1863,17 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     /// </summary>
     private void ClearPendingValuesForDb(ActiveDb db)
     {
-        foreach (var node in WalkDbAllNodes(db))
+        // Walk _modelToDb to find VMs owned by this DB and clear their
+        // pending state. Keyed by MemberNode reference — safe in multi-DB
+        // sessions where the same path can appear in multiple DBs.
+        foreach (var kvp in _modelToDb)
         {
-            if (node.IsPendingInlineEdit) node.ClearPending();
+            if (!ReferenceEquals(kvp.Value, db)) continue;
+            if (_modelToVm.TryGetValue(kvp.Key, out var vm) && vm.IsPendingInlineEdit)
+                vm.ClearPending();
         }
-        // Also evict from the store so a later tree rebuild doesn't
-        // re-populate values that were just committed.
+        // Evict from the store so a later tree rebuild doesn't re-populate
+        // values that were just committed.
         _pendingEditStore.ClearForDb(db, _modelToDb);
     }
 
@@ -1938,11 +1904,9 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             return false;
         }
 
-        // Multi-PLC safe (#58 review must-fix #4): WalkDbTopLevels keys
-        // by ActiveDb reference, so two PLCs hosting DB_Common are not
-        // aliased. Single-DB-shape safe (#78): falls back to RootMembers
-        // when this DB is the displayed one but _dbToSynthetic is empty.
-        var pendingEdits = CollectPendingInlineEdits(WalkDbTopLevels(db));
+        // Store-based: unambiguous in multi-DB sessions (MemberNode identity),
+        // correct even when the tree hasn't rebuilt yet (store survives rebuilds).
+        var pendingEdits = _pendingEditStore.GetForDb(db, _modelToDb).ToList();
         if (pendingEdits.Count == 0) return true;
 
         var status = _usageTracker.GetStatus();
@@ -2229,7 +2193,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>Number of individual inline edits waiting to be applied.</summary>
-    public int PendingInlineEditCount => CountPendingInlineEdits(RootMembers);
+    public int PendingInlineEditCount => _pendingEditStore.Count;
 
     /// <summary>Status text showing pending inline edits count.</summary>
     public string? PendingStatusText
@@ -3683,7 +3647,9 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         }
 
         _lastApplySucceeded = false;
-        var pendingEdits = CollectPendingInlineEdits(RootMembers);
+        // Store-based: single-DB mode has exactly one active DB, so GetAll()
+        // yields its pending entries without needing a per-DB filter.
+        var pendingEdits = _pendingEditStore.GetAll().ToList();
 
         if (pendingEdits.Count == 0 && !_hasPendingChanges)
             return;
@@ -3825,8 +3791,10 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         // (matches the legacy ExecuteApply ordering).
         foreach (var db in AllActiveDbs)
         {
-            if (!_dbToSynthetic.TryGetValue(db, out var synthetic)) continue;
-            var edits = CollectPendingInlineEdits(synthetic.Children);
+            // Store-based: unambiguous in multi-PLC sessions; correct even if
+            // the tree hasn't rebuilt after a recent active-set transition.
+            var edits = _pendingEditStore.GetForDb(db, _modelToDb).ToList();
+            if (edits.Count == 0) continue;
             totalChanges += edits.Count;
             perDb.Add((db, edits));
         }
@@ -4237,32 +4205,6 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             }
         }
         return excluded.Count > 0 ? excluded : null;
-    }
-
-    /// <summary>Collects all nodes with pending inline edits as (MemberNode, newValue) pairs.</summary>
-    private static List<(MemberNode Member, string Value)> CollectPendingInlineEdits(
-        IEnumerable<MemberNodeViewModel> nodes)
-    {
-        var result = new List<(MemberNode, string)>();
-        foreach (var node in nodes)
-        {
-            if (node.PendingValue != null)
-                result.Add((node.Model, node.PendingValue));
-            result.AddRange(CollectPendingInlineEdits(node.Children));
-        }
-        return result;
-    }
-
-    /// <summary>Counts nodes with pending inline edits.</summary>
-    private static int CountPendingInlineEdits(IEnumerable<MemberNodeViewModel> nodes)
-    {
-        int count = 0;
-        foreach (var node in nodes)
-        {
-            if (node.PendingValue != null) count++;
-            count += CountPendingInlineEdits(node.Children);
-        }
-        return count;
     }
 
     /// <summary>Clears all pending inline edits without applying them.</summary>
