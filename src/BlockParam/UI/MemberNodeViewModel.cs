@@ -291,6 +291,22 @@ public class MemberNodeViewModel : ViewModelBase
         }
     }
 
+    /// <summary>
+    /// Restores a pending value seeded from the <c>PendingEditStore</c> after a
+    /// tree rebuild. Sets the backing field directly, bypassing
+    /// <see cref="StartValueEdited"/> so the store write-back loop is avoided
+    /// and the freemium cap is not charged a second time for a value the user
+    /// already staged in a prior tree shape.
+    /// </summary>
+    internal void SetPendingFromStore(string pendingValue)
+    {
+        _pendingValue = pendingValue;
+        _editableStartValue = pendingValue;
+        OnPropertyChanged(nameof(PendingValue));
+        OnPropertyChanged(nameof(IsPendingInlineEdit));
+        OnPropertyChanged(nameof(EditableStartValue));
+    }
+
     /// <summary>Clears the pending inline edit, reverting to the original StartValue.</summary>
     public void ClearPending()
     {

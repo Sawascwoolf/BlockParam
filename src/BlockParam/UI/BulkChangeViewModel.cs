@@ -129,6 +129,14 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     // PlcName comparisons that would still collide across PLC boundaries.
     private readonly Dictionary<ActiveDb, MemberNodeViewModel> _dbToSynthetic = new();
 
+    // Session-scoped store for pending inline-edit values, keyed by MemberNode
+    // reference. Survives BuildRootMembersFromActiveDbs rebuilds — fresh VMs
+    // are seeded from here after every tree rebuild so active-set transitions
+    // (solo, chip-×, reactivate) no longer orphan pending state.
+    // Cleared on RefreshTree (Apply mints new MemberNode instances, making old
+    // keys dead) and on explicit DiscardAll.
+    private readonly PendingEditStore _pendingEditStore = new();
+
     // #78 snapshot: single immutable view of the active set + stashes +
     // anchor PLC. The State setter is the one place that runs the cascade
     // (RebuildAfterActiveSetChanged / SyncStashedDbsCollection / anchor
@@ -921,6 +929,36 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
                 ? $"{plc} / {db.Info.Name}"
                 : db.Info.Name;
             AddDbGroupRoot(db, displayName);
+        }
+
+        // Seed any pending values that survived the rebuild (active-set
+        // transitions preserve MemberNode instances but mint fresh VMs).
+        SeedVmsFromStore();
+    }
+
+    /// <summary>
+    /// Restores pending-edit state from <see cref="_pendingEditStore"/> onto
+    /// freshly-constructed <see cref="MemberNodeViewModel"/> instances after a
+    /// tree rebuild. Called at the end of <see cref="BuildRootMembersFromActiveDbs"/>
+    /// so every active-set transition (solo, chip-×, reactivate) automatically
+    /// preserves in-progress edits without callers needing to stash/restore manually.
+    /// </summary>
+    private void SeedVmsFromStore()
+    {
+        var validator = BuildValidator();
+        foreach (var (node, pendingValue) in _pendingEditStore.GetAll())
+        {
+            if (!_modelToVm.TryGetValue(node, out var vm)) continue;
+            // Set the field directly to avoid firing OnSingleValueEdited,
+            // which would write back to the store (creating a loop) and
+            // charge a spurious "new edit" warn for the free-tier cap.
+            vm.SetPendingFromStore(pendingValue);
+            // Re-run validation so HasInlineError / InlineErrorMessage are
+            // accurate on the new VM (the value hasn't changed but the VM
+            // instance is fresh and its error state is unset).
+            var error = validator.Validate(node, pendingValue);
+            vm.HasInlineError = error != null;
+            vm.InlineErrorMessage = error;
         }
     }
 
@@ -1866,6 +1904,9 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         {
             if (node.IsPendingInlineEdit) node.ClearPending();
         }
+        // Also evict from the store so a later tree rebuild doesn't
+        // re-populate values that were just committed.
+        _pendingEditStore.ClearForDb(db, _modelToDb);
     }
 
     /// <summary>
@@ -1922,6 +1963,9 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             }
             db.OnApply.Invoke(db.Xml);
             if (totalChanged > 0) _usageTracker.RecordUsage(totalChanged);
+            // The edits are now committed to TIA — evict the DB's store entries
+            // so a subsequent tree rebuild doesn't re-populate committed values.
+            _pendingEditStore.ClearForDb(db, _modelToDb);
             return true;
         }
         catch (OperationCanceledException)
@@ -2044,6 +2088,9 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
                 // directly + run the same validator OnSingleValueEdited uses
                 // so HasInlineError / InlineErrorMessage stay accurate.
                 node.PendingValue = edit.PendingValue;
+                // Mirror the restored value to the store so subsequent tree
+                // rebuilds (e.g. a later active-set change) can re-seed it.
+                _pendingEditStore.Set(node.Model, edit.PendingValue);
                 var error = validator.Validate(node.Model, edit.PendingValue);
                 node.HasInlineError = error != null;
                 node.InlineErrorMessage = error;
@@ -3481,12 +3528,14 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
                 if (!string.Equals(node.PendingValue, _newValue, StringComparison.OrdinalIgnoreCase))
                 {
                     node.PendingValue = _newValue;
+                    _pendingEditStore.Set(node.Model, _newValue);
                     count++;
                 }
             }
             else if (node.IsPendingInlineEdit)
             {
                 node.ClearPending();
+                _pendingEditStore.Clear(node.Model);
                 count++;
             }
         }
@@ -3512,7 +3561,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     /// are best ignored here. (The legacy walk's recursion-into-children
     /// was a no-op anyway: children's paths weren't in the affected set.)
     /// </summary>
-    private static int SetPendingOnSingleVm(MemberNodeViewModel vm, string newValue)
+    private int SetPendingOnSingleVm(MemberNodeViewModel vm, string newValue)
     {
         if (!vm.IsLeaf) return 0;
         var startsEqualsNew = string.Equals(vm.StartValue, newValue, StringComparison.OrdinalIgnoreCase);
@@ -3521,6 +3570,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             if (!string.Equals(vm.PendingValue, newValue, StringComparison.OrdinalIgnoreCase))
             {
                 vm.PendingValue = newValue;
+                _pendingEditStore.Set(vm.Model, newValue);
                 return 1;
             }
             return 0;
@@ -3528,12 +3578,13 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         if (vm.IsPendingInlineEdit)
         {
             vm.ClearPending();
+            _pendingEditStore.Clear(vm.Model);
             return 1;
         }
         return 0;
     }
 
-    private static int SetPendingOnNodes(MemberNodeViewModel node,
+    private int SetPendingOnNodes(MemberNodeViewModel node,
         HashSet<string> affectedPaths, string newValue)
     {
         int count = 0;
@@ -3547,6 +3598,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
                 if (!string.Equals(node.PendingValue, newValue, StringComparison.OrdinalIgnoreCase))
                 {
                     node.PendingValue = newValue;
+                    _pendingEditStore.Set(node.Model, newValue);
                     count++;
                 }
             }
@@ -3555,6 +3607,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
                 // Bulk targets the original value and there's a stale pending on this
                 // node — clear it so the node reverts to StartValue.
                 node.ClearPending();
+                _pendingEditStore.Clear(node.Model);
                 count++;
             }
         }
@@ -4112,6 +4165,9 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             memberVm.InlineErrorMessage = null;
             if (StatusText.StartsWith(memberVm.Name + ":"))
                 StatusText = "";
+            // Evict cleared edit from the store so tree rebuilds don't
+            // re-populate a value the user just reverted.
+            _pendingEditStore.Clear(memberVm.Model);
             RefreshPendingAndPreview();
             return;
         }
@@ -4132,6 +4188,10 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             StatusText = $"{memberVm.Name}: {error}";
         else if (StatusText.StartsWith(memberVm.Name + ":"))
             StatusText = "";
+
+        // Mirror the staged value to the store so tree rebuilds (active-set
+        // transitions) can seed fresh VMs without losing this edit.
+        _pendingEditStore.Set(memberVm.Model, newValue);
 
         // Pending edits no longer smart-expand ancestors (#10): they surface in the
         // sidebar, which is where the user looks for them. The tree's expansion
@@ -4222,13 +4282,16 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     /// </summary>
     public void DiscardPendingSilent()
     {
+        // Clear the store first so SeedVmsFromStore can't revive discarded
+        // edits if a tree rebuild happens before the next user gesture.
+        _pendingEditStore.ClearAll();
         ClearAllPendingInlineEdits(RootMembers);
         RefreshPendingAndPreview();
         StatusText = Res.Get("Status_Ready");
         RefreshFlatList();
     }
 
-    private static void ClearAllPendingInlineEdits(IEnumerable<MemberNodeViewModel> nodes)
+    private void ClearAllPendingInlineEdits(IEnumerable<MemberNodeViewModel> nodes)
     {
         foreach (var node in nodes)
         {
@@ -4263,6 +4326,12 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         var parser = new SimaticMLParser(constantResolver, _udtResolver, _commentResolver);
         _active.Info = parser.Parse(modifiedXml);
         InlineRuleExtractor.ApplyTo(_configLoader.GetConfig(), _active.Info);
+
+        // Parse produces new MemberNode instances for the active DB — the old
+        // keys in the store are now dead. Clear the store before rebuilding so
+        // SeedVmsFromStore doesn't populate fresh VMs with stale values from
+        // the committed (and now applied) edit set.
+        _pendingEditStore.ClearAll();
 
         RootMembers.Clear();
         BuildRootMembersFromActiveDbs();
