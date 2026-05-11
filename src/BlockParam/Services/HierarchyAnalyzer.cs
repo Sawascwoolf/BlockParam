@@ -14,6 +14,149 @@ public class HierarchyAnalyzer
     /// </summary>
     public AnalysisResult Analyze(DataBlockInfo db, MemberNode selectedMember)
     {
+        var withinDb = AnalyzeWithinDb(db, selectedMember);
+        return new AnalysisResult(selectedMember, withinDb);
+    }
+
+    /// <summary>
+    /// Multi-DB analysis (#58). Generates the existing within-DB scope levels
+    /// PLUS one cross-DB sibling per within-DB scope, plus an "All selected
+    /// DBs" mega-scope covering every same-name match across every DB.
+    ///
+    /// Cross-DB lift rule: a scope whose <see cref="ScopeLevel.MatchingMembers"/>
+    /// has paths {p1, p2, ...} is lifted to a cross-DB sibling whose
+    /// MatchingMembers is every member in every active DB whose Path is in
+    /// {p1, p2, ...} and whose Datatype matches the selected member. DBs
+    /// that don't have any of those paths contribute zero members and are
+    /// silently skipped (#58 decision).
+    /// </summary>
+    public AnalysisResult AnalyzeMulti(
+        IReadOnlyList<DataBlockInfo> activeDbs,
+        DataBlockInfo selectedDb,
+        MemberNode selectedMember)
+    {
+        var withinDb = AnalyzeWithinDb(selectedDb, selectedMember);
+
+        // Single-DB session degrades to legacy behavior.
+        if (activeDbs.Count <= 1)
+            return new AnalysisResult(selectedMember, withinDb);
+
+        var combined = new List<ScopeLevel>(withinDb);
+        var crossDbScopes = new List<ScopeLevel>();
+
+        foreach (var w in withinDb)
+        {
+            var lifted = LiftToCrossDb(w, activeDbs, selectedMember);
+            if (lifted != null && lifted.MatchCount > w.MatchCount)
+                crossDbScopes.Add(lifted);
+        }
+
+        // Per-ancestor cross-DB scopes: for ancestors where the within-DB
+        // count is 1 (so BuildScopeLevels skipped them) but multiple DBs each
+        // contribute the same path, the user still wants a "this ancestor
+        // across all selected DBs" option. Without these, selecting a leaf
+        // whose name is unique inside its parent leaves the user without a
+        // mid-level scope — only the broadest "all DBs" option remained.
+        foreach (var ancestor in GetAncestors(selectedMember))
+        {
+            var ancestorScope = BuildAncestorCrossDbScope(activeDbs, selectedMember, ancestor);
+            if (ancestorScope != null) crossDbScopes.Add(ancestorScope);
+        }
+
+        combined.AddRange(crossDbScopes);
+
+        // "All selected DBs" mega-scope: every same-name + same-datatype
+        // match across every active DB. Equivalent to lifting the broadest
+        // within-DB scope cross-DB, but emitted unconditionally so it shows
+        // up even when the selected DB has only the selected member itself.
+        var megaScope = BuildAllSelectedDbsScope(activeDbs, selectedMember);
+        if (megaScope != null
+            && (combined.Count == 0
+                || megaScope.MatchCount > combined.Max(s => s.MatchCount)))
+        {
+            combined.Add(megaScope);
+        }
+
+        // Final dedupe by match count: a broader cross-DB ancestor whose
+        // count equals a narrower one's adds no new members and would just
+        // be UI noise (e.g. "in estopButton" == "in estopButton.estopActive"
+        // when only one estopButton child has the leaf).
+        combined = DeduplicateByMatchCount(combined);
+
+        return new AnalysisResult(selectedMember, combined);
+    }
+
+    /// <summary>
+    /// For a given ancestor of the selected member, returns a cross-DB scope
+    /// covering every same-name + same-datatype descendant of that ancestor's
+    /// path across all active DBs. Returns null when the resulting count is
+    /// less than 2 (no bulk benefit) or duplicates the within-DB scope a
+    /// caller already produced.
+    /// </summary>
+    private static ScopeLevel? BuildAncestorCrossDbScope(
+        IReadOnlyList<DataBlockInfo> activeDbs,
+        MemberNode selectedMember,
+        MemberNode ancestor)
+    {
+        var name = selectedMember.Name;
+        var datatype = selectedMember.Datatype;
+        var ancestorPath = ancestor.Path;
+        var prefix = ancestorPath + ".";
+
+        var matches = new List<MemberNode>();
+        foreach (var db in activeDbs)
+        {
+            foreach (var m in db.AllMembers())
+            {
+                if (m.Name != name || m.Datatype != datatype) continue;
+                // Match descendants by path-prefix. DBs that share the same
+                // shape share the same path strings, so ancestorPath resolved
+                // within selectedDb is the right prefix to apply across every
+                // active DB.
+                if (string.Equals(m.Path, ancestorPath, StringComparison.Ordinal)
+                    || m.Path.StartsWith(prefix, StringComparison.Ordinal))
+                {
+                    matches.Add(m);
+                }
+            }
+        }
+
+        if (matches.Count < 2) return null;
+
+        return new ScopeLevel(
+            ancestorName: $"all selected DBs.{ancestorPath}",
+            ancestorPath: ancestorPath,
+            depth: -1000 + ancestor.Depth,
+            matchingMembers: matches);
+    }
+
+    private static List<ScopeLevel> DeduplicateByMatchCount(List<ScopeLevel> scopes)
+    {
+        // Dedupe key = (MatchCount, sorted member-path set). MatchCount alone
+        // collapsed two scopes that targeted the same number of cells but
+        // different ones — e.g. row-fix Matrix[1,*] and col-fix Matrix[*,2]
+        // on a square 2D array (#90). Keying on the path set as well means
+        // scopes only collapse when they actually point at the same nodes.
+        // Stable: ties on the same key go to the first occurrence.
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        var result = new List<ScopeLevel>(scopes.Count);
+        foreach (var s in scopes.OrderBy(x => x.MatchCount))
+        {
+            if (seen.Add(ScopeFingerprint(s))) result.Add(s);
+        }
+        return result;
+    }
+
+    private static string ScopeFingerprint(ScopeLevel s)
+    {
+        var paths = s.MatchingMembers
+            .Select(m => m.Path)
+            .OrderBy(p => p, StringComparer.Ordinal);
+        return $"{s.MatchCount}|{string.Join("", paths)}";
+    }
+
+    private List<ScopeLevel> AnalyzeWithinDb(DataBlockInfo db, MemberNode selectedMember)
+    {
         var targetName = selectedMember.Name;
         var targetDatatype = selectedMember.Datatype;
 
@@ -34,7 +177,7 @@ public class HierarchyAnalyzer
 
         if (allMatches.Count <= 1 && arraySiblingScope == null && partialDimScopes.Count == 0)
         {
-            return new AnalysisResult(selectedMember, new List<ScopeLevel>());
+            return new List<ScopeLevel>();
         }
 
         var scopes = allMatches.Count > 1
@@ -57,7 +200,73 @@ public class HierarchyAnalyzer
             scopes.Insert(insertAt, partial);
         }
 
-        return new AnalysisResult(selectedMember, scopes);
+        return scopes;
+    }
+
+    /// <summary>
+    /// Builds the cross-DB sibling for a within-DB scope by matching the
+    /// scope's member paths against every active DB. Returns null if the
+    /// lifted scope has the same match count as the input (i.e. only the
+    /// selected DB had any of those paths) — no point showing a "cross-DB"
+    /// scope that isn't actually wider.
+    /// </summary>
+    private static ScopeLevel? LiftToCrossDb(
+        ScopeLevel withinDbScope,
+        IReadOnlyList<DataBlockInfo> activeDbs,
+        MemberNode selectedMember)
+    {
+        var paths = new HashSet<string>(
+            withinDbScope.MatchingMembers.Select(m => m.Path),
+            StringComparer.Ordinal);
+        var datatype = selectedMember.Datatype;
+
+        var lifted = new List<MemberNode>();
+        foreach (var db in activeDbs)
+        {
+            foreach (var m in db.AllMembers())
+            {
+                if (m.Datatype == datatype && paths.Contains(m.Path))
+                    lifted.Add(m);
+            }
+        }
+
+        if (lifted.Count == 0) return null;
+
+        return new ScopeLevel(
+            ancestorName: $"{withinDbScope.AncestorName} — across all selected DBs",
+            ancestorPath: withinDbScope.AncestorPath,
+            depth: -1000 + withinDbScope.Depth, // Cross-DB scopes sort after their within-DB sibling.
+            matchingMembers: lifted);
+    }
+
+    /// <summary>
+    /// "All selected DBs" mega-scope: every same-name + same-datatype match
+    /// in every active DB. The broadest possible scope in multi-DB mode.
+    /// </summary>
+    private static ScopeLevel? BuildAllSelectedDbsScope(
+        IReadOnlyList<DataBlockInfo> activeDbs,
+        MemberNode selectedMember)
+    {
+        var name = selectedMember.Name;
+        var datatype = selectedMember.Datatype;
+
+        var matches = new List<MemberNode>();
+        foreach (var db in activeDbs)
+        {
+            foreach (var m in db.AllMembers())
+            {
+                if (m.Name == name && m.Datatype == datatype)
+                    matches.Add(m);
+            }
+        }
+
+        if (matches.Count <= 1) return null;
+
+        return new ScopeLevel(
+            ancestorName: "All selected DBs",
+            ancestorPath: "",
+            depth: -2000, // Sorts last (broadest).
+            matchingMembers: matches);
     }
 
     /// <summary>
@@ -262,8 +471,11 @@ public class HierarchyAnalyzer
     }
 
     /// <summary>
-    /// Removes scopes where the match count equals a broader (higher) scope,
-    /// as they would be redundant in the UI.
+    /// Removes scopes whose (MatchCount, sorted member-path set) duplicates
+    /// an adjacent (broader) scope's. Adjacent-only because the caller hands
+    /// in scopes in narrowest-first order — a scope that ties on count but
+    /// targets different nodes (e.g. row-fix vs col-fix on a square 2D
+    /// array, #90) is a real second option and must survive.
     /// </summary>
     private static List<ScopeLevel> DeduplicateScopes(List<ScopeLevel> scopes)
     {
@@ -273,7 +485,7 @@ public class HierarchyAnalyzer
         var result = new List<ScopeLevel> { scopes[0] };
         for (int i = 1; i < scopes.Count; i++)
         {
-            if (scopes[i].MatchCount != scopes[i - 1].MatchCount)
+            if (ScopeFingerprint(scopes[i]) != ScopeFingerprint(scopes[i - 1]))
             {
                 result.Add(scopes[i]);
             }

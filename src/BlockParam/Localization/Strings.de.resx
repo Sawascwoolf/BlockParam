@@ -324,6 +324,52 @@ Datenbaustein jetzt kompilieren?</value></data>
   <data name="ConfigEditor_Import_NotImplemented" xml:space="preserve"><value>Import ist noch nicht implementiert.</value></data>
   <data name="ConfigEditor_Export_NotImplemented" xml:space="preserve"><value>Export ist noch nicht implementiert.</value></data>
   <data name="ConfigEditor_ExportFile_NotImplemented" xml:space="preserve"><value>Export von '{0}' ist noch nicht implementiert.</value></data>
+  <!-- Multi-DB Auswahl und DB-Wechsler im Dialog (#58, #59) -->
+  <data name="Dialog_SwitchDb_Tooltip" xml:space="preserve"><value>Zu einem anderen Datenbaustein in diesem Projekt wechseln</value></data>
+  <data name="Dialog_SwitchDb_SearchHint" xml:space="preserve"><value>Zum Filtern tippen…</value></data>
+  <data name="Dialog_SwitchDb_Refresh" xml:space="preserve"><value>DBs aus dem Projekt neu einlesen</value></data>
+  <data name="Dialog_SwitchDb_Loading" xml:space="preserve"><value>DBs werden geladen…</value></data>
+  <data name="Dialog_SwitchDb_Empty" xml:space="preserve"><value>Kein passender DB.</value></data>
+  <data name="Dialog_SwitchDb_InstanceBadge" xml:space="preserve"><value>Instanz</value></data>
+  <data name="Dialog_SwitchDb_SoloTooltip" xml:space="preserve"><value>Nur diesen DB anzeigen (andere abwählen)</value></data>
+  <data name="Dialog_ActiveDbChip_Close_Tooltip" xml:space="preserve"><value>Diesen Datenbaustein aus dem Dialog entfernen</value></data>
+  <data name="Dialog_ActiveDbChip_Solo_Tooltip" xml:space="preserve"><value>Nur zu diesem Datenbaustein wechseln (andere schließen)</value></data>
+  <data name="Dialog_SwitchDb_DiscardConfirm_Title" xml:space="preserve"><value>Vorgemerkte Änderungen verwerfen?</value></data>
+  <data name="Dialog_SwitchDb_DiscardConfirm_Text" xml:space="preserve"><value>Sie haben {0} vorgemerkte Änderung(en) an diesem DB. Beim Wechsel zu '{1}' werden sie verworfen.
+
+Fortfahren?</value><comment>{0} = Anzahl ausstehender Änderungen, {1} = Ziel-DB-Name</comment></data>
+  <data name="Dialog_SwitchDb_KeepConfirm_Title" xml:space="preserve"><value>Vorgemerkte Änderungen vor dem Wechsel anwenden?</value></data>
+  <data name="Dialog_SwitchDb_KeepConfirm_Text" xml:space="preserve"><value>Sie haben {0} vorgemerkte Änderung(en) an '{1}'.
+
+Ja — In TIA Portal anwenden, dann wechseln.
+Nein — Zwischenspeichern und wechseln.
+Abbrechen — Bei '{1}' bleiben.</value><comment>{0} = Anzahl ausstehender Änderungen, {1} = aktueller DB-Name, {2} = Ziel-DB-Name (ungenutzt)</comment></data>
+  <data name="Status_DbSwitch_ApplyBlocked" xml:space="preserve"><value>Vorgemerkte Änderungen können nicht angewendet werden — ungültige Einträge korrigieren oder auf das Zurücksetzen des Tageslimits warten.</value></data>
+  <data name="Reactivate_AdditiveOrReplace_Title" xml:space="preserve"><value>Hinzufügen oder ersetzen?</value></data>
+  <data name="Reactivate_AdditiveOrReplace_Text" xml:space="preserve"><value>'{0}' zusätzlich zu den aktuellen DBs einblenden oder ersetzen?
+
+Ja — '{0}' zur aktuellen Sitzung hinzufügen.
+Nein — Aktuelle DBs durch '{0}' ersetzen.
+Abbrechen — Bei den aktuellen DBs bleiben.</value><comment>{0} = Name des wieder aktivierten DB</comment></data>
+  <data name="Status_DbSwitched_StashRestored" xml:space="preserve"><value>Zu {0} gewechselt — {1} zwischengespeicherte Änderung(en) wiederhergestellt.</value><comment>{0} = DB-Name, {1} = Anzahl wiederhergestellt</comment></data>
+  <data name="Status_DbSwitched_StashPartial" xml:space="preserve"><value>Zu {0} gewechselt — {1} zwischengespeicherte Änderung(en) wiederhergestellt; {2} passen nicht mehr zur aktuellen DB-Struktur.</value><comment>{0} = DB-Name, {1} = Anzahl wiederhergestellt, {2} = Anzahl verworfen</comment></data>
+  <data name="Inspector_StashedDb_Header" xml:space="preserve"><value>AUSSTEHEND IN {0}</value><comment>{0} = zwischengespeicherter DB-Name (großgeschrieben, passend zu anderen Abschnittsüberschriften)</comment></data>
+  <data name="Inspector_StashedDb_Tooltip" xml:space="preserve"><value>Klicken, um zu diesem DB zurückzuwechseln. Für die Änderungen am aktuellen DB wird erneut nachgefragt.</value></data>
+  <data name="Dialog_SwitchDb_LoadFailed" xml:space="preserve"><value>'{0}' konnte nicht geladen werden:
+
+{1}</value><comment>{0} = DB-Name, {1} = Fehlermeldung</comment></data>
+  <data name="Status_DbSwitched" xml:space="preserve"><value>Zu {0} gewechselt</value><comment>{0} = DB-Name</comment></data>
+  <data name="Status_DbSwitchFailed" xml:space="preserve"><value>Wechsel zu {0} fehlgeschlagen: {1}</value><comment>{0} = DB-Name, {1} = Fehlermeldung</comment></data>
+  <data name="Status_DbEnumFailed" xml:space="preserve"><value>DBs konnten nicht aufgelistet werden: {0}</value><comment>{0} = Fehlermeldung</comment></data>
+  <!-- Schließen-Prompt mit zwischengespeicherten Änderungen in anderen DBs (#59) -->
+  <data name="Dialog_UnsavedChanges_Prompt_WithStash" xml:space="preserve"><value>Sie haben {0} ausstehende Änderung(en) am aktuellen DB und {1} zwischengespeicherte Änderung(en) in anderen DB(s): {2}.
+
+Ja — Aktuellen DB jetzt anwenden (zwischengespeicherte Änderungen in anderen DBs werden beim Schließen dennoch verworfen).
+Nein — Alles verwerfen und schließen.
+Abbrechen — Im Dialog bleiben.</value><comment>{0} = ausstehende Anzahl, {1} = zwischengespeicherte Anzahl, {2} = kommagetrennte DB-Namen</comment></data>
+  <data name="Dialog_UnsavedChanges_StashOnly" xml:space="preserve"><value>Sie haben {0} zwischengespeicherte Änderung(en) in anderen DB(s): {1}.
+
+Beim Schließen des Dialogs werden sie verworfen. Trotzdem schließen?</value><comment>{0} = zwischengespeicherte Anzahl, {1} = kommagetrennte DB-Namen</comment></data>
   <!-- PillMultiSelect-Steuerelement (Popup-Suchfeld + Fußzeilen-Aktionen) -->
   <data name="PillMultiSelect_SearchPlaceholder" xml:space="preserve"><value>Suchen...</value></data>
   <data name="PillMultiSelect_SelectAll" xml:space="preserve"><value>Alle wählen</value></data>
