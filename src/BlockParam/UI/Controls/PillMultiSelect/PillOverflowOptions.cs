@@ -1,5 +1,3 @@
-using BlockParam.Localization;
-
 namespace BlockParam.UI.Controls.PillMultiSelect;
 
 /// <summary>
@@ -41,13 +39,12 @@ public class PillOverflowOptions
     /// <summary>
     /// Format string for the suffix appended once <see cref="CollapseAfterEntries"/>
     /// trips. Must contain a single <c>{0}</c> placeholder for the hidden-
-    /// item count. Defaults to the localized "+{0} more" pulled from
-    /// BlockParam's resx; host apps not shipping that resx can set this
-    /// directly (e.g. <c>"and {0} others"</c>) to avoid the dependency.
+    /// item count. Default English literal; override per host (e.g.
+    /// <c>"and {0} others"</c>, or a localized template).
     /// </summary>
     public string PlusMoreFormat
     {
-        get => _plusMoreFormat ?? Res.Get("PillMultiSelect_PlusMore");
+        get => _plusMoreFormat ?? "+{0} more";
         set => _plusMoreFormat = value;
     }
 

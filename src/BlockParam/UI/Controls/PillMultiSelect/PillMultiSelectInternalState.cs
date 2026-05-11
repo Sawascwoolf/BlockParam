@@ -7,7 +7,6 @@ using System.Linq;
 using System.Windows.Data;
 using System.Windows.Input;
 using System.Windows.Media;
-using BlockParam.Localization;
 
 namespace BlockParam.UI.Controls.PillMultiSelect;
 
@@ -36,11 +35,11 @@ namespace BlockParam.UI.Controls.PillMultiSelect;
 /// as an overridable property (<see cref="SearchPlaceholder"/>,
 /// <see cref="ClearTooltip"/>, <see cref="SelectAllText"/>,
 /// <see cref="ResetText"/>) plus <see cref="PillOverflowOptions.PlusMoreFormat"/>
-/// for the "+N more" suffix. Defaults pull from BlockParam's resx so the
-/// in-tree app stays unchanged; host apps that don't ship that resx can
-/// set the properties directly without dragging in <c>BlockParam.Localization</c>.
+/// for the "+N more" suffix. Defaults are English literals; host apps that
+/// want localization bind the corresponding DPs on <see cref="PillMultiSelect"/>
+/// to their own resource lookup.
 /// </remarks>
-internal sealed class PillMultiSelectInternalState : ViewModelBase
+internal sealed class PillMultiSelectInternalState : PillViewModelBase
 {
     private readonly ObservableCollection<PillRowViewModel> _items;
     private readonly ListCollectionView _filteredView;
@@ -69,10 +68,10 @@ internal sealed class PillMultiSelectInternalState : ViewModelBase
         _filteredView = (ListCollectionView)CollectionViewSource.GetDefaultView(_items);
         _filteredView.Filter = FilterPredicate;
 
-        ToggleOpenCommand = new RelayCommand(() => IsOpen = !IsOpen);
-        SelectAllCommand = new RelayCommand(SelectAllVisible);
-        ResetCommand = new RelayCommand(ResetSelection);
-        ClearCommand = new RelayCommand(ResetSelection);
+        ToggleOpenCommand = new PillRelayCommand(() => IsOpen = !IsOpen);
+        SelectAllCommand = new PillRelayCommand(SelectAllVisible);
+        ResetCommand = new PillRelayCommand(ResetSelection);
+        ClearCommand = new PillRelayCommand(ResetSelection);
     }
 
     public string Label
@@ -99,42 +98,39 @@ internal sealed class PillMultiSelectInternalState : ViewModelBase
 
     /// <summary>
     /// Placeholder text shown inside the popup's search box when empty.
-    /// Defaults to the localized "Search..." string; callers can override
-    /// for context-specific phrasing.
+    /// Default English literal; bind to a host resource lookup for i18n.
     /// </summary>
     public string SearchPlaceholder
     {
-        get => _searchPlaceholder ?? Res.Get("PillMultiSelect_SearchPlaceholder");
+        get => _searchPlaceholder ?? "Search...";
         set => SetProperty(ref _searchPlaceholder, value);
     }
 
     /// <summary>
-    /// Tooltip on the trigger pill's clear (X) button. Defaults to the
-    /// localized "Clear"; override per-host to match surrounding terminology.
+    /// Tooltip on the trigger pill's clear (X) button. Default English literal;
+    /// override to match surrounding terminology or for i18n.
     /// </summary>
     public string ClearTooltip
     {
-        get => _clearTooltip ?? Res.Get("PillMultiSelect_Clear");
+        get => _clearTooltip ?? "Clear";
         set => SetProperty(ref _clearTooltip, value);
     }
 
     /// <summary>
-    /// Caption of the popup's "Select all" footer button. Defaults to the
-    /// localized "Select all".
+    /// Caption of the popup's "Select all" footer button. Default English literal.
     /// </summary>
     public string SelectAllText
     {
-        get => _selectAllText ?? Res.Get("PillMultiSelect_SelectAll");
+        get => _selectAllText ?? "Select all";
         set => SetProperty(ref _selectAllText, value);
     }
 
     /// <summary>
-    /// Caption of the popup's "Reset" footer button. Defaults to the
-    /// localized "Reset".
+    /// Caption of the popup's "Reset" footer button. Default English literal.
     /// </summary>
     public string ResetText
     {
-        get => _resetText ?? Res.Get("PillMultiSelect_Reset");
+        get => _resetText ?? "Reset";
         set => SetProperty(ref _resetText, value);
     }
 

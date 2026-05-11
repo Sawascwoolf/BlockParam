@@ -233,7 +233,7 @@ public partial class PillMultiSelect : UserControl
     }
 
     // String DPs default to null at the DP level; the callbacks forward only
-    // non-null values so the internal state keeps its resx fallback intact
+    // non-null values so the internal state keeps its English-literal default
     // when the host doesn't set the DP.
 
     public static readonly DependencyProperty ClearTooltipProperty =

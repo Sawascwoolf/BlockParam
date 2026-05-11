@@ -18,7 +18,7 @@ namespace BlockParam.UI.Controls.PillMultiSelect;
 /// <c>ICollectionView.GroupDescriptions</c> hookable precisely so v2 can
 /// populate this without rewiring the view pipeline.
 /// </remarks>
-internal sealed class PillRowViewModel : ViewModelBase
+internal sealed class PillRowViewModel : PillViewModelBase
 {
     private string _display;
     private string _abbreviation;
