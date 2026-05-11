@@ -276,7 +276,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         }
 
         var version = typeof(BulkChangeViewModel).Assembly.GetName().Version;
-        _title = BuildTitle(version, _currentPlcName, dataBlockInfo.Name);
+        _title = BuildTitle(version, _currentPlcName, dataBlockInfo.Name, _activeDbs.Count);
 
         InlineRuleExtractor.ApplyTo(configLoader.GetConfig(), dataBlockInfo);
 
@@ -406,6 +406,21 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         if (dbsChanged) RebuildAfterActiveSetChanged();
         if (stashesChanged) SyncStashedDbsCollection();
         OnPropertyChanged(nameof(HasMultipleActiveDbs));
+
+        // #91 — every cascade that changes the active set must refresh the
+        // title and CurrentDataBlockName, not just the anchor-remove path.
+        // Solo / reactivate / add all funnel through here, so single-DB
+        // ↔ multi-DB title transitions stay in sync without each gesture
+        // owning its own Title = BuildTitle(...) call.
+        if (dbsChanged) RefreshAnchorDisplay();
+    }
+
+    private void RefreshAnchorDisplay()
+    {
+        var version = typeof(BulkChangeViewModel).Assembly.GetName().Version;
+        var anchorName = State.Dbs.Count > 0 ? State.Dbs[0].Info.Name : "";
+        Title = BuildTitle(version, _currentPlcName, anchorName, State.Dbs.Count);
+        OnPropertyChanged(nameof(CurrentDataBlockName));
     }
 
     public string Title
@@ -1807,19 +1822,9 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     /// <returns>true if removed; false if the user cancelled.</returns>
     private bool RemoveActiveDb(ActiveDb db)
     {
-        bool wasAnchor = State.Dbs.Count > 0 && ReferenceEquals(db, State.Dbs[0]);
         var next = TryComputeRemove(State, db);
         if (next == null) return false;
         State = next;
-        if (wasAnchor && next.Dbs.Count > 0)
-        {
-            // Cascade only refreshes RootMembers / chips / stash list;
-            // title + CurrentDataBlockName key off the anchor name and
-            // need an explicit update.
-            var version = typeof(BulkChangeViewModel).Assembly.GetName().Version;
-            Title = BuildTitle(version, next.AnchorPlcName, next.Dbs[0].Info.Name);
-            OnPropertyChanged(nameof(CurrentDataBlockName));
-        }
         return true;
     }
 
@@ -1989,13 +1994,17 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
 
 
     /// <summary>
-    /// Builds the dialog window title — adds a "<c>{PLC} / </c>" prefix to the
-    /// DB name when a PLC name is known so multi-PLC projects don't leave
-    /// the user guessing which software unit they're operating on. Single-PLC
-    /// hosts (DevLauncher) pass an empty PLC name and the prefix is dropped.
+    /// Builds the dialog window title. Single-DB sessions render
+    /// <c>"BlockParam v{version}: {PLC} / {DB}"</c>. Multi-DB sessions
+    /// drop the DB/PLC suffix entirely (#91): the chip strip is the
+    /// single source of truth for which DBs are in scope, so surfacing
+    /// one specific DB's name in the title contradicts the peer-DB
+    /// model. Single-PLC hosts (DevLauncher) pass an empty PLC name and
+    /// the prefix is dropped.
     /// </summary>
-    private static string BuildTitle(System.Version? version, string plcName, string dbName)
+    private static string BuildTitle(System.Version? version, string plcName, string dbName, int activeDbCount)
     {
+        if (activeDbCount > 1) return $"BlockParam v{version}";
         var location = string.IsNullOrEmpty(plcName) ? dbName : $"{plcName} / {dbName}";
         return $"BlockParam v{version}: {location}";
     }
