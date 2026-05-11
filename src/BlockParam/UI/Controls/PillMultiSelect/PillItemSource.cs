@@ -12,7 +12,11 @@ namespace BlockParam.UI.Controls.PillMultiSelect;
 /// <see cref="PillMultiSelect"/> instance. Subscribes to
 /// <see cref="INotifyCollectionChanged"/> when the source supports it and
 /// handles incremental Add/Remove/Replace/Reset. Resolves Display and
-/// Abbreviation strings via <see cref="MemberPathResolver"/>.
+/// Abbreviation strings via <see cref="MemberPathResolver"/>. When grouping
+/// is configured (see <see cref="GroupKeyMemberPath"/> /
+/// <see cref="GroupKeyOverride"/>) also resolves each row's group key and
+/// assigns it to the matching <see cref="PillGroupViewModel"/> in the
+/// internal state.
 /// </summary>
 /// <remarks>
 /// This class has no knowledge of WPF DependencyProperties; it is pure data
@@ -35,8 +39,10 @@ internal sealed class PillItemSource
     private IEnumerable? _itemsSource;
     private string? _displayMemberPath;
     private string? _abbreviationMemberPath;
+    private string? _groupKeyMemberPath;
     private Func<object, string>? _displayOverride;
     private Func<object, string>? _abbreviationOverride;
+    private Func<object, object?>? _groupKeyOverride;
 
     /// <summary>
     /// Raised after a row is added to the internal state. Allows
@@ -119,6 +125,24 @@ internal sealed class PillItemSource
     }
 
     /// <summary>
+    /// Path to the group-key property on each source item. When set (and the
+    /// <see cref="GroupKeyOverride"/> is null), each row's group key is read
+    /// from this property and the row is placed into the matching
+    /// <see cref="PillGroupViewModel"/>. Setting this re-assigns existing rows
+    /// to new groups (without rebuilding rows or losing selection state).
+    /// </summary>
+    public string? GroupKeyMemberPath
+    {
+        get => _groupKeyMemberPath;
+        set
+        {
+            if (_groupKeyMemberPath == value) return;
+            _groupKeyMemberPath = value;
+            RegroupExistingRows();
+        }
+    }
+
+    /// <summary>
     /// Optional delegate that overrides <see cref="DisplayMemberPath"/> for
     /// display-string resolution. When set, called instead of the member-path
     /// reflection path. Set via the <c>DisplaySelector</c> CLR escape hatch.
@@ -149,6 +173,30 @@ internal sealed class PillItemSource
         }
     }
 
+    /// <summary>
+    /// Optional delegate that overrides <see cref="GroupKeyMemberPath"/>
+    /// for group-key resolution. When set, called instead of the reflection
+    /// path. Setting this re-assigns existing rows to new groups.
+    /// </summary>
+    internal Func<object, object?>? GroupKeyOverride
+    {
+        get => _groupKeyOverride;
+        set
+        {
+            _groupKeyOverride = value;
+            RegroupExistingRows();
+        }
+    }
+
+    /// <summary>
+    /// True when either of the grouping inputs (<see cref="GroupKeyMemberPath"/>
+    /// or <see cref="GroupKeyOverride"/>) is set. Drives whether
+    /// <see cref="PillMultiSelectInternalState"/> attaches the explicit
+    /// PropertyGroupDescription on <see cref="PillRowViewModel.GroupKey"/>.
+    /// </summary>
+    internal bool IsGroupingActive =>
+        !string.IsNullOrEmpty(_groupKeyMemberPath) || _groupKeyOverride != null;
+
     // ── Private helpers ──────────────────────────────────────────────────────
 
     private void RebuildRows()
@@ -159,6 +207,7 @@ internal sealed class PillItemSource
             RowRemoved?.Invoke(row);
 
         _state.ClearItems();
+        _state.ClearGroups();
         _rowBySource.Clear();
 
         if (_itemsSource == null) return;
@@ -172,6 +221,15 @@ internal sealed class PillItemSource
         var display = ResolveDisplay(source);
         var abbrev = ResolveAbbreviation(source, display);
         var row = new PillRowViewModel(source, display, abbrev);
+
+        if (IsGroupingActive)
+        {
+            var key = ResolveGroupKey(source);
+            row.GroupKey = key;
+            var group = _state.EnsureGroupForKey(key);
+            group.AddChild(row);
+        }
+
         _rowBySource[source] = row;
         _state.AddItem(row);
         RowAdded?.Invoke(row);
@@ -181,6 +239,14 @@ internal sealed class PillItemSource
     {
         if (!_rowBySource.TryGetValue(source, out var row)) return;
         _rowBySource.Remove(source);
+
+        if (row.OwningGroup is { } group)
+        {
+            group.RemoveChild(row);
+            if (group.Children.Count == 0)
+                _state.RemoveGroup(group);
+        }
+
         _state.RemoveItem(row);
         RowRemoved?.Invoke(row);
     }
@@ -197,6 +263,45 @@ internal sealed class PillItemSource
             kvp.Value.Abbreviation = ResolveAbbreviation(kvp.Key, kvp.Value.Display);
     }
 
+    /// <summary>
+    /// Re-assigns every existing row to the group matching its current
+    /// source-derived group key. Called when <see cref="GroupKeyMemberPath"/>
+    /// or <see cref="GroupKeyOverride"/> changes. Rows keep their selection
+    /// state; only their <see cref="PillRowViewModel.OwningGroup"/> assignment
+    /// moves. Empty groups left behind are removed.
+    /// </summary>
+    private void RegroupExistingRows()
+    {
+        // Detach every row from its current group, clear the state's group
+        // dictionary, then rebuild assignments from scratch. We do it in two
+        // passes (detach-all then attach-all) so the per-group aggregate
+        // recomputation only fires twice per row instead of N times during
+        // a partial-move scan.
+        foreach (var row in _rowBySource.Values)
+        {
+            if (row.OwningGroup is { } oldGroup)
+                oldGroup.RemoveChild(row);
+            row.GroupKey = null;
+        }
+        _state.ClearGroups();
+
+        if (!IsGroupingActive)
+        {
+            _state.OnGroupingActiveChanged(isActive: false);
+            return;
+        }
+
+        foreach (var row in _rowBySource.Values)
+        {
+            var key = ResolveGroupKey(row.Source);
+            row.GroupKey = key;
+            var group = _state.EnsureGroupForKey(key);
+            group.AddChild(row);
+        }
+
+        _state.OnGroupingActiveChanged(isActive: true);
+    }
+
     private string ResolveDisplay(object source)
     {
         if (_displayOverride != null) return _displayOverride(source);
@@ -207,6 +312,21 @@ internal sealed class PillItemSource
     {
         if (_abbreviationOverride != null) return _abbreviationOverride(source);
         return _resolver.Resolve(source, _abbreviationMemberPath, _ => displayFallback);
+    }
+
+    private object ResolveGroupKey(object source)
+    {
+        if (_groupKeyOverride != null)
+            return _groupKeyOverride(source) ?? NullGroupSentinel.Instance;
+
+        if (string.IsNullOrEmpty(_groupKeyMemberPath))
+            return NullGroupSentinel.Instance;
+
+        if (!_resolver.TryGetDescriptor(source.GetType(), _groupKeyMemberPath!, out var descriptor)
+            || descriptor == null)
+            return NullGroupSentinel.Instance;
+
+        return descriptor.GetValue(source) ?? NullGroupSentinel.Instance;
     }
 
     private void OnSourceCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
@@ -252,5 +372,20 @@ internal sealed class PillItemSource
     {
         public new bool Equals(object? x, object? y) => ReferenceEquals(x, y);
         public int GetHashCode(object obj) => RuntimeHelpers.GetHashCode(obj);
+    }
+
+    /// <summary>
+    /// Stand-in object used when a source item's group-key resolves to
+    /// <c>null</c>. Dictionary lookups can't use a null key directly, and
+    /// using the same sentinel for every null lets all "ungrouped" rows
+    /// share one bucket. Equality is reference-based and the instance is
+    /// shared, so all PillGroupViewModel lookups for null keys hit the
+    /// same dictionary entry.
+    /// </summary>
+    internal sealed class NullGroupSentinel
+    {
+        internal static readonly NullGroupSentinel Instance = new();
+        private NullGroupSentinel() { }
+        public override string ToString() => string.Empty;
     }
 }

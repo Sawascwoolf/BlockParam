@@ -70,6 +70,13 @@ class Program
             return;
         }
 
+        // --capture-pill-grouped <out-dir>         Grouped popup: tri-state headers, collapsed group, search expands
+        if (args.Length >= 2 && args[0] == "--capture-pill-grouped")
+        {
+            PillMultiSelectCapture.RunGrouped(Path.GetFullPath(args[1]));
+            return;
+        }
+
         // --demo-pill                              Interactive multi-PLC pill demo (no auto-close)
         if (args.Length >= 1 && args[0] == "--demo-pill")
         {
