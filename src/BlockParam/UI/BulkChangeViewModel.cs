@@ -1579,7 +1579,10 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             dbs: State.Dbs.Concat(new[] { built }).ToList(),
             stashes: stashesNew);
 
-        var (restored, dropped) = RestoreStashOntoLive(stash);
+        // Multi-DB shape after additive add — scope the path lookup to the
+        // just-added DB's subtree so peer DBs with colliding member paths
+        // don't accidentally absorb the stashed edits (#82 path-identity).
+        var (restored, dropped) = RestoreStashOntoLive(stash, scopedTo: built);
         if (restored > 0 || dropped > 0)
         {
             StatusText = dropped == 0
@@ -2069,14 +2072,16 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     /// composing the next <see cref="ActiveSetState"/> so the cascade
     /// fires once.
     /// </summary>
-    private (int restored, int dropped) RestoreStashOntoLive(StashedDbState state)
+    private (int restored, int dropped) RestoreStashOntoLive(StashedDbState state, ActiveDb? scopedTo = null)
     {
         int restored = 0;
         int dropped = 0;
         var validator = BuildValidator();
         foreach (var edit in state.Edits)
         {
-            var node = FindNodeByPath(edit.Path);
+            var node = scopedTo != null
+                ? FindNodeByPathInDb(edit.Path, scopedTo)
+                : FindNodeByPath(edit.Path);
             if (node is { IsLeaf: true })
             {
                 // Restore-without-quota: setting EditableStartValue would route
@@ -2882,6 +2887,29 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             if (found != null) return found;
         }
         return null;
+    }
+
+    /// <summary>
+    /// DB-scoped variant of <see cref="FindNodeByPath"/>. In multi-DB
+    /// shape, member Paths repeat across DBs (the stash holds the bare
+    /// member path, not "DbName.MemberPath") — without scoping, a
+    /// reactivate-additive would replay edits onto whichever DB happened
+    /// to be checked first. Scopes the recursion to <paramref name="owner"/>'s
+    /// synthetic subtree; falls back to the full tree in single-DB shape
+    /// where the question is moot.
+    /// </summary>
+    private MemberNodeViewModel? FindNodeByPathInDb(string path, ActiveDb owner)
+    {
+        if (_dbToSynthetic.TryGetValue(owner, out var synthetic))
+        {
+            foreach (var child in synthetic.Children)
+            {
+                var found = FindNodeByPathRecursive(child, path);
+                if (found != null) return found;
+            }
+            return null;
+        }
+        return FindNodeByPath(path);
     }
 
     private static MemberNodeViewModel? FindNodeByPathRecursive(MemberNodeViewModel node, string path)
