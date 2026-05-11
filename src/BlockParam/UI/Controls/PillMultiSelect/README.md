@@ -9,7 +9,7 @@ states.
 
 ## Vendoring
 
-Drop these 14 source files into any WPF project. That's it. (This README is
+Drop these 16 source files into any WPF project. That's it. (This README is
 just for you — leave it behind or take it along.)
 
 ```
@@ -18,8 +18,9 @@ PillMultiSelect.xaml.cs       PillItemSource.cs
 PillRelayCommand.cs           PillSelectionSync.cs
 PillViewModelBase.cs          PillFormatterCoordinator.cs
 PillRowViewModel.cs           PillOverflowFormatter.cs
-PillTooltipMode.cs            PillOverflowOptions.cs
-PillTooltipFormatters.cs      MemberPathResolver.cs
+PillGroupViewModel.cs         PillOverflowOptions.cs
+PillTooltipMode.cs            MemberPathResolver.cs
+PillTooltipFormatters.cs      PillGroupTemplateConverters.cs
 ```
 
 Dependencies: **.NET BCL + WPF only.** No third-party packages, no
@@ -51,10 +52,40 @@ project if you want — it has no other meaning.
 | `ClearTooltip`           | `string?`                             | Defaults to `"Clear"`.                             |
 | `SelectAllText`          | `string?`                             | Defaults to `"Select all"`.                        |
 | `ResetText`              | `string?`                             | Defaults to `"Reset"`.                             |
+| `GroupKeyMemberPath`     | `string?`                             | Property to bucket rows into expandable groups.    |
+| `GroupHeaderTemplate`    | `DataTemplate?`                       | Overrides the default group header rendering.      |
 
 Code-only escape hatches (override the corresponding DP when both are set):
 `DisplayFormatter`, `TooltipFormatter`, `DisplaySelector`, `AbbreviationSelector`,
-`FilterPredicate`.
+`FilterPredicate`, `GroupKeySelector`.
+
+## Tri-state rows
+
+`PillRowViewModel.IsSelected` is `bool?`. Leaf rows toggled inside the popup
+stay binary (the checkbox has `IsThreeState=false`); the indeterminate state
+only ever appears when an external `bool?` source property pushes `null`
+through `IsSelectedMemberPath`. `SelectedItems` always represents fully-checked
+source items — indeterminate rows are intentionally absent.
+
+## Grouping
+
+Set `GroupKeyMemberPath` to a property name on the source items (or use the
+`GroupKeySelector` CLR escape hatch for richer key resolution). The popup
+renders one expandable section per distinct group-key value with:
+
+- a **tri-state header checkbox** that aggregates child selection
+  (`true` / `false` / `null`) and writes back to every child when toggled,
+- an **expand chevron** that hides/shows the children, and
+- a **n / N count badge**.
+
+Typing in the search box temporarily forces every group that has at least one
+matching row to be expanded so the hit is discoverable — collapsed groups
+restore their prior state when the search clears.
+
+The built-in header template is sufficient out of the box; bind
+`GroupHeaderTemplate` to a custom `DataTemplate` whose DataContext is
+`PillGroupViewModel` (with `Key`, `Header`, `IsSelected`, `IsExpanded`,
+`SelectedCount`, `TotalCount`) when you want richer rendering.
 
 Routed event: `SelectionChanged` (fires once per reconciliation cycle).
 

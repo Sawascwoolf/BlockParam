@@ -30,13 +30,15 @@ internal static class PillMultiSelectCapture
 
     /// <summary>
     /// Demo employee row. Exposed as a public property set so
-    /// <see cref="PillMultiSelect.DisplayMemberPath"/> and
-    /// <see cref="PillMultiSelect.AbbreviationMemberPath"/> can resolve them.
+    /// <see cref="PillMultiSelect.DisplayMemberPath"/>,
+    /// <see cref="PillMultiSelect.AbbreviationMemberPath"/>, and
+    /// <see cref="PillMultiSelect.GroupKeyMemberPath"/> can resolve them.
     /// </summary>
     private sealed class DemoEmployee
     {
         public string Name { get; set; } = string.Empty;
         public string Abbrev { get; set; } = string.Empty;
+        public string Department { get; set; } = string.Empty;
     }
 
     /// <summary>
@@ -54,16 +56,16 @@ internal static class PillMultiSelectCapture
 
     private static readonly DemoEmployee[] DemoEmployees =
     {
-        new() { Name = "A. Kowalski",  Abbrev = "AKO" },
-        new() { Name = "B. Schäfer",   Abbrev = "BSC" },
-        new() { Name = "C. Hoffmann",  Abbrev = "CHO" },
-        new() { Name = "D. Lang",      Abbrev = "DLN" },
-        new() { Name = "E. Krüger",    Abbrev = "EKR" },
-        new() { Name = "F. Baumann",   Abbrev = "FBM" },
-        new() { Name = "G. Weber",     Abbrev = "GWE" },
-        new() { Name = "H. Roth",      Abbrev = "HRT" },
-        new() { Name = "I. Zentner",   Abbrev = "IZN" },
-        new() { Name = "J. Fischer",   Abbrev = "JFR" },
+        new() { Name = "A. Kowalski",  Abbrev = "AKO", Department = "Engineering" },
+        new() { Name = "B. Schäfer",   Abbrev = "BSC", Department = "Operations"  },
+        new() { Name = "C. Hoffmann",  Abbrev = "CHO", Department = "Engineering" },
+        new() { Name = "D. Lang",      Abbrev = "DLN", Department = "Operations"  },
+        new() { Name = "E. Krüger",    Abbrev = "EKR", Department = "Engineering" },
+        new() { Name = "F. Baumann",   Abbrev = "FBM", Department = "Operations"  },
+        new() { Name = "G. Weber",     Abbrev = "GWE", Department = "Engineering" },
+        new() { Name = "H. Roth",      Abbrev = "HRT", Department = "Quality"     },
+        new() { Name = "I. Zentner",   Abbrev = "IZN", Department = "Engineering" },
+        new() { Name = "J. Fischer",   Abbrev = "JFR", Department = "Quality"     },
     };
 
     // Material person icon (24x24).
@@ -154,6 +156,142 @@ internal static class PillMultiSelectCapture
         }
 
         RunCaptureScenes(outDir, scenes);
+    }
+
+    /// <summary>
+    /// Bundled-trigger scenes (closed pill view). Demonstrates how a
+    /// fully-selected group collapses into one "Engineering"-style token
+    /// in the trigger summary instead of listing every member.
+    /// </summary>
+    public static void RunGroupedBundled(string outDir)
+    {
+        var scenes = new List<CaptureScene>
+        {
+            // 11 — one group fully selected (5 Engineering); other groups untouched.
+            // Trigger pill reads "Engineering" instead of 5 abbreviations.
+            BuildClosedGroupedScene(
+                fileName: "11_pill_grouped_bundled_one_group.png",
+                selectedAbbrevs: new[] { "AKO", "CHO", "EKR", "GWE", "IZN" },
+                outDir),
+
+            // 12 — every group fully selected (10/10 → 3 group tokens).
+            // Trigger reads "Engineering, Operations, Quality".
+            BuildClosedGroupedScene(
+                fileName: "12_pill_grouped_bundled_all_groups.png",
+                selectedAbbrevs: new[] { "AKO", "BSC", "CHO", "DLN", "EKR", "FBM", "GWE", "HRT", "IZN", "JFR" },
+                outDir),
+
+            // 13 — mixed: Engineering fully selected + 2 of 3 Operations.
+            // Trigger reads "Engineering, BSC, DLN" — group bundled,
+            // partial-group members listed individually.
+            BuildClosedGroupedScene(
+                fileName: "13_pill_grouped_bundled_mixed.png",
+                selectedAbbrevs: new[] { "AKO", "CHO", "EKR", "GWE", "IZN", "BSC", "DLN" },
+                outDir),
+        };
+
+        RunCaptureScenes(outDir, scenes);
+    }
+
+    private static CaptureScene BuildClosedGroupedScene(
+        string fileName,
+        string[] selectedAbbrevs,
+        string outDir)
+    {
+        return new CaptureScene(
+            Build: () =>
+            {
+                var (window, c) = BuildSceneWindow(grouped: true);
+                ApplySelectionByAbbrevDp(c, DemoEmployees, selectedAbbrevs);
+                SetIsOpen(c, open: false);
+                return window;
+            },
+            Capture: window =>
+            {
+                var outPath = Path.Combine(outDir, fileName);
+                // Closed pill view: a plain window-level RenderTargetBitmap
+                // captures the trigger pill correctly since no popup is open.
+                Program.CaptureWindowToPng(window, outPath, scale: 2.0);
+                Log.Information("Bundled trigger scene saved: {Path}", outPath);
+            });
+    }
+
+    /// <summary>
+    /// Grouped-popup scenes: open with mixed-selection tri-state headers,
+    /// user-collapsed group, and search-forces-expanded-group. Exercises
+    /// the GroupKeyMemberPath / PillGroupViewModel rendering and the
+    /// search-into-collapsed expansion policy.
+    /// </summary>
+    public static void RunGrouped(string outDir)
+    {
+        // 2 of 5 in Engineering = tri-state header; 3 of 3 in Operations =
+        // fully-checked header; 0 of 2 in Quality = unchecked. Picked so
+        // every header state appears in one screenshot.
+        var selectedAbbrevs = new[] { "AKO", "CHO", "BSC", "DLN", "FBM" };
+
+        var scenes = new List<CaptureScene>
+        {
+            // 08 — grouped popup open, mixed selection: all three header states visible
+            BuildGroupedScene(
+                fileName: "08_pill_grouped_open.png",
+                selectedAbbrevs: selectedAbbrevs,
+                configure: _ => { /* default — all groups expanded, no search */ },
+                outDir),
+
+            // 09 — user collapsed the Operations group; tri-state header on
+            // Engineering still visible; collapsed group hides its members.
+            BuildGroupedScene(
+                fileName: "09_pill_grouped_collapsed.png",
+                selectedAbbrevs: selectedAbbrevs,
+                configure: state =>
+                {
+                    if (state.Groups.TryGetValue("Operations", out var ops))
+                        ops.IsExpanded = false;
+                },
+                outDir),
+
+            // 10 — search active. "ann" matches Hoffmann (Engineering) and
+            // Baumann (Operations). User had collapsed Operations; the
+            // search expansion policy forces it open so the match is reachable.
+            BuildGroupedScene(
+                fileName: "10_pill_grouped_search.png",
+                selectedAbbrevs: selectedAbbrevs,
+                configure: state =>
+                {
+                    if (state.Groups.TryGetValue("Operations", out var ops))
+                        ops.IsExpanded = false;
+                    state.SearchText = "ann";
+                },
+                outDir),
+        };
+
+        RunCaptureScenes(outDir, scenes);
+    }
+
+    private static CaptureScene BuildGroupedScene(
+        string fileName,
+        string[] selectedAbbrevs,
+        Action<PillMultiSelectInternalState> configure,
+        string outDir)
+    {
+        PillMultiSelect? control = null;
+
+        return new CaptureScene(
+            Build: () =>
+            {
+                var (window, c) = BuildSceneWindow(grouped: true);
+                ApplySelectionByAbbrevDp(c, DemoEmployees, selectedAbbrevs);
+                SetIsOpen(c, open: true);
+                configure(c.InternalState);
+                control = c;
+                return window;
+            },
+            Capture: window =>
+            {
+                var outPath = Path.Combine(outDir, fileName);
+                CompositeTriggerAndPopupToPng(window, control!, outPath, scale: 2.0);
+                Log.Information("Grouped pill scene saved: {Path}", outPath);
+            });
     }
 
     /// <summary>
@@ -384,10 +522,10 @@ internal static class PillMultiSelectCapture
         return pill;
     }
 
-    private static (Window window, PillMultiSelect control) BuildSceneWindow()
+    private static (Window window, PillMultiSelect control) BuildSceneWindow(bool grouped = false)
     {
         var employees = DemoEmployees
-            .Select(e => new DemoEmployee { Name = e.Name, Abbrev = e.Abbrev })
+            .Select(e => new DemoEmployee { Name = e.Name, Abbrev = e.Abbrev, Department = e.Department })
             .ToList();
 
         var control = new PillMultiSelect
@@ -395,11 +533,21 @@ internal static class PillMultiSelectCapture
             ItemsSource = employees,
             DisplayMemberPath = nameof(DemoEmployee.Name),
             AbbreviationMemberPath = nameof(DemoEmployee.Abbrev),
-            Label = "Mitarbeiter",
+            Label = grouped ? "Team" : "Mitarbeiter",
             Icon = Geometry.Parse(PersonIconPath),
             HorizontalAlignment = HorizontalAlignment.Left,
             VerticalAlignment = VerticalAlignment.Top,
         };
+
+        if (grouped)
+        {
+            // Pre-set grouping before SelectedItems so each row enters its
+            // group already wired and aggregate header tri-state is computed
+            // off the very first selection reconcile pass.
+            control.GroupKeyMemberPath = nameof(DemoEmployee.Department);
+            control.PopupWidth = 320;
+            control.PopupMaxListHeight = 360;
+        }
 
         var host = new Border
         {
@@ -425,8 +573,12 @@ internal static class PillMultiSelectCapture
 
     /// <summary>
     /// Pre-selects rows whose Abbreviation is in <paramref name="abbrevs"/> by
-    /// filtering the source collection and assigning the matching items to the
-    /// <see cref="PillMultiSelect.SelectedItems"/> DP. No reflection required.
+    /// filtering the control's actual <c>ItemsSource</c> and assigning the
+    /// matching items to the <see cref="PillMultiSelect.SelectedItems"/> DP.
+    /// Reading from <c>ItemsSource</c> (not the static seed) is critical —
+    /// <see cref="PillSelectionSync"/> uses reference equality, so the
+    /// SelectedItems entries must be the same object instances the rows
+    /// wrap.
     /// </summary>
     private static void ApplySelectionByAbbrevDp(
         PillMultiSelect pill,
@@ -434,8 +586,11 @@ internal static class PillMultiSelectCapture
         string[] abbrevs)
     {
         var abbrevSet = new HashSet<string>(abbrevs, StringComparer.Ordinal);
+        // Prefer the live ItemsSource: BuildSceneWindow copies the static
+        // seed, and selection must reference the same instances as the rows.
+        var source = pill.ItemsSource as IEnumerable<DemoEmployee> ?? employees;
         pill.SelectedItems = new ObservableCollection<object>(
-            employees.Where(e => abbrevSet.Contains(e.Abbrev)));
+            source.Where(e => abbrevSet.Contains(e.Abbrev)));
     }
 
     private static void SetIsOpen(PillMultiSelect pill, bool open)

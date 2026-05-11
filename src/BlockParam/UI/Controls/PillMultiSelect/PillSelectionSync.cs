@@ -14,15 +14,19 @@ namespace BlockParam.UI.Controls.PillMultiSelect;
 ///   <item><b>Edge A</b> — row <see cref="PillRowViewModel.IsSelected"/> ↔
 ///     <see cref="PillMultiSelect.SelectedItems"/> collection. Toggling a
 ///     checkbox adds/removes the source from the host's collection; adding/
-///     removing from the collection flips the row's checkbox.</item>
+///     removing from the collection flips the row's checkbox. Indeterminate
+///     (<c>null</c>) is treated as "not in SelectedItems" — the host's
+///     collection always represents *fully-checked* source items.</item>
 ///   <item><b>Edge B</b> — row <see cref="PillRowViewModel.IsSelected"/> ↔
-///     source item's <c>IsSelectedMemberPath</c> bool property.  Toggling
-///     writes through; an external <see cref="INotifyPropertyChanged"/> raise
-///     on the bound property flips the row back.</item>
+///     source item's <c>IsSelectedMemberPath</c> property. Supports both
+///     <c>bool</c> and <c>bool?</c> source properties; null writes through
+///     when the source declares a <c>bool?</c>, and reads back faithfully.
+///     An external <see cref="INotifyPropertyChanged"/> raise on the bound
+///     property flips the row back.</item>
 ///   <item><b>Edge C</b> — when <see cref="PillItemSource"/> adds or removes
 ///     rows (ItemsSource collection mutation), new rows are reconciled against
 ///     both <see cref="PillMultiSelect.SelectedItems"/> membership and the
-///     IsSelectedMemberPath bool. Removed rows are unsubscribed.</item>
+///     IsSelectedMemberPath value. Removed rows are unsubscribed.</item>
 /// </list>
 /// </summary>
 /// <remarks>
@@ -114,7 +118,7 @@ internal sealed class PillSelectionSync
     /// <summary>
     /// Called when the <c>IsSelectedMemberPath</c> DP changes on the UserControl.
     /// Unsubscribes the old path listener, subscribes the new one, and re-reads
-    /// each source item's bool to sync row IsSelected (Edge B initial sync).
+    /// each source item's value to sync row IsSelected (Edge B initial sync).
     /// </summary>
     internal void SetIsSelectedMemberPath(string? newValue)
     {
@@ -129,7 +133,7 @@ internal sealed class PillSelectionSync
 
         if (_isSelectedMemberPath != null)
         {
-            // Re-read each row's bool from the new path and subscribe INPC.
+            // Re-read each row's value from the new path and subscribe INPC.
             ReconcileRowsFromMemberPath();
         }
     }
@@ -142,16 +146,16 @@ internal sealed class PillSelectionSync
         row.PropertyChanged += OnRowPropertyChanged;
 
         // Reconcile the new row's IsSelected from SelectedItems membership (Edge A)
-        // and from the IsSelectedMemberPath bool (Edge B). Last-writer-wins: we
+        // and from the IsSelectedMemberPath value (Edge B). Last-writer-wins: we
         // apply SelectedItems first, then overwrite with the member-path value if
         // both DPs are set — the member-path value is considered more "live".
-        bool newSelected = false;
+        bool? newSelected = false;
 
         if (_selectedItems != null)
             newSelected = ContainsRef(_selectedItems, row.Source);
 
         if (_isSelectedMemberPath != null)
-            newSelected = ReadBoolFromSource(row.Source, _isSelectedMemberPath);
+            newSelected = ReadSelectionFromSource(row.Source, _isSelectedMemberPath);
 
         // Guard against triggering re-entrancy: we set the row directly here
         // during the "seed" phase, then subscribe INPC for future changes.
@@ -163,8 +167,10 @@ internal sealed class PillSelectionSync
         }
 
         // Mirror the seed selection into SelectedItems (OnRowPropertyChanged
-        // was silenced above, so we must do this explicitly).
-        if (newSelected && _selectedItems != null && !ContainsRef(_selectedItems, row.Source))
+        // was silenced above, so we must do this explicitly). Indeterminate
+        // (null) does NOT add to SelectedItems — it's neither fully checked
+        // nor explicitly unchecked.
+        if (newSelected == true && _selectedItems != null && !ContainsRef(_selectedItems, row.Source))
             _selectedItems.Add(row.Source);
 
         if (_isSelectedMemberPath != null)
@@ -197,10 +203,11 @@ internal sealed class PillSelectionSync
         _pendingSelectionChanged = true;
         try
         {
-            // Edge A: mirror to SelectedItems.
+            // Edge A: mirror to SelectedItems. Only fully-checked rows live in
+            // SelectedItems; indeterminate and false are both treated as absent.
             if (_selectedItems != null)
             {
-                if (row.IsSelected)
+                if (row.IsSelected == true)
                 {
                     if (!ContainsRef(_selectedItems, row.Source))
                         _selectedItems.Add(row.Source);
@@ -213,7 +220,7 @@ internal sealed class PillSelectionSync
 
             // Edge B: write through to the source property.
             if (_isSelectedMemberPath != null)
-                WriteBoolToSource(row.Source, _isSelectedMemberPath, row.IsSelected);
+                WriteSelectionToSource(row.Source, _isSelectedMemberPath, row.IsSelected);
         }
         finally
         {
@@ -284,13 +291,14 @@ internal sealed class PillSelectionSync
         _pendingSelectionChanged = true;
         try
         {
-            var newBool = ReadBoolFromSource(sender, _isSelectedMemberPath);
-            SetRowSelected(sender, newBool);
+            var newValue = ReadSelectionFromSource(sender, _isSelectedMemberPath);
+            SetRowSelected(sender, newValue);
 
             // Mirror to SelectedItems as well (Edge A forward from Edge B mutation).
+            // Indeterminate (null) is absent from SelectedItems.
             if (_selectedItems != null)
             {
-                if (newBool)
+                if (newValue == true)
                 {
                     if (!ContainsRef(_selectedItems, sender))
                         _selectedItems.Add(sender);
@@ -356,14 +364,14 @@ internal sealed class PillSelectionSync
         {
             foreach (var row in _state.Items)
             {
-                var selected = ReadBoolFromSource(row.Source, _isSelectedMemberPath);
+                var selected = ReadSelectionFromSource(row.Source, _isSelectedMemberPath);
                 row.IsSelected = selected;
 
                 // Mirror into SelectedItems so Edge A stays consistent.
                 // OnRowPropertyChanged is blocked by _syncing, so we do it here.
                 if (_selectedItems != null)
                 {
-                    if (selected)
+                    if (selected == true)
                     {
                         if (!ContainsRef(_selectedItems, row.Source))
                             _selectedItems.Add(row.Source);
@@ -386,7 +394,7 @@ internal sealed class PillSelectionSync
 
     // ── Row lookup helpers ───────────────────────────────────────────────────
 
-    private void SetRowSelected(object source, bool selected)
+    private void SetRowSelected(object source, bool? selected)
     {
         foreach (var row in _state.Items)
         {
@@ -420,16 +428,35 @@ internal sealed class PillSelectionSync
 
     // ── Source property read/write (via MemberPathResolver) ─────────────────
 
-    private bool ReadBoolFromSource(object source, string path)
+    /// <summary>
+    /// Reads the value at <paramref name="path"/> on <paramref name="source"/>
+    /// as a tri-state. Supports both <c>bool</c> and <c>bool?</c> source
+    /// properties — a <c>bool?</c> set to null reads back as null; a plain
+    /// <c>bool</c> reads back as <c>true</c>/<c>false</c>. Any other type or
+    /// a missing property reads back as <c>false</c>.
+    /// </summary>
+    private bool? ReadSelectionFromSource(object source, string path)
     {
         if (!_resolver.TryGetDescriptor(source.GetType(), path, out var descriptor)
             || descriptor == null)
             return false;
 
-        return descriptor.GetValue(source) is true;
+        var raw = descriptor.GetValue(source);
+        return raw switch
+        {
+            bool b => b,
+            null => null,
+            _ => false,
+        };
     }
 
-    private void WriteBoolToSource(object source, string path, bool value)
+    /// <summary>
+    /// Writes <paramref name="value"/> back to <paramref name="path"/> on
+    /// <paramref name="source"/>. When the source property is <c>bool?</c>
+    /// the indeterminate state writes through as null; when it's plain
+    /// <c>bool</c> the null is coerced to <c>false</c> to satisfy the type.
+    /// </summary>
+    private void WriteSelectionToSource(object source, string path, bool? value)
     {
         if (!_resolver.TryGetDescriptor(source.GetType(), path, out var descriptor)
             || descriptor == null)
@@ -437,7 +464,18 @@ internal sealed class PillSelectionSync
 
         if (descriptor.IsReadOnly) return;
 
-        descriptor.SetValue(source, value);
+        var propertyType = descriptor.PropertyType;
+        if (propertyType == typeof(bool?))
+        {
+            descriptor.SetValue(source, value);
+        }
+        else if (propertyType == typeof(bool))
+        {
+            descriptor.SetValue(source, value == true);
+        }
+        // Any other property type — silently skip. The control's IsSelectedMemberPath
+        // contract is that the property is bool or bool?; mistyped paths are a
+        // host-configuration error and we choose not to throw.
     }
 
     // ── SelectionChanged deduplication ───────────────────────────────────────

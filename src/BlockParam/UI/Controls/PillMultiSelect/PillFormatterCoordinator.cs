@@ -203,7 +203,18 @@ internal sealed class PillFormatterCoordinator
     private void ApplyOverflowOptionsToState(PillOverflowOptions? options)
     {
         _state.DisplayFormatter = options != null
-            ? selected => PillOverflowFormatter.FormatRows(selected, options)
+            ? selected =>
+            {
+                // Bundle fully-checked groups before applying overflow rules so
+                // "Engineering" counts as one entry (and one display string) in
+                // the abbreviation/collapse thresholds.
+                var tokens = PillTriggerTokenBuilder.Build(selected);
+                return PillOverflowFormatter.Format(
+                    tokens,
+                    t => t.Display,
+                    t => t.Abbreviation,
+                    options);
+            }
             : (Func<IReadOnlyList<PillRowViewModel>, string>?)null;
     }
 
@@ -215,16 +226,32 @@ internal sealed class PillFormatterCoordinator
     /// <summary>
     /// Returns the row-level formatter delegate that corresponds to
     /// <paramref name="mode"/>. Returns <c>null</c> for <see cref="PillTooltipMode.None"/>,
-    /// which WPF renders as "no tooltip".
+    /// which WPF renders as "no tooltip". Tooltip lines are also bundled —
+    /// a fully-checked group becomes "Engineering (5)" rather than five
+    /// individual member lines.
     /// </summary>
     private static Func<IReadOnlyList<PillRowViewModel>, string?>? BuildTooltipFormatterFor(
         PillTooltipMode mode) =>
         mode switch
         {
             PillTooltipMode.FullNames =>
-                rows => PillTooltipFormatters.FullNamesRows(rows),
+                rows =>
+                {
+                    var tokens = PillTriggerTokenBuilder.Build(rows);
+                    return string.Join("\n", tokens.Select(t =>
+                        t.IsGroup
+                            ? $"{t.Display} ({t.GroupMemberCount})"
+                            : t.Display));
+                },
             PillTooltipMode.AbbrevAndFullNames =>
-                rows => PillTooltipFormatters.AbbrevAndFullNamesRows(rows),
+                rows =>
+                {
+                    var tokens = PillTriggerTokenBuilder.Build(rows);
+                    return string.Join("\n", tokens.Select(t =>
+                        t.IsGroup
+                            ? $"{t.Display} ({t.GroupMemberCount})"
+                            : $"{t.Abbreviation} — {t.Display}"));
+                },
             _ => null,
         };
 }

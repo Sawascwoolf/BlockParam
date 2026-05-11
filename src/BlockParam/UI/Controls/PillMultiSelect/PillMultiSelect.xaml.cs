@@ -5,6 +5,7 @@ using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Markup;
 using System.Windows.Media;
 
 namespace BlockParam.UI.Controls.PillMultiSelect;
@@ -92,6 +93,48 @@ public partial class PillMultiSelect : UserControl
     {
         get => (string?)GetValue(AbbreviationMemberPathProperty);
         set => SetValue(AbbreviationMemberPathProperty, value);
+    }
+
+    /// <summary>
+    /// Optional path to a property on each source item used to group rows in
+    /// the popup list. When set, the ListBox renders one expandable section
+    /// per distinct group-key value with a tri-state header checkbox that
+    /// toggles all children. When null (default), the list is flat.
+    /// <para>
+    /// <b>Precedence</b>: overridden by <see cref="GroupKeySelector"/> CLR
+    /// escape hatch when both are set.
+    /// </para>
+    /// </summary>
+    public static readonly DependencyProperty GroupKeyMemberPathProperty =
+        DependencyProperty.Register(nameof(GroupKeyMemberPath), typeof(string), typeof(PillMultiSelect),
+            new PropertyMetadata(null, (d, e) => ((PillMultiSelect)d)._itemSource.GroupKeyMemberPath = (string?)e.NewValue));
+
+    public string? GroupKeyMemberPath
+    {
+        get => (string?)GetValue(GroupKeyMemberPathProperty);
+        set => SetValue(GroupKeyMemberPathProperty, value);
+    }
+
+    /// <summary>
+    /// Optional custom <see cref="DataTemplate"/> for the group header row
+    /// (checkbox + label + expand chevron + count). When null, the control's
+    /// built-in default template defined in XAML is used. The template's
+    /// DataContext is the <see cref="PillGroupViewModel"/> itself — the
+    /// container template unwraps the <see cref="System.Windows.Data.CollectionViewGroup.Name"/>
+    /// (which is the group VM) into a <c>ContentControl.Content</c>, so a
+    /// host template binds directly against the group VM's members:
+    /// <c>{Binding Header}</c>, <c>{Binding IsSelected}</c>,
+    /// <c>{Binding IsExpanded}</c>, <c>{Binding SelectedCount}</c>,
+    /// <c>{Binding TotalCount}</c>.
+    /// </summary>
+    public static readonly DependencyProperty GroupHeaderTemplateProperty =
+        DependencyProperty.Register(nameof(GroupHeaderTemplate), typeof(DataTemplate), typeof(PillMultiSelect),
+            new PropertyMetadata(null, (d, e) => ((PillMultiSelect)d)._internalState.GroupHeaderTemplate = (DataTemplate?)e.NewValue));
+
+    public DataTemplate? GroupHeaderTemplate
+    {
+        get => (DataTemplate?)GetValue(GroupHeaderTemplateProperty);
+        set => SetValue(GroupHeaderTemplateProperty, value);
     }
 
     public static readonly DependencyProperty LabelProperty =
@@ -378,6 +421,17 @@ public partial class PillMultiSelect : UserControl
     }
 
     /// <summary>
+    /// Per-item group-key selector. Overrides <see cref="GroupKeyMemberPath"/>
+    /// when set; existing rows are re-grouped immediately. Setting back to
+    /// <c>null</c> restores the DP-driven behaviour.
+    /// </summary>
+    public Func<object, object?>? GroupKeySelector
+    {
+        get => _itemSource.GroupKeyOverride;
+        set => _itemSource.GroupKeyOverride = value;
+    }
+
+    /// <summary>
     /// Custom search-filter predicate. Receives a source item and the current
     /// search text; return <c>true</c> to include the item. Overrides the
     /// default Display/Abbreviation contains-check when set. Setting back to
@@ -397,6 +451,14 @@ public partial class PillMultiSelect : UserControl
 
     internal System.Windows.Controls.Primitives.Popup PopupElement => PillPopup;
     internal FrameworkElement TriggerElement => PillTrigger;
+
+    /// <summary>
+    /// Backing view-model used by the popup's bindings. Exposed for headless
+    /// capture and tests (both projects have <c>InternalsVisibleTo</c>) so
+    /// they can drive non-DP state — search text, group expansion — without
+    /// reflection. Not part of the public API surface.
+    /// </summary>
+    internal PillMultiSelectInternalState InternalState => _internalState;
 
     // ── Event handlers ────────────────────────────────────────────────────────
 

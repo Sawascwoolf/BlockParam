@@ -62,6 +62,10 @@ Thumbs.db
 ## Only the stitched MP4 + fixtures + scripts are tracked.
 assets/screenshots/workflow/wf*.png
 
+## Pill review composite — regenerated on demand by scripts/review-pill-screenshots.ps1.
+## The 01-10 canonical scenes are tracked; the stitched composite is not.
+assets/screenshots/pill/composite.png
+
 ## License-dialog visual states — diagnostic output of `--capture-license`.
 ## Regenerable on demand; not part of marketing assets.
 assets/screenshots/license/

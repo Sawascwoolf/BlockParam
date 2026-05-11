@@ -1,10 +1,90 @@
 <UserControl x:Class="BlockParam.UI.Controls.PillMultiSelect.PillMultiSelect"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:local="clr-namespace:BlockParam.UI.Controls.PillMultiSelect"
              FontFamily="Segoe UI" FontSize="12">
 
     <UserControl.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVis"/>
+        <local:PillGroupHeaderVisibilityConverter x:Key="GroupHeaderVis"/>
+        <local:PillGroupExpandedVisibilityConverter x:Key="GroupExpandedVis"/>
+
+        <!-- Default header template used when GroupKeyMemberPath / GroupKeySelector
+             is set on the PillMultiSelect but the host has not supplied a
+             GroupHeaderTemplate of its own. DataContext is the PillGroupViewModel. -->
+        <DataTemplate x:Key="DefaultPillGroupHeaderTemplate">
+            <!-- Light tint + thin bottom border so the header reads as a
+                 section boundary, not as just another row. Reinforces the
+                 visual grouping along with the indented leaves below. -->
+            <Border Background="#F4F6F9"
+                    BorderBrush="#E5E7EB" BorderThickness="0,0,0,1"
+                    Padding="6,5">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+
+                    <!-- Expand/collapse chevron. ToggleButton.IsChecked binds to
+                         PillGroupViewModel.IsExpanded — checked = expanded (▼),
+                         unchecked = collapsed (▶). -->
+                    <ToggleButton Grid.Column="0"
+                                  IsChecked="{Binding IsExpanded, Mode=TwoWay}"
+                                  Width="14" Height="14"
+                                  Background="Transparent"
+                                  BorderThickness="0"
+                                  Cursor="Hand"
+                                  Focusable="False"
+                                  Margin="0,0,2,0">
+                        <ToggleButton.Template>
+                            <ControlTemplate TargetType="ToggleButton">
+                                <Grid Background="Transparent">
+                                    <Path x:Name="Chevron"
+                                          Stroke="#6B7280" StrokeThickness="1.4"
+                                          StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                                          Fill="Transparent"
+                                          HorizontalAlignment="Center"
+                                          VerticalAlignment="Center"
+                                          Data="M 3,5 L 7,9 L 11,5"/>
+                                </Grid>
+                                <ControlTemplate.Triggers>
+                                    <Trigger Property="IsChecked" Value="False">
+                                        <Setter TargetName="Chevron" Property="Data"
+                                                Value="M 5,3 L 9,7 L 5,11"/>
+                                    </Trigger>
+                                </ControlTemplate.Triggers>
+                            </ControlTemplate>
+                        </ToggleButton.Template>
+                    </ToggleButton>
+
+                    <!-- Tri-state header checkbox. IsThreeState=False so user clicks
+                         cycle binary; the indeterminate visual is driven by the
+                         aggregated bool? from PillGroupViewModel.RecomputeFromChildren. -->
+                    <CheckBox Grid.Column="1"
+                              IsChecked="{Binding IsSelected, Mode=TwoWay}"
+                              IsThreeState="False"
+                              VerticalAlignment="Center"
+                              Margin="4,0,8,0"/>
+
+                    <TextBlock Grid.Column="2"
+                               Text="{Binding Header}"
+                               FontWeight="SemiBold"
+                               Foreground="#1F2937"
+                               VerticalAlignment="Center"
+                               TextTrimming="CharacterEllipsis"/>
+
+                    <TextBlock Grid.Column="3"
+                               Foreground="#9CA3AF" FontSize="11"
+                               VerticalAlignment="Center" Margin="8,0,2,0">
+                        <Run Text="{Binding SelectedCount, Mode=OneWay}"/>
+                        <Run Text=" / "/>
+                        <Run Text="{Binding TotalCount, Mode=OneWay}"/>
+                    </TextBlock>
+                </Grid>
+            </Border>
+        </DataTemplate>
 
         <!-- Material magnifier (24x24) -->
         <Geometry x:Key="MagnifierGeom">M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.516 6.516 0 0 1 9.5 16C5.91 16 3 13.09 3 9.5S5.91 3 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5z</Geometry>
@@ -95,7 +175,9 @@
 
         <!-- Strip the default ListBoxItem selection chrome — the inline
              checkbox communicates state. The whole row is a click target
-             that toggles the checkbox. -->
+             that toggles the checkbox. When the popup is rendering explicit
+             groups, the left padding bumps so children visually nest under
+             their group header. -->
         <Style x:Key="PillRowStyle" TargetType="ListBoxItem">
             <Setter Property="Padding" Value="8,5"/>
             <Setter Property="Cursor" Value="Hand"/>
@@ -119,6 +201,20 @@
                     </ControlTemplate>
                 </Setter.Value>
             </Setter>
+            <Style.Triggers>
+                <!-- When the popup is grouped, indent leaf rows so children
+                     read as nested under their group header. Walks up through
+                     the GroupItem to find the ListBox so we can pick up the
+                     state's IsExplicitGroupingActive flag. The 26px left
+                     padding aligns the leaf checkbox exactly with the header
+                     checkbox: header Border(6) + chevron(14) + chevron right
+                     margin(2) + header checkbox left margin(4) = 26. -->
+                <DataTrigger Binding="{Binding DataContext.IsExplicitGroupingActive,
+                                              RelativeSource={RelativeSource AncestorType=ListBox}}"
+                             Value="True">
+                    <Setter Property="Padding" Value="26,5,8,5"/>
+                </DataTrigger>
+            </Style.Triggers>
         </Style>
     </UserControl.Resources>
 
@@ -253,11 +349,17 @@
                              BorderThickness="0" Background="Transparent"
                              ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                              ScrollViewer.VerticalScrollBarVisibility="Auto">
-                        <!-- "Selected first" grouping. The VM only attaches
-                             a GroupDescription when there's both a selected
-                             AND an unselected item in the snapshot, so the
-                             True group always comes first and we render the
-                             1px divider only above the False group. -->
+                        <!-- Group rendering. Two distinct grouping modes share
+                             this single template:
+                             1) Selected-first (Name is a bool): renders a 1px
+                                divider before the False (unselected) group;
+                                no divider above the True group.
+                             2) Explicit grouping by GroupKeyMemberPath
+                                (Name is a PillGroupViewModel): renders a
+                                full header with checkbox, expand chevron,
+                                label, and count; items hidden when collapsed.
+                             The two modes never coexist — explicit grouping
+                             suppresses selected-first inside the VM. -->
                         <ListBox.GroupStyle>
                             <GroupStyle HidesIfEmpty="True">
                                 <GroupStyle.ContainerStyle>
@@ -266,15 +368,34 @@
                                             <Setter.Value>
                                                 <ControlTemplate TargetType="GroupItem">
                                                     <StackPanel>
+                                                        <!-- Selected-first 1px divider. Hidden by default;
+                                                             shown only when Name=False (the unselected
+                                                             group, rendered after the selected one). -->
                                                         <Border x:Name="GroupDivider"
                                                                 Height="1" Background="#EEF1F4"
-                                                                Margin="8,4"/>
-                                                        <ItemsPresenter/>
+                                                                Margin="8,4"
+                                                                Visibility="Collapsed"/>
+
+                                                        <!-- Explicit-group header. ContentTemplate
+                                                             falls back to the inline default when the
+                                                             host has not bound GroupHeaderTemplate. -->
+                                                        <ContentControl x:Name="ExplicitHeader"
+                                                                        Content="{Binding Name}"
+                                                                        Visibility="{Binding Name, Converter={StaticResource GroupHeaderVis}}"
+                                                                        ContentTemplate="{Binding DataContext.GroupHeaderTemplate, RelativeSource={RelativeSource AncestorType=ListBox}, FallbackValue={StaticResource DefaultPillGroupHeaderTemplate}, TargetNullValue={StaticResource DefaultPillGroupHeaderTemplate}}"/>
+
+                                                        <!-- The leaves. Always visible in selected-first
+                                                             mode (Name is bool, IsExpanded path returns
+                                                             Unset, converter defaults to Visible). For
+                                                             explicit groups, visibility follows
+                                                             PillGroupViewModel.IsExpanded. -->
+                                                        <ItemsPresenter x:Name="LeafItems"
+                                                                        Visibility="{Binding Name.IsExpanded, Converter={StaticResource GroupExpandedVis}}"/>
                                                     </StackPanel>
                                                     <ControlTemplate.Triggers>
-                                                        <DataTrigger Binding="{Binding Name}" Value="True">
+                                                        <DataTrigger Binding="{Binding Name}" Value="False">
                                                             <Setter TargetName="GroupDivider"
-                                                                    Property="Visibility" Value="Collapsed"/>
+                                                                    Property="Visibility" Value="Visible"/>
                                                         </DataTrigger>
                                                     </ControlTemplate.Triggers>
                                                 </ControlTemplate>
