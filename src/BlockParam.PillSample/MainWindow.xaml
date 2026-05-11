@@ -1,0 +1,74 @@
+<Window x:Class="BlockParam.PillSample.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:pill="clr-namespace:BlockParam.UI.Controls.PillMultiSelect"
+        xmlns:local="clr-namespace:BlockParam.PillSample"
+        Title="PillMultiSelect — standalone sample"
+        Width="720" Height="520"
+        FontFamily="Segoe UI" FontSize="13"
+        Background="#FAFAFA">
+
+    <Window.Resources>
+        <!--
+            Reusable PillOverflowOptions resource used by the second pill below.
+            Shows the same threshold pattern hosts typically configure: switch from
+            full names to abbreviations once 4 are selected (or 30 chars), then
+            collapse with "+N more" after 5 visible.
+        -->
+        <pill:PillOverflowOptions x:Key="DbOverflow"
+                                  AbbreviateAfterEntries="4"
+                                  AbbreviateAfterChars="30"
+                                  CollapseAfterEntries="5" />
+    </Window.Resources>
+
+    <ScrollViewer Padding="32" VerticalScrollBarVisibility="Auto">
+        <StackPanel>
+
+            <TextBlock Text="PillMultiSelect"
+                       FontSize="20" FontWeight="SemiBold"
+                       Foreground="#111827" />
+            <TextBlock Text="Bound to plain CLR objects. No BlockParam project reference — this window proves the control is self-contained."
+                       Foreground="#6B7280" TextWrapping="Wrap" Margin="0,4,0,24" />
+
+            <!-- Scene 1 ─ employees (default formatting, no overflow rules) -->
+            <TextBlock Text="1. Employees — default formatting"
+                       FontWeight="SemiBold" Margin="0,0,0,8" />
+            <pill:PillMultiSelect ItemsSource="{Binding Employees}"
+                                  DisplayMemberPath="Name"
+                                  AbbreviationMemberPath="Abbrev"
+                                  Label="Members"
+                                  SelectedItems="{Binding SelectedEmployees, Mode=OneWay}"
+                                  PopupWidth="280"
+                                  HorizontalAlignment="Left"
+                                  Margin="0,0,0,32" />
+
+            <!-- Scene 2 ─ DBs (overflow rules + full-names tooltip) -->
+            <TextBlock Text="2. Data blocks — overflow + tooltip"
+                       FontWeight="SemiBold" Margin="0,0,0,8" />
+            <pill:PillMultiSelect ItemsSource="{Binding DataBlocks}"
+                                  DisplayMemberPath="Name"
+                                  AbbreviationMemberPath="Number"
+                                  Label="PLC_PowerStation"
+                                  SelectedItems="{Binding SelectedDataBlocks, Mode=OneWay}"
+                                  OverflowOptions="{StaticResource DbOverflow}"
+                                  TooltipMode="FullNames"
+                                  PopupWidth="320"
+                                  HorizontalAlignment="Left"
+                                  Margin="0,0,0,32" />
+
+            <!-- Scene 3 ─ same DB list, search box hidden, footer hidden -->
+            <TextBlock Text="3. Compact mode — ShowSearchBox=False, ShowFooterActions=False"
+                       FontWeight="SemiBold" Margin="0,0,0,8" />
+            <pill:PillMultiSelect ItemsSource="{Binding DataBlocks}"
+                                  DisplayMemberPath="Name"
+                                  AbbreviationMemberPath="Number"
+                                  Label="Quick pick"
+                                  SelectedItems="{Binding SelectedQuickPicks, Mode=OneWay}"
+                                  ShowSearchBox="False"
+                                  ShowFooterActions="False"
+                                  PopupWidth="260"
+                                  HorizontalAlignment="Left" />
+
+        </StackPanel>
+    </ScrollViewer>
+</Window>

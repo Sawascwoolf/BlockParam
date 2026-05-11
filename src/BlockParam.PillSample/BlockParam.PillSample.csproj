@@ -1,0 +1,39 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Portability proof for the PillMultiSelect control.
+
+    This project deliberately does NOT reference BlockParam.csproj.
+    It pulls the 14 source files of UI/Controls/PillMultiSelect/ via Compile/Page
+    Include so a colleague can verify with their own eyes that the control compiles
+    and runs against nothing but the .NET BCL and WPF — no Siemens.Engineering,
+    no BlockParam.Localization, no project-internal helpers.
+
+    To vendor into another solution, copy those 14 files into a folder, drop them
+    into a WPF project, rename the namespace if you wish, and you're done.
+  -->
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net48</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <LangVersion>latest</LangVersion>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>BlockParam.PillSample</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Pill control source pulled directly from the canonical folder. -->
+    <Compile Include="..\BlockParam\UI\Controls\PillMultiSelect\*.cs"
+             Exclude="..\BlockParam\UI\Controls\PillMultiSelect\*.xaml.cs"
+             LinkBase="PillMultiSelect" />
+    <Page Include="..\BlockParam\UI\Controls\PillMultiSelect\PillMultiSelect.xaml"
+          LinkBase="PillMultiSelect" />
+    <Compile Include="..\BlockParam\UI\Controls\PillMultiSelect\PillMultiSelect.xaml.cs"
+             LinkBase="PillMultiSelect">
+      <DependentUpon>PillMultiSelect.xaml</DependentUpon>
+    </Compile>
+  </ItemGroup>
+
+</Project>
