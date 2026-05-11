@@ -1,3 +1,4 @@
+using System.Linq;
 using FluentAssertions;
 using BlockParam.UI.Controls.PillMultiSelect;
 using Xunit;
@@ -16,6 +17,9 @@ public class PillSnapshotOrderingTests
         return vm;
     }
 
+    private static string[] ViewOrder(PillMultiSelectInternalState vm)
+        => vm.FilteredItems.Cast<PillRowViewModel>().Select(r => r.Display).ToArray();
+
     [Fact]
     public void SortSelectedFirst_defaults_to_true()
     {
@@ -24,34 +28,33 @@ public class PillSnapshotOrderingTests
     }
 
     [Fact]
-    public void Snapshot_on_popup_open_freezes_WasSelectedAtSort_to_current_selection()
+    public void Popup_open_orders_selected_items_first_in_view()
+    {
+        var vm = BuildVm(
+            Item("A", "1", selected: true),
+            Item("B", "2", selected: false),
+            Item("C", "3", selected: true));
+
+        vm.IsOpen = true;
+
+        ViewOrder(vm).Should().Equal("A", "C", "B");
+    }
+
+    [Fact]
+    public void Toggling_selection_while_open_does_not_reshuffle_view()
     {
         var a = Item("A", "1", selected: true);
         var b = Item("B", "2", selected: false);
         var c = Item("C", "3", selected: true);
         var vm = BuildVm(a, b, c);
-
         vm.IsOpen = true;
-
-        a.WasSelectedAtSort.Should().BeTrue();
-        b.WasSelectedAtSort.Should().BeFalse();
-        c.WasSelectedAtSort.Should().BeTrue();
-    }
-
-    [Fact]
-    public void Toggling_selection_while_open_does_not_change_WasSelectedAtSort()
-    {
-        var a = Item("A", "1", selected: true);
-        var b = Item("B", "2", selected: false);
-        var vm = BuildVm(a, b);
-        vm.IsOpen = true;
+        var openingOrder = ViewOrder(vm);
 
         // User toggles inside the open popup.
         a.IsSelected = false;
         b.IsSelected = true;
 
-        a.WasSelectedAtSort.Should().BeTrue();   // still in the "selected" group
-        b.WasSelectedAtSort.Should().BeFalse();  // still in the "unselected" group
+        ViewOrder(vm).Should().Equal(openingOrder);
     }
 
     [Fact]
@@ -62,8 +65,7 @@ public class PillSnapshotOrderingTests
         var vm = BuildVm(a, b);
 
         vm.IsOpen = true;
-        a.WasSelectedAtSort.Should().BeTrue();
-        b.WasSelectedAtSort.Should().BeFalse();
+        ViewOrder(vm).Should().Equal("A", "B");  // selected (A) first
 
         // User toggles, then closes and reopens.
         a.IsSelected = false;
@@ -71,23 +73,20 @@ public class PillSnapshotOrderingTests
         vm.IsOpen = false;
         vm.IsOpen = true;
 
-        a.WasSelectedAtSort.Should().BeFalse();  // no longer at top
-        b.WasSelectedAtSort.Should().BeTrue();   // now at top
+        ViewOrder(vm).Should().Equal("B", "A");  // selected (B) now first
     }
 
     [Fact]
-    public void SortSelectedFirst_false_clears_WasSelectedAtSort_on_all_items()
+    public void SortSelectedFirst_false_disables_view_grouping()
     {
-        var a = Item("A", "1", selected: true);
-        var b = Item("B", "2", selected: false);
-        var vm = BuildVm(a, b);
+        var vm = BuildVm(
+            Item("A", "1", selected: true),
+            Item("B", "2", selected: false));
         vm.IsOpen = true;
-        a.WasSelectedAtSort.Should().BeTrue();
+        vm.FilteredItems.GroupDescriptions.Should().HaveCount(1);
 
         vm.SortSelectedFirst = false;
 
-        a.WasSelectedAtSort.Should().BeFalse();
-        b.WasSelectedAtSort.Should().BeFalse();
         vm.FilteredItems.GroupDescriptions.Should().BeEmpty();
         vm.FilteredItems.SortDescriptions.Should().BeEmpty();
     }

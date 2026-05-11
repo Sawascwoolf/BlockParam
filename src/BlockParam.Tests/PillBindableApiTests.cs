@@ -31,16 +31,10 @@ public class PillTooltipMode_Dp_Tests
         return pill;
     }
 
-    [UIFact]
-    public void TooltipMode_None_installs_no_tooltip_formatter()
-    {
-        var pill = MakePill("Alpha", "Beta");
-        pill.TooltipMode = PillTooltipMode.None;
-        // Access internal state via the DP — no reflection.
-        // We can verify effect through internal state properties once TooltipMode wires the formatter.
-        // Because we cannot access _internalState directly from tests, verify via the public DP value.
-        pill.TooltipMode.Should().Be(PillTooltipMode.None);
-    }
+    // Note: TooltipMode = None is the DP's default value (set in PropertyMetadata)
+    // and its observable effect — SelectionTooltip == null when no formatter is
+    // installed — is covered by PillTooltipTests.SelectionTooltip_is_null_when_no_formatter_set.
+    // A "set None, read back None" test here would only re-prove DP defaulting.
 
     [UIFact]
     public void TooltipMode_FullNames_dp_can_be_set_and_read_back()

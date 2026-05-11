@@ -49,7 +49,7 @@ public static class PillOverflowFormatter
             var visible = tokens.Take(max);
             var hidden = tokens.Count - max;
             // Format string is host-overridable — see PillOverflowOptions.PlusMoreFormat.
-            // Default pulls localized "+{0} more" / "+{0} weitere" from BlockParam's resx.
+            // Default is the English literal "+{0} more"; bind your own for localization.
             return string.Join(", ", visible) + ", "
                 + string.Format(CultureInfo.CurrentCulture, options.PlusMoreFormat, hidden);
         }

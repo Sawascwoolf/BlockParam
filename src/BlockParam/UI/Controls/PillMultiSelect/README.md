@@ -9,7 +9,8 @@ states.
 
 ## Vendoring
 
-Drop these 14 files into any WPF project. That's it.
+Drop these 14 source files into any WPF project. That's it. (This README is
+just for you — leave it behind or take it along.)
 
 ```
 PillMultiSelect.xaml          PillMultiSelectInternalState.cs
@@ -75,7 +76,13 @@ five string DPs (`SearchPlaceholder`, `ClearTooltip`, `SelectAllText`,
 
 ## Tests
 
-The sibling tests in `src/BlockParam.Tests/Pill*Tests.cs` (108 cases) cover
-the bindable surface, selection sync, overflow formatter, item lifecycle,
-tooltip modes, and snapshot ordering. They only need xUnit + Moq — no
-host-project setup — and can travel with the control if desired.
+The sibling tests in `src/BlockParam.Tests/Pill*Tests.cs` cover the bindable
+surface, selection sync, overflow formatter, item lifecycle, tooltip modes,
+and snapshot ordering. They only need xUnit + StaFact + FluentAssertions —
+no other host-project setup — and can travel with the control if desired.
+
+Caveat for vendoring the tests: several reach `internal` types
+(`PillRowViewModel`, `PillMultiSelectInternalState`). The project that owns
+the control needs `[InternalsVisibleTo("YourTestProject")]` for those to
+compile. Tests that only touch the public DP surface
+(`PillBindableApiTests.cs`, `PillOverflowFormatterTests.cs`) don't need it.
