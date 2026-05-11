@@ -140,6 +140,35 @@ public class PillGroupVm_Lifecycle_Tests
         fx.State.Groups.Should().HaveCount(1);
         fx.State.Groups.Keys.Should().BeEquivalentTo(new[] { "Sales" });
     }
+
+    [Fact]
+    public void Swapping_ItemsSource_detaches_children_from_old_groups()
+    {
+        // When the host swaps ItemsSource, RebuildRows discards the old
+        // group VMs. ClearGroups must detach each child first so stale
+        // PropertyChanged subscriptions against the old group's
+        // OnChildPropertyChanged unwind cleanly - the row could still be
+        // alive through SelectedItems, and we don't want a dead group to
+        // be reachable through its event handlers.
+        var fx = new GroupingFixture();
+        fx.Add(new TeamMember("Alice", "Eng"));
+        fx.Add(new TeamMember("Bob", "Eng"));
+        fx.ItemSource.GroupKeyMemberPath = nameof(TeamMember.Department);
+        var oldEng = fx.State.Groups["Eng"];
+        oldEng.Children.Count.Should().Be(2);
+        var aliceRow = fx.State.Items.First(r => r.Display == "Alice");
+
+        // Trigger a Reset by swapping ItemsSource.
+        fx.ItemSource.ItemsSource = new ObservableCollection<TeamMember>
+        {
+            new("Carol", "Sales"),
+        };
+
+        // Old group must have no remaining children and the surviving row
+        // must no longer point at the dead group.
+        oldEng.Children.Should().BeEmpty();
+        aliceRow.OwningGroup.Should().BeNull();
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -330,6 +359,52 @@ public class PillSearch_ExpansionPolicy_Tests
 
         fx.State.SearchText = "";
 
+        fx.State.Groups["Eng"].IsExpanded.Should().BeFalse();
+    }
+
+    [Fact]
+    public void Mid_search_collapse_persists_after_search_clears()
+    {
+        // User starts with an expanded group; types a search that matches a
+        // child, so the policy is a no-op for that group. The user then
+        // collapses the group while search is active. Clearing the search
+        // should leave the group collapsed - the most recent user intent.
+        var fx = new GroupingFixture();
+        fx.Add(new TeamMember("Alice", "Eng"));
+        fx.Add(new TeamMember("Bob", "Sales"));
+        fx.ItemSource.GroupKeyMemberPath = nameof(TeamMember.Department);
+        // Eng starts expanded (default).
+        fx.State.SearchText = "Alice";  // search active; Eng has a match
+        fx.State.Groups["Eng"].IsExpanded.Should().BeTrue();
+
+        // User collapses Eng mid-search.
+        fx.State.Groups["Eng"].IsExpanded = false;
+
+        fx.State.SearchText = "";
+
+        // Restore must honour the mid-search write, not the pre-search value.
+        fx.State.Groups["Eng"].IsExpanded.Should().BeFalse();
+    }
+
+    [Fact]
+    public void Subsequent_keystroke_does_not_reexpand_user_collapsed_group()
+    {
+        // User collapses Eng mid-search; typing more characters that still
+        // match should not re-expand Eng on every keystroke.
+        var fx = new GroupingFixture();
+        fx.Add(new TeamMember("Alice", "Eng"));
+        fx.Add(new TeamMember("Bob", "Sales"));
+        fx.ItemSource.GroupKeyMemberPath = nameof(TeamMember.Department);
+        fx.State.SearchText = "A";
+        fx.State.Groups["Eng"].IsExpanded.Should().BeTrue();
+
+        // User collapses Eng even though it has a match.
+        fx.State.Groups["Eng"].IsExpanded = false;
+
+        // User refines the search; Eng still matches "Al".
+        fx.State.SearchText = "Al";
+
+        // The collapse must stick - the user already expressed a preference.
         fx.State.Groups["Eng"].IsExpanded.Should().BeFalse();
     }
 

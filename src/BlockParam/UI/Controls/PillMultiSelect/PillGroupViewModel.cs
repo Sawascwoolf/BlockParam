@@ -45,6 +45,17 @@ internal sealed class PillGroupViewModel : PillViewModelBase
     // the search clears. Null = no override active.
     private bool? _userIsExpandedBeforeSearch;
 
+    // Guards the IsExpanded setter from rewriting _userIsExpandedBeforeSearch
+    // when ForceExpandedForSearch is the caller. Without this guard the
+    // force-expand would clobber whatever pre-search value we just captured.
+    private bool _settingExpandedForSearch;
+
+    // Sticks once the user (or any external caller) touches IsExpanded during
+    // a search session. ForceExpandedForSearch then leaves the group alone on
+    // subsequent keystrokes so a mid-search collapse persists. Cleared by
+    // RestoreUserExpandedAfterSearch when the search ends.
+    private bool _userOverrodeExpandedDuringSearch;
+
     internal PillGroupViewModel(object key, string header)
     {
         Key = key;
@@ -114,11 +125,28 @@ internal sealed class PillGroupViewModel : PillViewModelBase
     /// Whether the group's children are visible. <c>true</c> by default;
     /// flipped by the user via the expand chevron in the group header
     /// (or programmatically via <see cref="ToggleExpandedCommand"/>).
+    /// When a search is active, an external write here is treated as the
+    /// user's new "true" preference and overwrites the remembered pre-search
+    /// value so a mid-search collapse persists across the search clearing.
     /// </summary>
     public bool IsExpanded
     {
         get => _isExpanded;
-        set => SetProperty(ref _isExpanded, value);
+        set
+        {
+            if (!SetProperty(ref _isExpanded, value)) return;
+
+            // External (non-search) writes during a search session reflect a
+            // fresh user intent. Update the remembered pre-search value so
+            // RestoreUserExpandedAfterSearch honours it when the search clears,
+            // and latch the override flag so ForceExpandedForSearch stops
+            // re-forcing the expand on subsequent keystrokes.
+            if (!_settingExpandedForSearch && _userIsExpandedBeforeSearch.HasValue)
+            {
+                _userIsExpandedBeforeSearch = value;
+                _userOverrodeExpandedDuringSearch = true;
+            }
+        }
     }
 
     /// <summary>
@@ -216,24 +244,39 @@ internal sealed class PillGroupViewModel : PillViewModelBase
     /// the user's prior <see cref="IsExpanded"/> value the first time this
     /// is called so <see cref="RestoreUserExpandedAfterSearch"/> can put it
     /// back when search clears. Subsequent calls during the same search
-    /// session don't overwrite the remembered value.
+    /// session don't overwrite the remembered value. If the user explicitly
+    /// collapsed the group mid-search, the setter has already updated the
+    /// remembered value, and we don't re-force the expand here so the
+    /// collapse persists across keystrokes.
     /// </summary>
     internal void ForceExpandedForSearch()
     {
         if (_userIsExpandedBeforeSearch == null)
             _userIsExpandedBeforeSearch = _isExpanded;
-        IsExpanded = true;
+
+        // User already expressed a preference during this search session —
+        // either left the group expanded or collapsed it explicitly. Honour
+        // their last write; don't override on subsequent keystrokes.
+        if (_userOverrodeExpandedDuringSearch) return;
+
+        if (_isExpanded) return;
+
+        _settingExpandedForSearch = true;
+        try { IsExpanded = true; }
+        finally { _settingExpandedForSearch = false; }
     }
 
     /// <summary>
-    /// Restores the user's pre-search <see cref="IsExpanded"/> value (if any)
-    /// and clears the remembered flag. Safe to call when no search was active.
+    /// Restores the user's pre-search <see cref="IsExpanded"/> value (or the
+    /// most recent mid-search write, whichever is later) and clears the
+    /// remembered flags. Safe to call when no search was active.
     /// </summary>
     internal void RestoreUserExpandedAfterSearch()
     {
         if (_userIsExpandedBeforeSearch is bool prior)
         {
             _userIsExpandedBeforeSearch = null;
+            _userOverrodeExpandedDuringSearch = false;
             IsExpanded = prior;
         }
     }

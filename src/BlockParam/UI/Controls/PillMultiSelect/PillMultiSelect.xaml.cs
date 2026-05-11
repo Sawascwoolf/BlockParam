@@ -119,10 +119,13 @@ public partial class PillMultiSelect : UserControl
     /// Optional custom <see cref="DataTemplate"/> for the group header row
     /// (checkbox + label + expand chevron + count). When null, the control's
     /// built-in default template defined in XAML is used. The template's
-    /// DataContext is the <see cref="System.Windows.Data.CollectionViewGroup"/>;
-    /// its <c>Name</c> property is the <see cref="PillGroupViewModel"/>, so
-    /// bindings like <c>{Binding Name.Header}</c>, <c>{Binding Name.IsSelected}</c>,
-    /// <c>{Binding Name.IsExpanded}</c> resolve directly against the group VM.
+    /// DataContext is the <see cref="PillGroupViewModel"/> itself — the
+    /// container template unwraps the <see cref="System.Windows.Data.CollectionViewGroup.Name"/>
+    /// (which is the group VM) into a <c>ContentControl.Content</c>, so a
+    /// host template binds directly against the group VM's members:
+    /// <c>{Binding Header}</c>, <c>{Binding IsSelected}</c>,
+    /// <c>{Binding IsExpanded}</c>, <c>{Binding SelectedCount}</c>,
+    /// <c>{Binding TotalCount}</c>.
     /// </summary>
     public static readonly DependencyProperty GroupHeaderTemplateProperty =
         DependencyProperty.Register(nameof(GroupHeaderTemplate), typeof(DataTemplate), typeof(PillMultiSelect),

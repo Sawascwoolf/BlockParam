@@ -408,9 +408,23 @@ internal sealed class PillMultiSelectInternalState : PillViewModelBase
         _groups.Remove(group.Key);
     }
 
-    /// <summary>Empties the group map. Called during full rebuild / regroup.</summary>
+    /// <summary>
+    /// Empties the group map. Called during full rebuild / regroup. Detaches
+    /// each group's children first so their <c>PropertyChanged</c> handlers
+    /// against the (about-to-be-orphaned) group's <c>OnChildPropertyChanged</c>
+    /// unwind cleanly. Without this, rows held alive by an outside reference
+    /// (e.g. the host's <c>SelectedItems</c>) would keep stale subscriptions
+    /// to discarded group VMs.
+    /// </summary>
     internal void ClearGroups()
     {
+        foreach (var group in _groups.Values)
+        {
+            // Snapshot to a local because RemoveChild mutates the children list.
+            var children = group.Children.ToArray();
+            foreach (var child in children)
+                group.RemoveChild(child);
+        }
         _groups.Clear();
     }
 
