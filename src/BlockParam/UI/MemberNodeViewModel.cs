@@ -56,7 +56,21 @@ public class MemberNodeViewModel : ViewModelBase
     public string Datatype => Model.Datatype;
     public string? StartValue => Model.StartValue;
     public string Path => Model.Path;
-    public int Depth => Model.Depth;
+    /// <summary>
+    /// Visual nesting depth (0 = root, 1 = child of a root, …). Counts VM
+    /// ancestors instead of model ancestors so the synthetic per-DB group
+    /// root in multi-DB sessions adds a real indent level for its members.
+    /// In single-DB sessions this matches the underlying Model.Depth.
+    /// </summary>
+    public int Depth
+    {
+        get
+        {
+            int depth = 0;
+            for (var p = Parent; p != null; p = p.Parent) depth++;
+            return depth;
+        }
+    }
     public bool IsLeaf => Model.IsLeaf;
     public bool IsUdtInstance => Model.IsUdtInstance;
     public bool IsStruct => Model.IsStruct;
@@ -131,8 +145,20 @@ public class MemberNodeViewModel : ViewModelBase
     public bool IsSelected
     {
         get => _isSelected;
-        set => SetProperty(ref _isSelected, value);
+        set
+        {
+            if (SetProperty(ref _isSelected, value) && value)
+                SelectedChanged?.Invoke(this);
+        }
     }
+
+    /// <summary>
+    /// Fired when <see cref="IsSelected"/> transitions to <c>true</c>. The
+    /// owning <see cref="BulkChangeViewModel"/> subscribes per node and
+    /// clears <see cref="IsSelected"/> on every other node so the focus row
+    /// stays globally exclusive across DBs (#95).
+    /// </summary>
+    public event Action<MemberNodeViewModel>? SelectedChanged;
 
     /// <summary>True if this member is affected by the current bulk scope selection.</summary>
     public bool IsAffected
@@ -275,6 +301,22 @@ public class MemberNodeViewModel : ViewModelBase
                 StartValueEdited?.Invoke(this, value ?? "");
             }
         }
+    }
+
+    /// <summary>
+    /// Restores a pending value seeded from the <c>PendingEditStore</c> after a
+    /// tree rebuild. Sets the backing field directly, bypassing
+    /// <see cref="StartValueEdited"/> so the store write-back loop is avoided
+    /// and the freemium cap is not charged a second time for a value the user
+    /// already staged in a prior tree shape.
+    /// </summary>
+    internal void SetPendingFromStore(string pendingValue)
+    {
+        _pendingValue = pendingValue;
+        _editableStartValue = pendingValue;
+        OnPropertyChanged(nameof(PendingValue));
+        OnPropertyChanged(nameof(IsPendingInlineEdit));
+        OnPropertyChanged(nameof(EditableStartValue));
     }
 
     /// <summary>Clears the pending inline edit, reverting to the original StartValue.</summary>

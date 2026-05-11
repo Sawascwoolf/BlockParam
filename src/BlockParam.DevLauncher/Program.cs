@@ -11,6 +11,7 @@ using System.Windows.Media.Imaging;
 using Serilog;
 using BlockParam.Config;
 using BlockParam.Licensing;
+using BlockParam.Models;
 using BlockParam.Services;
 using BlockParam.SimaticML;
 using BlockParam.UI;
@@ -89,6 +90,29 @@ class Program
         {
             PillMultiSelectCapture.RunDbInteractive();
             return;
+        }
+
+        // --plc <name>   Fake an owning PLC for the anchor DB (and any
+        // unprefixed fixtures). Lets the multi-PLC title / chip-group-header
+        // branch be exercised without TIA: the VM hides the PLC chrome iff
+        // _currentPlcName is empty (UI/BulkChangeViewModel.cs:1093), so
+        // passing this arg flips the branch. Combine with a
+        // <PLC>__<DBName>.xml fixture (see EnumerateDevLauncherDbs) to add
+        // peers on a different PLC and exercise the multi-PLC chip groups.
+        string? anchorPlc = null;
+        {
+            int idx = Array.IndexOf(args, "--plc");
+            if (idx >= 0)
+            {
+                if (idx + 1 >= args.Length)
+                {
+                    MessageBox.Show("--plc requires a value.", "Error",
+                        MessageBoxButton.OK, MessageBoxImage.Error);
+                    return;
+                }
+                anchorPlc = args[idx + 1];
+                args = args.Take(idx).Concat(args.Skip(idx + 2)).ToArray();
+            }
         }
 
         // --- Parse capture arguments ---
@@ -243,6 +267,11 @@ class Program
             Log.Error(e.Exception, "UNHANDLED EXCEPTION");
             e.Handled = true; // prevent crash, log instead
         };
+        // DB-switcher (#59) for DevLauncher: simulate the project block tree
+        // by enumerating every *.xml under %TEMP%\BlockParam\ that parses as a
+        // SimaticML DB. Lets the dropdown be exercised without a real TIA
+        // project — pick a few real exports and drop them in the dir.
+        IConstantResolver? switchConstantResolver = constantResolver;
         var vm = new BulkChangeViewModel(
             dbInfo, xml, analyzer, bulkService, usageTracker, configLoader,
             onApply: modifiedXml =>
@@ -259,7 +288,48 @@ class Program
             udtDir: udtDir,
             udtResolver: udtResolver,
             commentResolver: commentResolver,
-            updateCheckService: updateCheckService);
+            updateCheckService: updateCheckService,
+            currentPlcName: anchorPlc,
+            enumerateDataBlocks: () => EnumerateDevLauncherDbs(tiaExportDir, anchorPlc),
+            switchToDataBlock: summary =>
+            {
+                var path = ResolveFixturePath(tiaExportDir, summary)
+                    ?? throw new FileNotFoundException(
+                        $"Fixture missing for switch: {summary.PlcName}__{summary.Name}.xml or {summary.Name}.xml");
+                var newXml = File.ReadAllText(path);
+                var newParser = new SimaticMLParser(switchConstantResolver, udtResolver, commentResolver);
+                dbInfo = newParser.Parse(newXml);
+                xml = newXml;
+                Log.Information("DevLauncher DB switch: now editing {Name}", dbInfo.Name);
+                return newXml;
+            },
+            // Peer-add path: when the user checks a second DB in the
+            // dropdown, the VM calls this to build a fully-wired ActiveDb
+            // (not the read-only _switchToDataBlock fallback). Each peer
+            // gets its own OnApply that writes <Name>_modified.xml, so
+            // multi-DB Apply, stash/restore, anchor handoff, and §F-style
+            // quota-decrement scenarios are exercisable without TIA.
+            buildActiveDbForSummary: summary =>
+            {
+                var path = ResolveFixturePath(tiaExportDir, summary);
+                if (path == null)
+                {
+                    Log.Warning("DevLauncher peer-add: fixture missing for {Plc}__{Name}",
+                        summary.PlcName, summary.Name);
+                    return null;
+                }
+                var peerXml = File.ReadAllText(path);
+                var peerParser = new SimaticMLParser(switchConstantResolver, udtResolver, commentResolver);
+                var peerInfo = peerParser.Parse(peerXml);
+                Action<string> peerOnApply = modifiedXml =>
+                {
+                    var outPath = Path.Combine(tiaExportDir, $"{peerInfo.Name}_modified.xml");
+                    File.WriteAllText(outPath, modifiedXml);
+                    Log.Information("Apply (peer {Name}): saved to {Path}", peerInfo.Name, outPath);
+                };
+                Log.Information("DevLauncher peer-add: {Name} (plc='{Plc}')", peerInfo.Name, summary.PlcName);
+                return new ActiveDb(peerInfo, peerXml, peerOnApply, plcName: summary.PlcName);
+            });
 
         licenseService.StartHeartbeat();
         var dialog = new BulkChangeDialog(vm);
@@ -362,6 +432,90 @@ class Program
         encoder.Frames.Add(BitmapFrame.Create(rtb));
         using var fs = File.Create(outputPath);
         encoder.Save(fs);
+    }
+
+    /// <summary>
+    /// DevLauncher stand-in for project DB enumeration (#59): every <c>*.xml</c>
+    /// under <c>%TEMP%\BlockParam\</c> whose root element is one of the SimaticML
+    /// DB block tags is offered as a switchable target.
+    ///
+    /// Filename convention for cross-PLC fixtures: <c>&lt;PlcName&gt;__&lt;DbName&gt;.xml</c>
+    /// (double-underscore separator) sets <see cref="DataBlockSummary.PlcName"/>
+    /// to <c>&lt;PlcName&gt;</c> and <see cref="DataBlockSummary.Name"/> to
+    /// <c>&lt;DbName&gt;</c>. Files without the prefix inherit
+    /// <paramref name="anchorPlc"/> (empty when <c>--plc</c> isn't passed),
+    /// so they group with the anchor in the chip toolbar.
+    /// </summary>
+    private static IReadOnlyList<DataBlockSummary> EnumerateDevLauncherDbs(string dir, string? anchorPlc)
+    {
+        if (!Directory.Exists(dir)) return Array.Empty<DataBlockSummary>();
+        var list = new List<DataBlockSummary>();
+        foreach (var path in Directory.GetFiles(dir, "*.xml"))
+        {
+            var fileName = Path.GetFileNameWithoutExtension(path);
+
+            // *_modified.xml are Apply-output artifacts saved by the onApply
+            // callback above. They duplicate the original's internal Name,
+            // which collides on the stash-key (Plc + Folder + Name) and
+            // causes a second stash to overwrite the first. Real TIA can't
+            // produce two GlobalDBs with the same Name, so the product code
+            // assumes uniqueness — exclude the artifacts here.
+            if (fileName.EndsWith("_modified", StringComparison.Ordinal))
+                continue;
+
+            // Split <PLC>__<DbName>. The double-underscore is the separator;
+            // single underscores are normal in DB names (DB_StashTest_2).
+            string plcName = anchorPlc ?? "";
+            string dbName = fileName;
+            int sepIdx = fileName.IndexOf("__", StringComparison.Ordinal);
+            if (sepIdx > 0 && sepIdx + 2 < fileName.Length)
+            {
+                plcName = fileName.Substring(0, sepIdx);
+                dbName = fileName.Substring(sepIdx + 2);
+            }
+
+            try
+            {
+                var doc = System.Xml.Linq.XDocument.Load(path);
+                var dbElement = doc.Descendants().FirstOrDefault(e =>
+                    e.Name.LocalName == "SW.Blocks.GlobalDB" ||
+                    e.Name.LocalName == "SW.Blocks.InstanceDB");
+                if (dbElement == null) continue;
+
+                var blockType = dbElement.Name.LocalName.Replace("SW.Blocks.", "");
+                list.Add(new DataBlockSummary(
+                    dbName,
+                    folderPath: "",
+                    blockType: blockType,
+                    isInstanceDb: blockType == "InstanceDB",
+                    plcName: plcName));
+            }
+            catch (Exception ex)
+            {
+                Log.Warning(ex, "DevLauncher: skipping {Path} (not a parseable DB XML)", path);
+            }
+        }
+        return list;
+    }
+
+    /// <summary>
+    /// Resolves <paramref name="summary"/> back to a fixture file under
+    /// <paramref name="tiaExportDir"/>. Prefers the PLC-prefixed filename
+    /// (<c>&lt;PlcName&gt;__&lt;Name&gt;.xml</c>) when <c>PlcName</c> is set,
+    /// falls back to the bare <c>&lt;Name&gt;.xml</c> so unprefixed fixtures
+    /// keep working when the user passes <c>--plc</c>. Returns null if
+    /// neither form exists — both <c>switchToDataBlock</c> and
+    /// <c>buildActiveDbForSummary</c> handle that.
+    /// </summary>
+    private static string? ResolveFixturePath(string tiaExportDir, DataBlockSummary summary)
+    {
+        if (!string.IsNullOrEmpty(summary.PlcName))
+        {
+            var prefixed = Path.Combine(tiaExportDir, $"{summary.PlcName}__{summary.Name}.xml");
+            if (File.Exists(prefixed)) return prefixed;
+        }
+        var bare = Path.Combine(tiaExportDir, $"{summary.Name}.xml");
+        return File.Exists(bare) ? bare : null;
     }
 
     private static string? FindFile(params string[] candidates)

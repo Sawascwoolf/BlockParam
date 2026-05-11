@@ -19,8 +19,42 @@ using BlockParam.Updates;
 namespace BlockParam.UI;
 
 /// <summary>
-/// Main ViewModel for the BulkChange dialog.
-/// Uses a flat list (via FlatTreeManager) for proper column alignment in ListView/GridView.
+/// Main ViewModel for the BulkChange dialog. Uses a flat list (via
+/// <see cref="FlatTreeManager"/>) for proper column alignment in
+/// ListView/GridView.
+///
+/// <para>
+/// <b>Active-set state model (#78).</b> The dialog's active DBs +
+/// per-DB pending-edit stashes + anchor PLC name are bundled into a
+/// single immutable <see cref="ActiveSetState"/> snapshot exposed via
+/// <see cref="State"/>. The setter is the one place that runs
+/// <c>RebuildAfterActiveSetChanged</c>, <c>SyncStashedDbsCollection</c>
+/// and the anchor-PLC display refresh — every mutation gesture funnels
+/// through it, so forgetting to refresh after a change is structurally
+/// impossible.
+/// </para>
+///
+/// <para>
+/// Mutators compute a new snapshot in locals and assign once.
+/// Single-step gestures (chip ×, dropdown toggle) call helpers like
+/// <see cref="TryComputeRemove"/> and assign the returned snapshot;
+/// compound gestures (Solo, Reactivate stash, legacy
+/// <see cref="SwitchToDataBlock"/>) compose the new snapshot across
+/// multiple steps and assign once at the end → exactly one cascade per
+/// user gesture, regardless of how many DBs were swapped in or out.
+/// Cancellation = don't assign; the dialog stays on the previous
+/// snapshot.
+/// </para>
+///
+/// <para>
+/// The legacy backing fields (<c>_activeDbs</c>, <c>_stashedDbs</c>,
+/// <c>_currentPlcName</c>) remain as the storage indexed by the ~50
+/// reader sites in this file; the State setter overwrites them from
+/// the new snapshot to keep the two views in lock-step. <b>Lint
+/// invariant:</b> any direct write to those fields outside the State
+/// setter or the constructor seed is a bug — the snapshot will drift
+/// out of sync with what the cascade can see.
+/// </para>
 /// </summary>
 public class BulkChangeViewModel : ViewModelBase, IDisposable
 {
@@ -31,7 +65,6 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     private readonly BulkChangeService _bulkChangeService;
     private readonly IUsageTracker _usageTracker;
     private readonly ConfigLoader _configLoader;
-    private readonly Action<string>? _onApply;
     private readonly Func<string>? _onBackup;   // callback to create backup, returns backup path
     private readonly Action<string>? _onRestore; // callback to restore from backup path
     private readonly FlatTreeManager _flatTreeManager = new();
@@ -47,11 +80,84 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     private AutocompleteProvider? _autocompleteProvider;
     private TagTableCache? _tagTableCache;
 
-    private DataBlockInfo _dataBlockInfo;
+    // Active DB set. All DBs in this list are peers — index 0 is just the
+    // first one in storage order, used as the anchor when the UI needs a
+    // single representative (title, default scope, "current" name display).
+    // Per-DB state (Info, Xml, OnApply) lives on each ActiveDb instance, so
+    // bulk preview / Apply iterate the whole list without privileging any
+    // entry. Mutations go through Add / RemoveActiveDb so anchor display
+    // updates stay consistent.
+    private readonly List<ActiveDb> _activeDbs = new();
+    // _active is kept as a derived alias over _activeDbs[0] so the ~50
+    // call sites that expected "the anchor DB" don't all need rewriting.
+    // It carries no privilege — removing _activeDbs[0] just shifts the next
+    // one into position.
+    private ActiveDb _active => _activeDbs[0];
+    private string _title = "";
+    // DB-switcher state (#59). Lazy-loaded on first dropdown open and cached
+    // for the dialog session; the ↻ button re-enumerates on demand.
+    private readonly Func<IReadOnlyList<DataBlockSummary>>? _enumerateDataBlocks;
+    private readonly Func<DataBlockSummary, string>? _switchToDataBlock;
+    // Multi-DB add (#58): host-supplied factory that builds a fully-wired
+    // ActiveDb for an arbitrary DB picked in the dropdown — including a
+    // per-DB OnApply that re-imports the modified xml back into TIA. Null
+    // when the host couldn't supply it (DevLauncher, tests); the VM falls
+    // back to a read-only ActiveDb in that case (see AddActiveDbFromSummary).
+    private readonly Func<DataBlockSummary, ActiveDb?>? _buildActiveDbForSummary;
+    private IReadOnlyList<DataBlockSummary>? _availableDataBlocks;
+    private IReadOnlyList<DataBlockSummary> _filteredDataBlocks = Array.Empty<DataBlockSummary>();
+    private string _dataBlockSearchText = "";
+    private bool _isDataBlocksDropdownOpen;
+    private bool _isLoadingDataBlocks;
+    private string _currentPlcName = "";
+    // In-memory stash of pending edits keyed by DB identity (#59). Lets the
+    // user switch DBs without committing or losing work — when they come back
+    // to a stashed DB later in the same session, the edits restore.
+    private readonly Dictionary<string, StashedDbState> _stashedDbs =
+        new(StringComparer.Ordinal);
+
+    // Model-to-VM and model-to-DB lookups for multi-DB routing (#58). Same
+    // path string can occur in multiple DBs, so reference equality on
+    // MemberNode is the unambiguous way to map a scope match back to its
+    // tree VM (where pending values live) and to its owning ActiveDb (where
+    // the xml lives). Rebuilt on every BuildRootMembersFromActiveDbs.
+    private readonly Dictionary<MemberNode, MemberNodeViewModel> _modelToVm = new();
+    private readonly Dictionary<MemberNode, ActiveDb> _modelToDb = new();
+    // Multi-DB only (#58): the synthetic group VM that wraps each ActiveDb's
+    // members. Used to route per-DB scans (ClearPendingValuesForDb,
+    // CountPendingEditsForDb, ...) by reference instead of by Info.Name +
+    // PlcName comparisons that would still collide across PLC boundaries.
+    private readonly Dictionary<ActiveDb, MemberNodeViewModel> _dbToSynthetic = new();
+
+    // Session-scoped store for pending inline-edit values, keyed by MemberNode
+    // reference. Survives BuildRootMembersFromActiveDbs rebuilds — fresh VMs
+    // are seeded from here after every tree rebuild so active-set transitions
+    // (solo, chip-×, reactivate) no longer orphan pending state.
+    // Cleared on RefreshTree (Apply mints new MemberNode instances, making old
+    // keys dead) and on explicit DiscardAll.
+    private readonly PendingEditStore _pendingEditStore = new();
+
+    // #78 snapshot: single immutable view of the active set + stashes +
+    // anchor PLC. The State setter is the one place that runs the cascade
+    // (RebuildAfterActiveSetChanged / SyncStashedDbsCollection / anchor
+    // PLC display) so every mutation gesture goes through one funnel.
+    // The legacy backing fields (_activeDbs / _stashedDbs / _currentPlcName)
+    // are kept as the storage of last resort — many call sites still index
+    // _activeDbs[i] etc. — and the setter overwrites them from the new
+    // snapshot to keep the two views in lock-step.
+    private ActiveSetState _state =
+        new ActiveSetState(
+            new List<ActiveDb>(),
+            new Dictionary<string, StashedDbState>(),
+            "");
     private MemberNodeViewModel? _selectedFlatMember;
     private ScopeLevel? _selectedScope;
     private string _newValue = "";
-    private readonly HashSet<string> _manualSelectedPaths = new(StringComparer.Ordinal);
+    // Multi-DB safe (#58): keyed by MemberNodeViewModel reference, not path
+    // string. Two leaves in different DBs that happen to share a Path would
+    // alias under string keying — Ctrl+click selection on a leaf in one
+    // active DB would silently target a same-path leaf in another.
+    private readonly HashSet<MemberNodeViewModel> _manualSelectedPaths = new();
     private readonly HashSet<string> _bulkErrorPaths = new(StringComparer.Ordinal);
     // True once the user has typed in the NewValue textbox. Prefills from the
     // current selection are skipped while this is true, so user-entered input
@@ -82,7 +188,6 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     private bool _isBulkPreviewExpanded = true;
     private bool _isPendingExpanded = true;
     private bool _isIssuesExpanded = true;
-    private string _currentXml;
     private readonly IReadOnlyList<string> _projectLanguages;
     private readonly CommentLanguagePolicy _commentLanguagePolicy;
     private readonly Dispatcher _dispatcher;
@@ -112,18 +217,23 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         UdtCommentResolver? commentResolver = null,
         string? editingLanguage = null,
         string? referenceLanguage = null,
-        IUpdateCheckService? updateCheckService = null)
+        IUpdateCheckService? updateCheckService = null,
+        Func<IReadOnlyList<DataBlockSummary>>? enumerateDataBlocks = null,
+        Func<DataBlockSummary, string>? switchToDataBlock = null,
+        string? currentPlcName = null,
+        IReadOnlyList<ActiveDb>? additionalActiveDbs = null,
+        Func<DataBlockSummary, ActiveDb?>? buildActiveDbForSummary = null)
     {
         _dispatcher = Dispatcher.CurrentDispatcher;
         _projectLanguages = projectLanguages is { Count: > 0 } ? projectLanguages : new[] { "en-GB" };
         _commentLanguagePolicy = new CommentLanguagePolicy(editingLanguage, referenceLanguage, _projectLanguages);
-        _dataBlockInfo = dataBlockInfo;
-        _currentXml = currentXml;
+        _activeDbs.Add(new ActiveDb(dataBlockInfo, currentXml, onApply));
+        if (additionalActiveDbs != null)
+            _activeDbs.AddRange(additionalActiveDbs);
         _analyzer = analyzer;
         _bulkChangeService = bulkChangeService;
         _usageTracker = usageTracker;
         _configLoader = configLoader;
-        _onApply = onApply;
         _onBackup = onBackup;
         _onRestore = onRestore;
         _messageBox = messageBox ?? new WpfMessageBoxService();
@@ -136,6 +246,20 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         _commentResolver = commentResolver;
         _licenseService = licenseService;
         _updateCheckService = updateCheckService;
+        _enumerateDataBlocks = enumerateDataBlocks;
+        _switchToDataBlock = switchToDataBlock;
+        _buildActiveDbForSummary = buildActiveDbForSummary;
+        _currentPlcName = currentPlcName ?? "";
+        // Seed the snapshot from the populated backing fields. Direct
+        // assignment (not via the setter) — RootMembers / StashedDbs
+        // collections aren't constructed yet, so the cascade isn't
+        // safe to fire here. The constructor's explicit
+        // BuildRootMembersFromActiveDbs / RebuildActiveDbChips calls
+        // below take the place of the cascade for the initial build.
+        _state = new ActiveSetState(
+            _activeDbs.ToList(),
+            new Dictionary<string, StashedDbState>(),
+            _currentPlcName);
         _autocompleteProvider = tagTableCache != null
             ? new AutocompleteProvider(configLoader, tagTableCache)
             : null;
@@ -152,23 +276,25 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         }
 
         var version = typeof(BulkChangeViewModel).Assembly.GetName().Version;
-        Title = $"BlockParam v{version}: {dataBlockInfo.Name}";
+        _title = BuildTitle(version, _currentPlcName, dataBlockInfo.Name, _activeDbs.Count);
 
         InlineRuleExtractor.ApplyTo(configLoader.GetConfig(), dataBlockInfo);
 
         BulkPreview = new ObservableCollection<BulkPreviewEntry>();
         PendingEdits = new ObservableCollection<PendingEditEntry>();
         ExistingIssues = new ObservableCollection<ExistingIssueEntry>();
+        StashedDbs = new ObservableCollection<StashedDbState>();
 
-        // Build tree view models
+        // Build tree view models. Multi-DB workflow (#58): when more than
+        // one DB is active, every active DB becomes a synthetic top-level
+        // "DB" group whose children are that DB's actual members.
+        // The user picked this shape over a flat union so each match in the
+        // tree carries a visible DB-of-origin label, and scope walks
+        // naturally extend one level deeper.
         RootMembers = new ObservableCollection<MemberNodeViewModel>();
-        foreach (var member in dataBlockInfo.Members)
-        {
-            var vm = new MemberNodeViewModel(member, null, _commentLanguagePolicy);
-            SubscribeStartValueEdited(vm);
-            RootMembers.Add(vm);
-        }
+        BuildRootMembersFromActiveDbs();
         RefreshRuleHints();
+        RebuildActiveDbChips();
 
         AvailableScopes = new ObservableCollection<ScopeLevel>();
 
@@ -193,6 +319,25 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         ClearManualSelectionCommand = new RelayCommand(ExecuteClearManualSelection,
             () => _manualSelectedPaths.Count > 0);
 
+        OpenDataBlocksDropdownCommand = new RelayCommand(ExecuteOpenDataBlocksDropdown,
+            () => _enumerateDataBlocks != null && _switchToDataBlock != null);
+        CloseDataBlocksDropdownCommand = new RelayCommand(() =>
+        {
+            IsDataBlocksDropdownOpen = false;
+        });
+        RefreshDataBlocksCommand = new RelayCommand(ExecuteRefreshDataBlocks,
+            () => _enumerateDataBlocks != null && !_isLoadingDataBlocks);
+        SwitchToStashedDbCommand = new RelayCommand(parameter =>
+        {
+            // Peer model: clicking a stashed-DB header re-activates that DB
+            // by adding it back to the active set, then restoring its stash
+            // edits. The previous anchor stays — the user can remove it
+            // themselves if desired. Overwriting the anchor in place would
+            // destroy the user's other active DBs, which the legacy
+            // SwitchToDataBlock path did under the old single-DB model.
+            if (parameter is StashedDbState stash) ReactivateStashedDb(stash);
+        });
+
         if (_licenseService != null)
         {
             _licenseStateChangedHandler = (_, __) =>
@@ -213,7 +358,76 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
 
     // --- Properties ---
 
-    public string Title { get; }
+    /// <summary>
+    /// Current snapshot of the active-DB set + interlocked state (#78).
+    /// Every mutation goes through the setter, which is the single point
+    /// that runs <see cref="RebuildAfterActiveSetChanged"/> /
+    /// <see cref="SyncStashedDbsCollection"/> / anchor-display refresh.
+    /// </summary>
+    public ActiveSetState State
+    {
+        get => _state;
+        private set
+        {
+            if (ReferenceEquals(_state, value)) return;
+            var old = _state;
+            _state = value;
+
+            // Sync the legacy backing fields so the ~50 read sites that
+            // index _activeDbs[i] / _stashedDbs[k] / _currentPlcName
+            // continue to see the same authoritative values.
+            _activeDbs.Clear();
+            _activeDbs.AddRange(value.Dbs);
+            _stashedDbs.Clear();
+            foreach (var kv in value.Stashes) _stashedDbs[kv.Key] = kv.Value;
+            bool anchorChanged = !string.Equals(_currentPlcName, value.AnchorPlcName, StringComparison.Ordinal);
+            if (anchorChanged)
+            {
+                _currentPlcName = value.AnchorPlcName;
+                OnPropertyChanged(nameof(CurrentPlcName));
+                OnPropertyChanged(nameof(HasCurrentPlcName));
+            }
+
+            OnActiveSetChanged(old, value);
+        }
+    }
+
+    /// <summary>
+    /// Diff old vs new snapshot and run only the cascade slices that
+    /// actually changed. Reference equality on Dbs / Stashes works because
+    /// every mutator constructs fresh List / Dictionary instances —
+    /// "same instance" implies "no change."
+    /// </summary>
+    private void OnActiveSetChanged(ActiveSetState old, ActiveSetState now)
+    {
+        bool dbsChanged = !ReferenceEquals(old.Dbs, now.Dbs);
+        bool stashesChanged = !ReferenceEquals(old.Stashes, now.Stashes);
+
+        if (dbsChanged) RebuildAfterActiveSetChanged();
+        if (stashesChanged) SyncStashedDbsCollection();
+        OnPropertyChanged(nameof(HasMultipleActiveDbs));
+
+        // #91 — every cascade that changes the active set must refresh the
+        // title and CurrentDataBlockName, not just the anchor-remove path.
+        // Solo / reactivate / add all funnel through here, so single-DB
+        // ↔ multi-DB title transitions stay in sync without each gesture
+        // owning its own Title = BuildTitle(...) call.
+        if (dbsChanged) RefreshAnchorDisplay();
+    }
+
+    private void RefreshAnchorDisplay()
+    {
+        var version = typeof(BulkChangeViewModel).Assembly.GetName().Version;
+        var anchorName = State.Dbs.Count > 0 ? State.Dbs[0].Info.Name : "";
+        Title = BuildTitle(version, _currentPlcName, anchorName, State.Dbs.Count);
+        OnPropertyChanged(nameof(CurrentDataBlockName));
+    }
+
+    public string Title
+    {
+        get => _title;
+        private set => SetProperty(ref _title, value);
+    }
     public ObservableCollection<MemberNodeViewModel> RootMembers { get; }
     public ObservableCollection<ScopeLevel> AvailableScopes { get; }
 
@@ -238,6 +452,16 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     /// edits. They never block Apply (#26).
     /// </summary>
     public ObservableCollection<ExistingIssueEntry> ExistingIssues { get; }
+
+    /// <summary>
+    /// One entry per DB the user has switched away from with un-applied
+    /// pending edits (#59). Each entry renders as its own inspector section
+    /// so the staged work stays visible across switches; clicking the section
+    /// header switches back to that DB (running the same prompt again).
+    /// </summary>
+    public ObservableCollection<StashedDbState> StashedDbs { get; }
+
+    public bool HasStashedDbs => StashedDbs.Count > 0;
 
     public bool HasBulkPreview => BulkPreview.Count > 0;
     public int BulkPreviewCount => BulkPreview.Count;
@@ -289,7 +513,12 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     public bool HasPendingChanges
     {
         get => _hasPendingChanges;
-        private set => SetProperty(ref _hasPendingChanges, value);
+        // internal set so BulkChangeViewModelMultiDbTests can drive
+        // CommitChanges in isolation — Apply normally toggles this flag
+        // mid-flow and consumes it before returning, so without test-only
+        // access there's no way to verify CommitChanges' multi-DB iteration
+        // without running the whole Apply pipeline.
+        internal set => SetProperty(ref _hasPendingChanges, value);
     }
 
     /// <summary>
@@ -303,13 +532,23 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         if (!_hasPendingChanges) return true;
         try
         {
-            _onApply?.Invoke(_currentXml);
+            // Multi-DB-safe (#58): invoke OnApply on every active DB, not
+            // just the first one. Single-DB sessions iterate exactly that
+            // DB so behavior is unchanged. A null OnApply (dropdown-added
+            // ActiveDb before per-DB host wiring) is a skip — Apply for
+            // that DB is read-only.
+            foreach (var db in AllActiveDbs)
+            {
+                db.OnApply?.Invoke(db.Xml);
+            }
             HasPendingChanges = false;
             // Pair line for the matching Log.Error path below — without
             // this, a TIA-side import failure has the error logged but
             // the success path is silent, so support cannot tell which
             // happened from the log file alone.
-            Log.Information("CommitChanges: import succeeded for {Db}", _dataBlockInfo.Name);
+            Log.Information(
+                "CommitChanges: import succeeded for {DbCount} DB(s) (focus={Focused})",
+                AllActiveDbs.Count, _active.Info.Name);
             return true;
         }
         catch (OperationCanceledException)
@@ -321,7 +560,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         }
         catch (Exception ex)
         {
-            Log.Error(ex, "CommitChanges: TIA import failed for {Db}", _dataBlockInfo.Name);
+            Log.Error(ex, "CommitChanges: TIA import failed for {Db}", _active.Info.Name);
             HasPendingChanges = false;
             _messageBox.ShowError(
                 $"TIA Portal import failed:\n\n{ex.InnerException?.Message ?? ex.Message}",
@@ -475,20 +714,20 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     /// When a refresh callback exists, clicking triggers a fresh export automatically.
     /// </summary>
     public bool CanShowSetpointsOnly
-        => _dataBlockInfo.UnresolvedUdts.Count == 0 || _onRefreshUdtTypes != null;
+        => _active.Info.UnresolvedUdts.Count == 0 || _onRefreshUdtTypes != null;
 
     /// <summary>Tooltip shown on the checkbox.</summary>
     public string ShowSetpointsOnlyTooltip
     {
         get
         {
-            if (_dataBlockInfo.UnresolvedUdts.Count == 0)
+            if (_active.Info.UnresolvedUdts.Count == 0)
                 return "Only show members marked as SetPoint (Einstellwert) in the UDT type definition.";
 
             if (_onRefreshUdtTypes != null)
                 return "Only show members marked as SetPoint. UDT types will be re-exported from TIA Portal when enabled.";
 
-            var missing = string.Join(", ", _dataBlockInfo.UnresolvedUdts);
+            var missing = string.Join(", ", _active.Info.UnresolvedUdts);
             return $"Disabled: UDT type definitions are missing ({missing}) and no PLC connection is available to export them.";
         }
     }
@@ -573,8 +812,13 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     /// <summary>Number of manually selected leaf members (includes ones hidden by filter).</summary>
     public int ManualSelectionCount => _manualSelectedPaths.Count;
 
-    /// <summary>Read-only view of manually selected member paths (for code-behind rehydration).</summary>
-    public IReadOnlyCollection<string> ManualSelectedPaths => _manualSelectedPaths;
+    /// <summary>
+    /// Read-only view of manually selected member VMs (for code-behind
+    /// rehydration). Multi-DB safe (#58): keyed by reference, so the
+    /// dialog's ListView rehydration test (Contains(m)) picks the right
+    /// VM in whichever DB it lives.
+    /// </summary>
+    public IReadOnlyCollection<MemberNodeViewModel> ManualSelectedPaths => _manualSelectedPaths;
 
     /// <summary>
     /// Bulk panel is visible when the user can edit — either scope mode (single selection)
@@ -630,6 +874,1263 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     public ICommand CollapseAllCommand { get; }
     public ICommand ClearManualSelectionCommand { get; }
     public ICommand ToggleInspectorCommand { get; }
+
+    // --- DB-switcher dropdown (#59) ---
+
+    public ICommand OpenDataBlocksDropdownCommand { get; }
+    public ICommand CloseDataBlocksDropdownCommand { get; }
+    public ICommand RefreshDataBlocksCommand { get; }
+    public ICommand SwitchToStashedDbCommand { get; }
+
+    /// <summary>
+    /// True when the host wired up DB enumeration + switching callbacks.
+    /// The dropdown chevron / popup are hidden in tests + DevLauncher runs
+    /// where no project is available.
+    /// </summary>
+    public bool HasDataBlockSwitcher =>
+        _enumerateDataBlocks != null && _switchToDataBlock != null;
+
+    /// <summary>Header label — the DB name part of the title combo.</summary>
+    public string CurrentDataBlockName => _active.Info.Name;
+
+    /// <summary>
+    /// Populates <see cref="RootMembers"/> from every active DB (#58).
+    /// Single-DB sessions get a flat list of the DB's
+    /// top-level members (unchanged behavior); multi-DB sessions get one
+    /// synthetic <see cref="MemberNode"/> per DB at the top level, whose
+    /// children are that DB's actual members. Synthetic roots are tagged
+    /// <c>Datatype="DB"</c> so the tree template can render them with a
+    /// distinct chrome.
+    /// </summary>
+    private void BuildRootMembersFromActiveDbs()
+    {
+        // Always rebuild the routing dictionaries so every model node is
+        // mapped to its current VM + owning DB. Stale entries from a prior
+        // tree would route writes to disposed VMs.
+        _modelToVm.Clear();
+        _modelToDb.Clear();
+        _dbToSynthetic.Clear();
+
+        if (_activeDbs.Count == 1)
+        {
+            // Single-DB: flat list of top-level members, identical to legacy.
+            var only = _activeDbs[0];
+            foreach (var member in only.Info.Members)
+            {
+                var vm = new MemberNodeViewModel(member, null, _commentLanguagePolicy);
+                SubscribeStartValueEdited(vm);
+                IndexSubtree(vm, only);
+                RootMembers.Add(vm);
+            }
+        }
+        else
+        {
+            // Multi-DB: one synthetic group node per DB. Children are the DB's
+            // real top-level members, reused by reference — Path strings stay
+            // unchanged, so existing rule patterns / scope-detection on member
+            // paths still match across DBs.
+            // Cross-PLC name collision: two PLCs can each host a DB called
+            // "DB_Foo". Tag any colliding synthetic root with its PLC prefix so
+            // the user can tell them apart in the tree.
+            var nameCounts = _activeDbs
+                .GroupBy(d => d.Info.Name, StringComparer.Ordinal)
+                .ToDictionary(g => g.Key, g => g.Count(), StringComparer.Ordinal);
+            for (int i = 0; i < _activeDbs.Count; i++)
+            {
+                var db = _activeDbs[i];
+                var plc = i == 0 ? _currentPlcName : db.PlcName;
+                bool collides = nameCounts.TryGetValue(db.Info.Name, out var c) && c > 1;
+                var displayName = collides && !string.IsNullOrEmpty(plc)
+                    ? $"{plc} / {db.Info.Name}"
+                    : db.Info.Name;
+                AddDbGroupRoot(db, displayName);
+            }
+        }
+
+        // Seed any pending values that survived the rebuild (active-set
+        // transitions preserve MemberNode instances but mint fresh VMs).
+        // Called unconditionally — single-DB rebuilds are just as likely to
+        // need store seeding as multi-DB ones (e.g. peer chip removed while
+        // the anchor DB had a pending inline edit in progress).
+        SeedVmsFromStore();
+    }
+
+    /// <summary>
+    /// Restores pending-edit state from <see cref="_pendingEditStore"/> onto
+    /// freshly-constructed <see cref="MemberNodeViewModel"/> instances after a
+    /// tree rebuild. Called at the end of <see cref="BuildRootMembersFromActiveDbs"/>
+    /// so every active-set transition (solo, chip-×, reactivate) automatically
+    /// preserves in-progress edits without callers needing to stash/restore manually.
+    /// </summary>
+    private void SeedVmsFromStore()
+    {
+        var validator = BuildValidator();
+        foreach (var (node, pendingValue) in _pendingEditStore.GetAll())
+        {
+            if (!_modelToVm.TryGetValue(node, out var vm))
+                continue;
+            // Set the field directly to avoid firing OnSingleValueEdited,
+            // which would write back to the store (creating a loop) and
+            // charge a spurious "new edit" warn for the free-tier cap.
+            vm.SetPendingFromStore(pendingValue);
+            // Re-run validation so HasInlineError / InlineErrorMessage are
+            // accurate on the new VM (the value hasn't changed but the VM
+            // instance is fresh and its error state is unset).
+            var error = validator.Validate(node, pendingValue);
+            vm.HasInlineError = error != null;
+            vm.InlineErrorMessage = error;
+        }
+    }
+
+    private void AddDbGroupRoot(ActiveDb db, string displayName)
+    {
+        var info = db.Info;
+        var synthetic = new MemberNode(
+            name: displayName,
+            datatype: "DB",
+            startValue: null,
+            path: info.Name,
+            parent: null,
+            children: info.Members);
+        var groupVm = new MemberNodeViewModel(synthetic, null, _commentLanguagePolicy);
+        // Subscribe edited-value events on every leaf descendant so inline
+        // edits in any active DB bubble up to the VM the same way
+        // single-DB edits do.
+        foreach (var descendant in groupVm.AllDescendants())
+            SubscribeStartValueEdited(descendant);
+        groupVm.IsExpanded = true;
+        _dbToSynthetic[db] = groupVm;
+        // Map every real (non-synthetic) descendant to its VM + owning DB so
+        // multi-DB scope hits route writes to the right tree / xml.
+        foreach (var descendant in groupVm.AllDescendants())
+        {
+            // Skip the synthetic group node itself — its Model has Datatype="DB"
+            // and isn't a real member. Identifying it by reference equality
+            // against the synthetic instance avoids relying on Datatype string
+            // matching, which is fragile.
+            if (ReferenceEquals(descendant.Model, synthetic)) continue;
+            _modelToVm[descendant.Model] = descendant;
+            _modelToDb[descendant.Model] = db;
+        }
+        RootMembers.Add(groupVm);
+    }
+
+    /// <summary>
+    /// Indexes every node in <paramref name="rootVm"/>'s subtree (root
+    /// included) into <see cref="_modelToVm"/> + <see cref="_modelToDb"/>.
+    /// Used by the single-DB code path; multi-DB indexes inside
+    /// <see cref="AddDbGroupRoot"/> with the synthetic-skip rule.
+    /// </summary>
+    private void IndexSubtree(MemberNodeViewModel rootVm, ActiveDb db)
+    {
+        _modelToVm[rootVm.Model] = rootVm;
+        _modelToDb[rootVm.Model] = db;
+        foreach (var descendant in rootVm.AllDescendants())
+        {
+            _modelToVm[descendant.Model] = descendant;
+            _modelToDb[descendant.Model] = db;
+        }
+    }
+
+    /// <summary>
+    /// Resolves a <see cref="MemberNode"/> (model) to its tree VM. Preferred
+    /// over <see cref="FindNodeByPath"/> when the caller already has the
+    /// model — it's O(1), and unambiguous in multi-DB sessions where the
+    /// same Path string can exist in multiple DBs.
+    /// </summary>
+    private MemberNodeViewModel? FindVmByModel(MemberNode model) =>
+        _modelToVm.TryGetValue(model, out var vm) ? vm : null;
+
+    /// <summary>
+    /// Returns the active DB that owns <paramref name="model"/>, or null
+    /// when the node is not part of the current tree (e.g. a stale model
+    /// from before the last RefreshTree).
+    /// </summary>
+    private ActiveDb? FindActiveDbForModel(MemberNode model) =>
+        _modelToDb.TryGetValue(model, out var db) ? db : null;
+
+    /// <summary>
+    /// All DBs currently being edited in this dialog session (#58). Always
+    /// non-empty. The DBs are peers — bulk preview / Apply iterate the
+    /// whole list. The DB at index 0 holds the "anchor" display role
+    /// (default title / scope label, see <see cref="DataBlockListItem.IsAnchor"/>);
+    /// it has no privilege over removability or Apply ordering.
+    /// </summary>
+    public IReadOnlyList<ActiveDb> AllActiveDbs => _activeDbs.AsReadOnly();
+
+    /// <summary>True when more than one DB is active in this session (#58).</summary>
+    public bool HasMultipleActiveDbs => _activeDbs.Count > 1;
+
+    /// <summary>
+    /// Flat list of chips, one per active DB. Useful for tests and any code
+    /// that needs to enumerate every chip without descending into groups.
+    /// Use <see cref="ActiveDbChipGroups"/> for the toolbar UI — it bundles
+    /// chips by PLC so long PLC names render once as a group header instead
+    /// of repeating on every chip.
+    /// </summary>
+    public ObservableCollection<ActiveDbChipViewModel> ActiveDbChips { get; }
+        = new ObservableCollection<ActiveDbChipViewModel>();
+
+    /// <summary>
+    /// Chips bundled per owning PLC. The toolbar binds here so the long PLC
+    /// name appears once as a group header rather than on every chip. In
+    /// single-PLC sessions <see cref="ActiveDbChipGroupViewModel.HasPlcHeader"/>
+    /// is false on the only group, so the row reduces to bare DB chips.
+    /// </summary>
+    public ObservableCollection<ActiveDbChipGroupViewModel> ActiveDbChipGroups { get; }
+        = new ObservableCollection<ActiveDbChipGroupViewModel>();
+
+    /// <summary>
+    /// Per-PLC collapsed-group memory for the dropdown picker. The popup is
+    /// reinstantiated on every open so Expander.IsExpanded would otherwise
+    /// reset every time. The dialog wires Expander.Loaded /
+    /// Expander.Collapsed back to <see cref="IsPlcGroupExpanded"/> /
+    /// <see cref="SetPlcGroupExpanded"/> so a user's collapse choice
+    /// survives popup close + reopen and chip-set changes.
+    /// </summary>
+    private readonly HashSet<string> _collapsedPlcGroups =
+        new HashSet<string>(StringComparer.Ordinal);
+
+    public bool IsPlcGroupExpanded(string plcName) => !_collapsedPlcGroups.Contains(plcName);
+
+    public void SetPlcGroupExpanded(string plcName, bool expanded)
+    {
+        if (expanded) _collapsedPlcGroups.Remove(plcName);
+        else _collapsedPlcGroups.Add(plcName);
+    }
+
+    private void RebuildActiveDbChips()
+    {
+        ActiveDbChips.Clear();
+        ActiveDbChipGroups.Clear();
+        bool canClose = _activeDbs.Count > 1;
+
+        // Build chips first; group second. Preserve _activeDbs order both
+        // within a group (chips appear in active-set order) and across groups
+        // (the first PLC seen anchors the leftmost group, matching the
+        // anchor's owner). Stable order keeps the layout from jumping when
+        // peer DBs on the same PLC are added/removed.
+        var orderedPlcs = new List<string>();
+        var perPlc = new Dictionary<string, List<ActiveDbChipViewModel>>(
+            StringComparer.Ordinal);
+
+        for (int i = 0; i < _activeDbs.Count; i++)
+        {
+            var db = _activeDbs[i];
+            // Anchor (index 0) reads PLC name from _currentPlcName, peers
+            // carry their own — mirrors the rule used elsewhere (FindActiveDb,
+            // IsSameSummary). Cross-PLC adds via dropdown carry the right
+            // summary.PlcName, so multi-PLC projects produce one group per
+            // distinct owner.
+            var plc = (i == 0 ? _currentPlcName : db.PlcName) ?? "";
+            var chip = new ActiveDbChipViewModel(
+                displayName: db.Info.Name,
+                plcPrefix: "", // group header carries the PLC name now
+                canClose: canClose,
+                onClose: () => RequestRemoveActiveDb(db),
+                onSolo: () => SoloActiveDbByReference(db),
+                number: db.Info.Number);
+            ActiveDbChips.Add(chip);
+
+            if (!perPlc.TryGetValue(plc, out var list))
+            {
+                list = new List<ActiveDbChipViewModel>();
+                perPlc[plc] = list;
+                orderedPlcs.Add(plc);
+            }
+            list.Add(chip);
+        }
+
+        // Show the group header whenever the project itself is multi-PLC,
+        // not just when the active set spans multiple PLCs. The host signals
+        // multi-PLC by setting _currentPlcName non-empty (single-PLC projects
+        // get an empty PLC display name to suppress redundant chrome).
+        // Showing the header even when only one PLC's DBs are currently
+        // active gives the user immediate visibility into which machine they
+        // are on, instead of having to guess until they add a peer.
+        bool showHeader = !string.IsNullOrEmpty(_currentPlcName);
+        foreach (var plc in orderedPlcs)
+        {
+            ActiveDbChipGroups.Add(new ActiveDbChipGroupViewModel(
+                plc, perPlc[plc], showHeader));
+        }
+    }
+
+    /// <summary>
+    /// Chip × handler. Refuses the last-DB removal (matches the dropdown
+    /// last-uncheck rule) and routes everything else through the existing
+    /// <see cref="RemoveActiveDb"/> path so the stash / Apply prompt fires
+    /// for DBs with pending edits.
+    /// </summary>
+    private void RequestRemoveActiveDb(ActiveDb db)
+    {
+        Log.Information(
+            "[gesture] Chip × on {Name} | {State}", db.Info.Name, SnapshotState());
+        if (State.Dbs.Count <= 1)
+        {
+            Log.Information(
+                "Refusing chip-close on {Name} — at least one DB must stay active",
+                db.Info.Name);
+            return;
+        }
+        RemoveActiveDb(db);
+    }
+
+    /// <summary>
+    /// One-line dump of the gesture-relevant VM state for log breadcrumbs.
+    /// Reads the bound collections so the log matches what the user sees.
+    /// </summary>
+    private string SnapshotState() =>
+        $"active=[{string.Join(",", _activeDbs.Select(d => d.Info.Name))}] " +
+        $"pending={PendingEdits.Count} stashed={StashedDbs.Count} " +
+        $"treeShape={(_activeDbs.Count == 1 ? "single" : "multi")}";
+
+    /// <summary>
+    /// Owning PLC name for the active DB, surfaced as a dim prefix in the
+    /// combo button and the window title so multi-PLC projects don't leave
+    /// the user guessing which PLC the dialog is operating on. Empty when
+    /// the host couldn't supply it (DevLauncher, single-PLC stand-ins).
+    /// </summary>
+    /// <summary>
+    /// Anchor PLC display, derived from <see cref="State"/>'s
+    /// <c>AnchorPlcName</c>. Get-only — the State setter is the single
+    /// path that updates the underlying field and raises the
+    /// <see cref="System.ComponentModel.INotifyPropertyChanged"/> events
+    /// for both this property and <see cref="HasCurrentPlcName"/>.
+    /// </summary>
+    public string CurrentPlcName => _currentPlcName;
+
+    /// <summary>True when <see cref="CurrentPlcName"/> is non-empty.</summary>
+    public bool HasCurrentPlcName => !string.IsNullOrEmpty(_currentPlcName);
+
+    public bool IsDataBlocksDropdownOpen
+    {
+        get => _isDataBlocksDropdownOpen;
+        set => SetProperty(ref _isDataBlocksDropdownOpen, value);
+    }
+
+    public bool IsLoadingDataBlocks
+    {
+        get => _isLoadingDataBlocks;
+        private set
+        {
+            if (SetProperty(ref _isLoadingDataBlocks, value))
+                OnPropertyChanged(nameof(ShowEmptyDataBlocksMessage));
+        }
+    }
+
+    /// <summary>Filtered, alphabetised list shown inside the dropdown.</summary>
+    public IReadOnlyList<DataBlockSummary> FilteredDataBlocks
+    {
+        get => _filteredDataBlocks;
+        private set
+        {
+            if (SetProperty(ref _filteredDataBlocks, value))
+            {
+                OnPropertyChanged(nameof(ShowEmptyDataBlocksMessage));
+                RebuildFilteredDataBlockItems();
+            }
+        }
+    }
+
+    private IReadOnlyList<DataBlockListItem> _filteredDataBlockItems = Array.Empty<DataBlockListItem>();
+
+    /// <summary>
+    /// Multi-select dropdown rows (#58). Same membership and order as
+    /// <see cref="FilteredDataBlocks"/>; each row wraps the summary with a
+    /// transient IsActive flag that two-way binds to its checkbox.
+    /// </summary>
+    public IReadOnlyList<DataBlockListItem> FilteredDataBlockItems
+    {
+        get => _filteredDataBlockItems;
+        private set => SetProperty(ref _filteredDataBlockItems, value);
+    }
+
+    private void RebuildFilteredDataBlockItems()
+    {
+        var items = new List<DataBlockListItem>(_filteredDataBlocks.Count);
+        foreach (var summary in _filteredDataBlocks)
+        {
+            var (isActive, isAnchor) = GetActiveStatusFor(summary);
+            var item = new DataBlockListItem(summary, isActive, isAnchor);
+            item.ToggleRequested += OnDataBlockListItemToggled;
+            items.Add(item);
+        }
+        FilteredDataBlockItems = items;
+    }
+
+    /// <summary>
+    /// True/false pair for a row: (isActive: in the dialog's active set,
+    /// isAnchor: index 0 of the active set, used as the UI's display
+    /// anchor). isAnchor carries no privilege over removability — it just
+    /// tells the row template whether to render the anchor decoration.
+    /// </summary>
+    private (bool isActive, bool isAnchor) GetActiveStatusFor(DataBlockSummary summary)
+    {
+        // Match on (Name, PlcName) — multi-PLC projects can host two DBs
+        // with the same name on different PLCs (#58 review must-fix #4).
+        // For index 0 the PLC name comes from _currentPlcName (display state);
+        // for the rest we read each ActiveDb.PlcName directly.
+        for (int i = 0; i < _activeDbs.Count; i++)
+        {
+            var db = _activeDbs[i];
+            var plc = i == 0 ? _currentPlcName : db.PlcName;
+            if (string.Equals(db.Info.Name, summary.Name, StringComparison.Ordinal)
+                && string.Equals(plc, summary.PlcName, StringComparison.Ordinal))
+                return (true, i == 0);
+        }
+        return (false, false);
+    }
+
+    /// <summary>
+    /// Pushes the current active-set state back into every existing row so
+    /// checkboxes stay accurate after the user toggles one (which mutates
+    /// the active set but doesn't rebuild the list).
+    /// </summary>
+    private void RefreshFilteredDataBlockItemsActiveState()
+    {
+        foreach (var item in _filteredDataBlockItems)
+        {
+            var (isActive, isAnchor) = GetActiveStatusFor(item.Summary);
+            item.SyncFrom(isActive, isAnchor);
+        }
+    }
+
+    private void OnDataBlockListItemToggled(DataBlockListItem item)
+    {
+        // The IsActive setter has already flipped to the new value. Peer
+        // model: checked → add to active set; unchecked → remove from active
+        // set, with the same Apply / Stash / Cancel prompt regardless of
+        // whether the row is the current anchor. The active set must keep
+        // at least one DB — refuse the last uncheck. Both branches funnel
+        // through State, so the cascade fires exactly once per toggle (#78).
+        var (wasActive, _) = GetActiveStatusFor(item.Summary);
+        bool wantActive = item.IsActive;
+        Log.Information(
+            "[gesture] Dropdown row {Name} {Direction} (was={WasActive} now={WantActive}) | {State}",
+            item.Name,
+            wantActive ? "CHECKED" : "UNCHECKED",
+            wasActive, wantActive, SnapshotState());
+
+        if (wantActive && !wasActive)
+        {
+            AddActiveDbToSet(item);
+        }
+        else if (!wantActive && wasActive)
+        {
+            if (State.Dbs.Count <= 1)
+            {
+                Log.Information(
+                    "Refusing to remove {Name} — at least one DB must stay active",
+                    item.Name);
+                // Snap the row checkbox back into sync with the unchanged
+                // active set — the cascade only fires when State actually
+                // changes, so we have to nudge the dropdown rows here.
+                RefreshFilteredDataBlockItemsActiveState();
+            }
+            else
+            {
+                var match = FindActiveDb(item.Summary);
+                if (match != null) RemoveActiveDb(match);
+                else RefreshFilteredDataBlockItemsActiveState();
+            }
+        }
+    }
+
+    /// <summary>
+    /// Pure-add path: append the dropdown-checked DB to the active set.
+    /// PendingEditStore (9814a6e) seeds pending values onto fresh VMs
+    /// after the rebuild, so the previously-required Apply/Stash/Cancel
+    /// rescue prompt on every other active DB is unnecessary — adding
+    /// a peer never destroys an in-progress edit (#93).
+    /// </summary>
+    private void AddActiveDbToSet(DataBlockListItem item)
+    {
+        var built = BuildActiveDbFromSummary(item.Summary);
+        if (built == null)
+        {
+            RefreshFilteredDataBlockItemsActiveState();
+            return;
+        }
+        State = State.With(dbs: State.Dbs.Concat(new[] { built }).ToList());
+        Log.Information("DB enabled via dropdown: {Name}", built.Info.Name);
+    }
+
+    /// <summary>
+    /// Solo gesture (#58 peer-mode): replace the active set with just the
+    /// target DB. Each dropped DB runs through the same Apply / Stash /
+    /// Cancel prompt RemoveActiveDb uses.
+    ///
+    /// Cancel semantics:
+    ///   • Target was already in the active set → partial-set behaviour
+    ///     (current matches user choices: silently-dropped DBs stay dropped,
+    ///     cancelled-on DBs stay, target stays).
+    ///   • Target was newly built (soloed from the dropdown without first
+    ///     checking it) → any cancel reverts the entire gesture so the
+    ///     freshly-built target is NOT silently added alongside the DB the
+    ///     user explicitly refused to drop. Without this, Solo+Cancel from a
+    ///     single-DB session quietly mutates the active set into multi-DB
+    ///     shape, triggering a tree rebuild that orphans pending edits on
+    ///     the original DB.
+    ///
+    /// Compound op (#78): builds the next snapshot in a local and commits
+    /// once at the end → exactly one cascade per gesture.
+    /// </summary>
+    public void SoloActiveDb(DataBlockSummary target)
+    {
+        var original = State;
+        var current = original;
+        var targetDb = FindActiveDb(target);
+        bool targetWasNewlyBuilt = false;
+        if (targetDb == null)
+        {
+            // The user soloed a row that wasn't already checked — append it
+            // to the snapshot before pruning so the "leave only this one"
+            // invariant always holds.
+            var built = BuildActiveDbFromSummary(target);
+            if (built == null)
+            {
+                IsDataBlocksDropdownOpen = false;
+                return;
+            }
+            current = current.With(dbs: current.Dbs.Concat(new[] { built }).ToList());
+            targetDb = built;
+            targetWasNewlyBuilt = true;
+        }
+
+        var next = ComposeRemoveOthers(current, targetDb);
+
+        // If we just appended a fresh target and the prune loop bailed
+        // (next still carries DBs other than target), drop the whole
+        // composition: the user's Cancel applies to the entire gesture.
+        if (targetWasNewlyBuilt && next.Dbs.Count > 1)
+        {
+            Log.Information(
+                "Solo+Cancel reverted: target {Name} was newly built and a " +
+                "prune cancelled — restoring original active set",
+                target.Name);
+            IsDataBlocksDropdownOpen = false;
+            return;
+        }
+
+        State = next;
+        IsDataBlocksDropdownOpen = false;
+    }
+
+    /// <summary>
+    /// Reference-based variant of <see cref="SoloActiveDb"/> used by the
+    /// chip-body click. Avoids the summary round-trip (chip already holds
+    /// the live <see cref="ActiveDb"/>). Same prompts on every dropped DB
+    /// with pending edits; if the user cancels mid-solo, the remaining
+    /// drops are skipped and the active set is whatever survived.
+    /// </summary>
+    public void SoloActiveDbByReference(ActiveDb target)
+    {
+        Log.Information(
+            "[gesture] Chip body click → solo {Name} | {State}",
+            target.Info.Name, SnapshotState());
+        if (State.Dbs.Count <= 1)
+        {
+            // Already the only active DB — there's nothing to solo away. Use
+            // the click as a one-step "open the picker so I can switch" so
+            // single-DB users don't have to reach for the + button.
+            if (_enumerateDataBlocks != null
+                && OpenDataBlocksDropdownCommand.CanExecute(null))
+            {
+                OpenDataBlocksDropdownCommand.Execute(null);
+            }
+            return;
+        }
+
+        State = ComposeRemoveOthers(State, target);
+    }
+
+    /// <summary>
+    /// Composes the snapshot that results from removing every DB in
+    /// <paramref name="current"/> except <paramref name="target"/>. Walks
+    /// the others in storage order, calling <see cref="TryComputeRemove"/>
+    /// for each (which prompts on pending edits). If the user cancels mid-
+    /// loop, returns the partial composition so the active set ends up as
+    /// whatever survived. Caller assigns the result to <see cref="State"/>.
+    /// </summary>
+    private ActiveSetState ComposeRemoveOthers(ActiveSetState current, ActiveDb target)
+    {
+        var next = current;
+        foreach (var db in current.Dbs.Where(d => !ReferenceEquals(d, target)).ToList())
+        {
+            var step = TryComputeRemove(next, db);
+            if (step == null)
+            {
+                Log.Information(
+                    "Solo cancelled at {Name} — leaving partial set", db.Info.Name);
+                break;
+            }
+            next = step;
+        }
+        return next;
+    }
+
+    private bool IsSameSummary(ActiveDb db, DataBlockSummary summary)
+    {
+        // Mirror FindActiveDb's anchor PLC handling: index 0 reads
+        // _currentPlcName; the rest carry their own PlcName on ActiveDb.
+        var idx = _activeDbs.IndexOf(db);
+        var plc = idx == 0 ? _currentPlcName : db.PlcName;
+        return string.Equals(db.Info.Name, summary.Name, StringComparison.Ordinal)
+            && string.Equals(plc, summary.PlcName, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Inspector path: re-add a previously-stashed DB back into the active
+    /// set, drop the others (with the same Apply / Stash / Cancel prompt
+    /// every remove uses), pop the stash entry, and replay its edits onto
+    /// the live tree. One snapshot is composed across all of these and
+    /// committed once → exactly one cascade. The pending-value replay
+    /// runs after the State assignment so it lands on the freshly-built
+    /// tree, not on VMs the cascade is about to discard.
+    /// </summary>
+    private void ReactivateStashedDb(StashedDbState stash)
+    {
+        Log.Information(
+            "[gesture] Stash header click → reactivate {Name} | {State}",
+            stash.DbName, SnapshotState());
+        var summary = stash.Summary;
+        var current = State;
+        var target = FindActiveDb(summary);
+
+        // #92 — When the user has ≥2 active DBs and clicks a stash header,
+        // ask whether they want to *add* the stashed DB to the current
+        // session (additive) or *replace* the active set with it (the
+        // legacy single-DB behaviour). Single-DB sessions skip the prompt:
+        // there's nothing to "replace away" so the gesture is unambiguous
+        // and goes through the additive branch implicitly via the existing
+        // append-then-prune flow below (which becomes a no-op prune when
+        // current has only one DB == target).
+        if (current.Dbs.Count >= 2)
+        {
+            var decision = _messageBox.AskYesNoCancel(
+                Res.Format("Reactivate_AdditiveOrReplace_Text", summary.Name),
+                Res.Get("Reactivate_AdditiveOrReplace_Title"));
+            if (decision == YesNoCancelResult.Cancel)
+            {
+                Log.Information("Reactivate cancelled by user for {Name}", summary.Name);
+                return;
+            }
+            if (decision == YesNoCancelResult.Yes)
+            {
+                ReactivateStashedDbAdditive(stash);
+                return;
+            }
+            // No falls through to the Replace path below.
+        }
+
+        if (target == null)
+        {
+            var built = BuildActiveDbFromSummary(summary);
+            if (built == null) return;
+            current = current.With(dbs: current.Dbs.Concat(new[] { built }).ToList());
+            target = built;
+        }
+
+        var next = ComposeRemoveOthers(current, target);
+
+        // Pop the stash entry inside the same snapshot so the cascade
+        // sees stashes-changed once. Other DBs that got stashed during
+        // ComposeRemoveOthers (peer with pending edits, user picked Stash)
+        // stay in next.Stashes — only the reactivated DB's entry is popped.
+        var stashKey = StashKey(summary);
+        if (next.Stashes.ContainsKey(stashKey))
+        {
+            var stashesNew = next.Stashes.ToDictionary(kv => kv.Key, kv => kv.Value);
+            stashesNew.Remove(stashKey);
+            next = next.With(stashes: stashesNew);
+        }
+
+        State = next;
+
+        // Replay the stash edits onto the now-final live tree. Runs after
+        // State assignment so the cascade has already rebuilt RootMembers
+        // — otherwise the new PendingValue assignments would land on VMs
+        // the rebuild is about to discard.
+        var (restored, dropped) = RestoreStashOntoLive(stash);
+        if (restored > 0 || dropped > 0)
+        {
+            StatusText = dropped == 0
+                ? Res.Format("Status_DbSwitched_StashRestored", summary.Name, restored)
+                : Res.Format("Status_DbSwitched_StashPartial",
+                    summary.Name, restored, dropped);
+        }
+    }
+
+    /// <summary>
+    /// Additive branch of <see cref="ReactivateStashedDb"/>: append the
+    /// stashed DB to the active set without dropping any other active DBs,
+    /// pop its stash entry, replay its edits. One snapshot, one cascade.
+    /// </summary>
+    private void ReactivateStashedDbAdditive(StashedDbState stash)
+    {
+        var summary = stash.Summary;
+        var built = BuildActiveDbFromSummary(summary);
+        if (built == null) return;
+
+        var stashesNew = State.Stashes.ToDictionary(kv => kv.Key, kv => kv.Value);
+        stashesNew.Remove(StashKey(summary));
+        State = State.With(
+            dbs: State.Dbs.Concat(new[] { built }).ToList(),
+            stashes: stashesNew);
+
+        // Multi-DB shape after additive add — scope the path lookup to the
+        // just-added DB's subtree so peer DBs with colliding member paths
+        // don't accidentally absorb the stashed edits (#82 path-identity).
+        var (restored, dropped) = RestoreStashOntoLive(stash, scopedTo: built);
+        if (restored > 0 || dropped > 0)
+        {
+            StatusText = dropped == 0
+                ? Res.Format("Status_DbSwitched_StashRestored", summary.Name, restored)
+                : Res.Format("Status_DbSwitched_StashPartial",
+                    summary.Name, restored, dropped);
+        }
+    }
+
+    /// <summary>
+    /// Re-runs the full UI rebuild after _activeDbs is mutated (add / remove /
+    /// reactivate). Refreshes dropdown checkbox states, clears stale selection
+    /// /scope/manual-selection (held by VM references that the rebuild
+    /// invalidates), rebuilds the tree from the new active set, then re-applies
+    /// filters + the flat list so the visible ListView (bound to FlatMembers,
+    /// not RootMembers) doesn't need a stray click to refresh.
+    /// </summary>
+    private void RebuildAfterActiveSetChanged()
+    {
+        Log.Information(
+            "[cascade] RebuildAfterActiveSetChanged → rebuilding tree | {State}",
+            SnapshotState());
+        // Always re-sync the row checkbox states from the authoritative
+        // active set so a refused toggle snaps back visually.
+        RefreshFilteredDataBlockItemsActiveState();
+        // BuildRootMembersFromActiveDbs creates fresh MemberNodeViewModel
+        // instances on every rebuild, so any selection / scope / manual-
+        // selection state held by reference points at orphaned VMs from
+        // the previous tree. Clear them before the rebuild — same pattern
+        // SwitchToDataBlock uses — so the count machinery doesn't accumulate
+        // phantom entries from a deactivated DB.
+        _selectedFlatMember = null;
+        _selectedScope = null;
+        _manualSelectedPaths.Clear();
+        RootMembers.Clear();
+        BuildRootMembersFromActiveDbs();
+        ApplyAllFilters();
+        RefreshFlatList();
+        RebuildActiveDbChips();
+        // PendingEdits / BulkPreview hold MemberNodeViewModel references —
+        // BuildRootMembersFromActiveDbs just minted fresh ones, so any
+        // surviving entries point at orphans from the prior tree. Without
+        // this refresh the inspector's "pending changes" list keeps showing
+        // edits whose DB just left the active set, and the chip-close /
+        // dropdown-add prompt machinery (which counts pending state on the
+        // *new* tree) silently disagrees with what the user sees. Same
+        // pattern as the _manualSelectedPaths.Clear() above — the cascade
+        // owns the cleanup of every collection that holds VM references.
+        RebuildPendingEdits();
+        BulkPreview.Clear();
+        OnPropertyChanged(nameof(HasMultipleActiveDbs));
+        OnPropertyChanged(nameof(SelectedFlatMember));
+        OnPropertyChanged(nameof(SelectedScope));
+        OnPropertyChanged(nameof(HasSelection));
+        OnPropertyChanged(nameof(HasScope));
+        OnPropertyChanged(nameof(IsManualMode));
+        OnPropertyChanged(nameof(ManualSelectionCount));
+        OnPropertyChanged(nameof(SelectedMemberDisplay));
+    }
+
+    /// <summary>
+    /// Pure builder (#78): produces a fully-wired <see cref="ActiveDb"/>
+    /// for a dropdown-picked DB without touching <see cref="State"/>.
+    /// Compound mutations (Solo, Reactivate) call this directly and
+    /// fold the result into their composed snapshot; the simple
+    /// "checkbox checked" path goes through
+    /// <see cref="AddActiveDbFromSummary"/>, which builds + assigns.
+    /// </summary>
+    private ActiveDb? BuildActiveDbFromSummary(DataBlockSummary summary)
+    {
+        try
+        {
+            // Preferred path (#58): host supplies a fully-wired ActiveDb,
+            // including a per-DB OnApply that re-imports the modified xml
+            // back into TIA. This is symmetric with the context-menu's
+            // ActiveDbFactory so dropdown-added DBs are first-class for
+            // Apply, not read-only.
+            if (_buildActiveDbForSummary != null)
+            {
+                var built = _buildActiveDbForSummary(summary);
+                if (built == null)
+                    Log.Information("ActiveDb build returned null for {Name}", summary.Name);
+                return built;
+            }
+
+            // Fallback (DevLauncher / tests): no host factory wired. Use
+            // the older _switchToDataBlock(summary) → xml callback to
+            // build a READ-ONLY ActiveDb. Apply on this DB will be a
+            // no-op (OnApply is null); the multi-DB Apply path skips
+            // null callbacks rather than throwing, and the
+            // remove-with-stash-prompt's 'Apply, then remove' branch
+            // refuses to charge a quota unit for a write that never
+            // reaches TIA.
+            if (_switchToDataBlock == null)
+            {
+                Log.Information(
+                    "DB enable ignored: neither buildActiveDbForSummary nor switchToDataBlock wired");
+                return null;
+            }
+            var xml = _switchToDataBlock(summary);
+            var constantResolver = _tagTableCache != null
+                ? new TagTableConstantResolver(_tagTableCache)
+                : (IConstantResolver?)null;
+            var parser = new SimaticMLParser(constantResolver, _udtResolver, _commentResolver);
+            var info = parser.Parse(xml);
+            // PlcName from _currentPlcName: the dropdown only enumerates DBs
+            // from the anchor's PLC, so any read-only-fallback addition is
+            // implicitly on the same PLC as the anchor.
+            return new ActiveDb(info, xml, onApply: null, plcName: _currentPlcName);
+        }
+        catch (Exception ex)
+        {
+            Log.Warning(ex, "Failed to build ActiveDb {Name}", summary.Name);
+            StatusText = Res.Format("Status_DbSwitchFailed", summary.Name, ex.Message);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Single-step add (dropdown checkbox-on). Builds the ActiveDb and
+    /// commits to <see cref="State"/> in one shot — the cascade fires
+    /// once on the resulting snapshot. Compound paths build directly via
+    /// <see cref="BuildActiveDbFromSummary"/> and skip this wrapper.
+    /// </summary>
+    private void AddActiveDbFromSummary(DataBlockSummary summary)
+    {
+        var built = BuildActiveDbFromSummary(summary);
+        if (built == null) return;
+        State = State.With(dbs: State.Dbs.Concat(new[] { built }).ToList());
+        Log.Information("DB enabled via dropdown: {Name}", built.Info.Name);
+    }
+
+    /// <summary>
+    /// Looks up an active DB by (Name, PlcName) so dropdown rows resolve to
+    /// the right ActiveDb instance even in multi-PLC projects where two
+    /// PLCs share a DB name (#58 review must-fix #4).
+    /// </summary>
+    private ActiveDb? FindActiveDb(DataBlockSummary summary)
+    {
+        for (int i = 0; i < _activeDbs.Count; i++)
+        {
+            var db = _activeDbs[i];
+            // Index 0 reads its display PLC from _currentPlcName; the rest
+            // read it from each ActiveDb directly.
+            var plc = i == 0 ? _currentPlcName : db.PlcName;
+            if (string.Equals(db.Info.Name, summary.Name, StringComparison.Ordinal)
+                && string.Equals(plc, summary.PlcName, StringComparison.Ordinal))
+                return db;
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// User's choice in response to the "this DB has pending edits" prompt
+    /// raised when removing a DB from the active set (#78). Centralised so
+    /// every remove path maps the underlying <see cref="YesNoCancelResult"/>
+    /// the same way: Yes→Apply, No→Stash, Cancel→Cancel. <c>NoEdits</c> is
+    /// the no-prompt fast path.
+    /// </summary>
+    private enum PendingDecision { NoEdits, Apply, Stash, Cancel }
+
+    /// <summary>
+    /// Single source of truth for the 3-way prompt that fires whenever a
+    /// DB with pending inline edits is about to be dropped from the active
+    /// set (#78). Returns <see cref="PendingDecision.NoEdits"/> immediately
+    /// if there's nothing pending — caller proceeds with the removal
+    /// without showing a dialog.
+    /// </summary>
+    private PendingDecision PromptForPendingEditsOnRemove(ActiveDb db)
+    {
+        var pendingCount = CountPendingEditsForDb(db);
+        if (pendingCount == 0)
+        {
+            Log.Information(
+                "[prompt] no-prompt fast path on {Name} (CountPendingEditsForDb=0) | {State}",
+                db.Info.Name, SnapshotState());
+            return PendingDecision.NoEdits;
+        }
+        Log.Information(
+            "[prompt] Showing 3-way for {Name} (pending={Pending}) | {State}",
+            db.Info.Name, pendingCount, SnapshotState());
+        var result = _messageBox.AskYesNoCancel(
+            Res.Format("Dialog_SwitchDb_KeepConfirm_Text",
+                pendingCount, db.Info.Name),
+            Res.Get("Dialog_SwitchDb_KeepConfirm_Title"));
+        Log.Information(
+            "[prompt] User picked {Result} for {Name}", result, db.Info.Name);
+        return result switch
+        {
+            YesNoCancelResult.Yes => PendingDecision.Apply,
+            YesNoCancelResult.No => PendingDecision.Stash,
+            _ => PendingDecision.Cancel,
+        };
+    }
+
+    /// <summary>
+    /// Snapshots pending inline edits for <paramref name="db"/> into an
+    /// inert <see cref="StashedDbState"/> ready to be added to a new
+    /// <see cref="ActiveSetState"/>. Returns null when the DB has no
+    /// pending edits to capture. Reads from the store — unambiguous in
+    /// multi-DB sessions where the same Path can exist in multiple DBs,
+    /// and correct even if the tree hasn't rebuilt yet. Pure read —
+    /// does NOT mutate <c>_stashedDbs</c> (the snapshot setter does).
+    /// </summary>
+    private StashedDbState? CaptureStashForDb(ActiveDb db)
+    {
+        var entries = new List<StashedEditEntry>();
+        foreach (var (node, pendingValue) in _pendingEditStore.GetForDb(db, _modelToDb))
+        {
+            // Resolve to the VM to read StartValue (which is model-derived
+            // and stable). If the VM can't be found the model is still valid.
+            var vm = FindVmByModel(node);
+            entries.Add(new StashedEditEntry(
+                node.Path,
+                vm?.StartValue ?? node.StartValue ?? "",
+                pendingValue));
+        }
+        if (entries.Count == 0) return null;
+        var summary = new DataBlockSummary(
+            db.Info.Name,
+            "",
+            blockType: db.Info.BlockType,
+            isInstanceDb: string.Equals(db.Info.BlockType, "InstanceDB", StringComparison.Ordinal),
+            plcName: _currentPlcName);
+        return new StashedDbState(summary, entries);
+    }
+
+    /// <summary>
+    /// Computes the next snapshot after removing <paramref name="db"/>
+    /// from <paramref name="current"/>. Side-effects (the user-visible
+    /// prompt + Apply branch's per-DB OnApply + usage-counter charge)
+    /// run here because they MUST occur against the live (pre-cascade)
+    /// tree. Returns null if the user cancelled or the Apply branch
+    /// failed (cap hit / read-only OnApply); caller treats null as
+    /// "abort this remove."
+    /// </summary>
+    private ActiveSetState? TryComputeRemove(ActiveSetState current, ActiveDb db)
+    {
+        var decision = PromptForPendingEditsOnRemove(db);
+        if (decision == PendingDecision.Cancel)
+        {
+            Log.Information("DB remove cancelled by user: {Name}", db.Info.Name);
+            return null;
+        }
+        if (decision == PendingDecision.Apply)
+        {
+            if (!TryApplyActiveDbInPlace(db))
+            {
+                Log.Information(
+                    "DB remove aborted: pending Apply did not succeed for {Name}",
+                    db.Info.Name);
+                return null;
+            }
+        }
+
+        IReadOnlyDictionary<string, StashedDbState> nextStashes = current.Stashes;
+        if (decision == PendingDecision.Stash)
+        {
+            var captured = CaptureStashForDb(db);
+            if (captured != null)
+            {
+                var dict = current.Stashes.ToDictionary(kv => kv.Key, kv => kv.Value);
+                dict[StashKey(captured.Summary)] = captured;
+                nextStashes = dict;
+            }
+        }
+
+        var nextDbs = current.Dbs.Where(d => !ReferenceEquals(d, db)).ToList();
+        // Anchor handoff: only when the removed DB was the anchor; the
+        // new anchor is whatever moved into nextDbs[0]. Same rule as the
+        // legacy RemoveActiveDb.
+        var nextAnchor = current.AnchorPlcName;
+        if (current.Dbs.Count > 0 && ReferenceEquals(db, current.Dbs[0]))
+        {
+            nextAnchor = nextDbs.Count > 0 ? (nextDbs[0].PlcName ?? "") : "";
+        }
+
+        Log.Information(
+            ReferenceEquals(db, current.Dbs[0])
+                ? "Anchor removed: now {NewName} (was: {OldName})"
+                : "DB disabled: {OldName}",
+            nextDbs.Count > 0 ? nextDbs[0].Info.Name : "<empty>",
+            db.Info.Name);
+
+        return new ActiveSetState(nextDbs, nextStashes, nextAnchor);
+    }
+
+    /// <summary>
+    /// Single-step remove (chip × / dropdown uncheck). Compound paths
+    /// (solo, reactivate) call <see cref="TryComputeRemove"/> directly
+    /// to compose multiple removes into one snapshot before assigning.
+    /// </summary>
+    /// <returns>true if removed; false if the user cancelled.</returns>
+    private bool RemoveActiveDb(ActiveDb db)
+    {
+        var next = TryComputeRemove(State, db);
+        if (next == null) return false;
+        State = next;
+        return true;
+    }
+
+    /// <summary>
+    /// Clears pending inline edits inside a specific DB's subtree (#58).
+    /// Used by multi-DB Apply's partial-commit branch: when DB#1 committed
+    /// but DB#2 cancelled, DB#1's tree must drop its pending flags (the
+    /// values are now in TIA) while DB#2's pending values stay for retry.
+    /// </summary>
+    private void ClearPendingValuesForDb(ActiveDb db)
+    {
+        // Walk _modelToDb to find VMs owned by this DB and clear their
+        // pending state. Keyed by MemberNode reference — safe in multi-DB
+        // sessions where the same path can appear in multiple DBs.
+        foreach (var kvp in _modelToDb)
+        {
+            if (!ReferenceEquals(kvp.Value, db)) continue;
+            if (_modelToVm.TryGetValue(kvp.Key, out var vm) && vm.IsPendingInlineEdit)
+                vm.ClearPending();
+        }
+        // Evict from the store so a later tree rebuild doesn't re-populate
+        // values that were just committed.
+        _pendingEditStore.ClearForDb(db, _modelToDb);
+    }
+
+    /// <summary>
+    /// Counts pending inline edits inside a DB's subtree. Used by the
+    /// remove-with-stash-prompt flow (#58, #78). Reads from the store
+    /// rather than walking the VM tree — O(store.Count) instead of
+    /// O(subtree size), and correct even when the tree hasn't rebuilt yet.
+    /// </summary>
+    private int CountPendingEditsForDb(ActiveDb db)
+        => _pendingEditStore.CountForDb(db, _modelToDb);
+
+    /// <summary>
+    /// Best-effort "apply this DB's edits before we remove it" (#58
+    /// remove-prompt → Yes branch). Iterates the DB's pending edits,
+    /// writes them into its xml, calls its OnApply once, then charges
+    /// the counter. Returns false if the daily cap or a null OnApply
+    /// blocks the write — caller leaves the DB in place.
+    /// </summary>
+    private bool TryApplyActiveDbInPlace(ActiveDb db)
+    {
+        if (db.OnApply == null)
+        {
+            // Read-only ActiveDb (dropdown-added with no host callback).
+            // The user picked "Apply, then remove" but there's nothing to
+            // apply against, so refuse rather than silently drop.
+            StatusText = Res.Format("Status_DbSwitch_ApplyBlocked");
+            return false;
+        }
+
+        // Store-based: unambiguous in multi-DB sessions (MemberNode identity),
+        // correct even when the tree hasn't rebuilt yet (store survives rebuilds).
+        var pendingEdits = _pendingEditStore.GetForDb(db, _modelToDb).ToList();
+        if (pendingEdits.Count == 0) return true;
+
+        var status = _usageTracker.GetStatus();
+        if (pendingEdits.Count > status.RemainingToday)
+        {
+            StatusText = Res.Format("Status_WouldExceedLimit",
+                pendingEdits.Count, status.RemainingToday);
+            return false;
+        }
+
+        try
+        {
+            int totalChanged = 0;
+            foreach (var (member, value) in pendingEdits)
+            {
+                var writeResult = _writer.ModifyStartValues(db.Xml, new[] { member }, value);
+                if (writeResult.IsSuccess)
+                {
+                    db.Xml = writeResult.ModifiedXml;
+                    totalChanged++;
+                }
+            }
+            db.OnApply.Invoke(db.Xml);
+            if (totalChanged > 0) _usageTracker.RecordUsage(totalChanged);
+            // The edits are now committed to TIA — evict the DB's store entries
+            // so a subsequent tree rebuild doesn't re-populate committed values.
+            _pendingEditStore.ClearForDb(db, _modelToDb);
+            return true;
+        }
+        catch (OperationCanceledException)
+        {
+            return false;
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "TryApplyActiveDbInPlace failed for {Name}", db.Info.Name);
+            return false;
+        }
+    }
+
+    /// <summary>True when enumeration is settled but the filter matches nothing.</summary>
+    public bool ShowEmptyDataBlocksMessage =>
+        !_isLoadingDataBlocks
+        && _availableDataBlocks != null
+        && _filteredDataBlocks.Count == 0;
+
+    /// <summary>Type-to-filter text for the dropdown's search box.</summary>
+    public string DataBlockSearchText
+    {
+        get => _dataBlockSearchText;
+        set
+        {
+            if (SetProperty(ref _dataBlockSearchText, value))
+                ApplyDataBlockFilter();
+        }
+    }
+
+    /// <summary>
+    /// Lazy-load + cache enumeration result. Subsequent opens are O(filter)
+    /// — no re-enumeration unless the user clicks ↻ (#59).
+    /// </summary>
+    private void ExecuteOpenDataBlocksDropdown()
+    {
+        if (_availableDataBlocks == null)
+            LoadAvailableDataBlocks(force: false);
+
+        ApplyDataBlockFilter();
+        IsDataBlocksDropdownOpen = true;
+    }
+
+    private void ExecuteRefreshDataBlocks()
+    {
+        LoadAvailableDataBlocks(force: true);
+        ApplyDataBlockFilter();
+    }
+
+    private void LoadAvailableDataBlocks(bool force)
+    {
+        if (_enumerateDataBlocks == null) return;
+        if (!force && _availableDataBlocks != null) return;
+
+        IsLoadingDataBlocks = true;
+        try
+        {
+            // Enumeration runs on the UI thread today: TIA Openness calls
+            // must originate from the same thread that owns the project.
+            // The visible spinner + the dialog's scoped scope keep this OK
+            // for typical project sizes; if it ever bites we'd move the
+            // enumeration onto a background task with a marshalled call.
+            _availableDataBlocks = DataBlockListFilter.Sort(_enumerateDataBlocks());
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "DB enumeration failed");
+            _availableDataBlocks = Array.Empty<DataBlockSummary>();
+            StatusText = Res.Format("Status_DbEnumFailed", ex.Message);
+        }
+        finally
+        {
+            IsLoadingDataBlocks = false;
+        }
+    }
+
+    private void ApplyDataBlockFilter()
+    {
+        var source = _availableDataBlocks ?? (IReadOnlyList<DataBlockSummary>)Array.Empty<DataBlockSummary>();
+        FilteredDataBlocks = DataBlockListFilter.Filter(source, _dataBlockSearchText);
+    }
+
+    private static string StashKey(DataBlockSummary summary) =>
+        $"{summary.PlcName}\u0001{summary.FolderPath}\u0001{summary.Name}";
+
+
+    /// <summary>
+    /// Builds the dialog window title. Single-DB sessions render
+    /// <c>"BlockParam v{version}: {PLC} / {DB}"</c>. Multi-DB sessions
+    /// drop the DB/PLC suffix entirely (#91): the chip strip is the
+    /// single source of truth for which DBs are in scope, so surfacing
+    /// one specific DB's name in the title contradicts the peer-DB
+    /// model. Single-PLC hosts (DevLauncher) pass an empty PLC name and
+    /// the prefix is dropped.
+    /// </summary>
+    private static string BuildTitle(System.Version? version, string plcName, string dbName, int activeDbCount)
+    {
+        if (activeDbCount > 1) return $"BlockParam v{version}";
+        var location = string.IsNullOrEmpty(plcName) ? dbName : $"{plcName} / {dbName}";
+        return $"BlockParam v{version}: {location}";
+    }
+
+    /// <summary>
+    /// Replays a stash's edits onto the live tree (#78). Pure write — does
+    /// NOT pop the stash entry from <see cref="_stashedDbs"/>. Callers
+    /// that need the entry popped do that separately, ideally as part of
+    /// composing the next <see cref="ActiveSetState"/> so the cascade
+    /// fires once.
+    /// </summary>
+    private (int restored, int dropped) RestoreStashOntoLive(StashedDbState state, ActiveDb? scopedTo = null)
+    {
+        int restored = 0;
+        int dropped = 0;
+        var validator = BuildValidator();
+        foreach (var edit in state.Edits)
+        {
+            var node = scopedTo != null
+                ? FindNodeByPathInDb(edit.Path, scopedTo)
+                : FindNodeByPath(edit.Path);
+            if (node is { IsLeaf: true })
+            {
+                // Restore-without-quota: setting EditableStartValue would route
+                // through OnSingleValueEdited and consume one inline-edit slot
+                // per restored row, which would silently drop edits mid-restore
+                // for free-tier users near the daily cap. Set PendingValue
+                // directly + run the same validator OnSingleValueEdited uses
+                // so HasInlineError / InlineErrorMessage stay accurate.
+                node.PendingValue = edit.PendingValue;
+                // Mirror the restored value to the store so subsequent tree
+                // rebuilds (e.g. a later active-set change) can re-seed it.
+                _pendingEditStore.Set(node.Model, edit.PendingValue);
+                var error = validator.Validate(node.Model, edit.PendingValue);
+                node.HasInlineError = error != null;
+                node.InlineErrorMessage = error;
+                restored++;
+            }
+            else
+            {
+                dropped++;
+                Log.Information("Stashed edit dropped (path no longer exists): {Path}", edit.Path);
+            }
+        }
+        // OnSingleValueEdited normally drives these refreshes; we bypassed it
+        // for the no-quota path so the aggregated views (PendingEdits list,
+        // BulkPreview, sidebar badges) need an explicit nudge.
+        if (restored > 0)
+        {
+            RefreshPendingAndPreview();
+            OnPropertyChanged(nameof(HasInlineErrors));
+            RaiseInvalidPendingChanged();
+        }
+        Log.Information("Restored {Restored} stashed edit(s) for {Db} ({Dropped} dropped)",
+            restored, state.Summary.Name, dropped);
+        return (restored, dropped);
+    }
+
+    /// <summary>Mirrors the dictionary into the bound <see cref="StashedDbs"/> collection.</summary>
+    private void SyncStashedDbsCollection()
+    {
+        StashedDbs.Clear();
+        foreach (var state in _stashedDbs.Values
+            .OrderBy(s => s.FolderPath, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(s => s.DbName, StringComparer.OrdinalIgnoreCase))
+        {
+            StashedDbs.Add(state);
+        }
+        OnPropertyChanged(nameof(HasStashedDbs));
+    }
 
     public bool IsInspectorCollapsed
     {
@@ -727,7 +2228,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>Number of individual inline edits waiting to be applied.</summary>
-    public int PendingInlineEditCount => CountPendingInlineEdits(RootMembers);
+    public int PendingInlineEditCount => _pendingEditStore.Count;
 
     /// <summary>Status text showing pending inline edits count.</summary>
     public string? PendingStatusText
@@ -1053,7 +2554,23 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
 
         ReloadSuggestions();
 
-        var result = _analyzer.Analyze(_dataBlockInfo, memberVm.Model);
+        // Multi-DB scope generation (#58): when more than one DB is
+        // active, every within-DB scope gains a cross-DB sibling matching
+        // the same paths across all active DBs, plus an "All selected
+        // DBs" mega-scope. The selected member's owning DB drives the
+        // within-DB analysis; the other active DBs contribute only to
+        // the cross-DB lifts.
+        AnalysisResult result;
+        if (HasMultipleActiveDbs)
+        {
+            var owningDb = FindActiveDbForModel(memberVm.Model)?.Info ?? _active.Info;
+            var allInfos = AllActiveDbs.Select(a => a.Info).ToList();
+            result = _analyzer.AnalyzeMulti(allInfos, owningDb, memberVm.Model);
+        }
+        else
+        {
+            result = _analyzer.Analyze(_active.Info, memberVm.Model);
+        }
 
         if (!result.HasBulkOptions)
         {
@@ -1108,11 +2625,23 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
 
         if (_selectedScope != null)
         {
-            var affectedPaths = new HashSet<string>(
-                _selectedScope.MatchingMembers.Select(m => m.Path));
+            // Multi-DB safe (#58 review must-fix #2): resolve scope members
+            // to their owning DB's tree VMs by reference, not by path string.
+            // The previous HashSet<string>+full-tree-walk would mark same-named
+            // paths in other active DBs as Affected even when the user picked
+            // a within-DB scope on a single DB.
+            var affectedVms = ResolveScopeVms(_selectedScope.MatchingMembers);
 
+            foreach (var vm in affectedVms)
+                MarkAffected(vm, _newValue);
+
+            // AffectedBadge bubbles up through ancestors; refresh every
+            // node's badge property so parent UDTs re-render their counts.
+            // Doing this once per tree (not per affected vm) is O(N), same
+            // as the legacy walk's PropertyChanged raises but without the
+            // cross-DB false-mark side effect.
             foreach (var root in RootMembers)
-                HighlightAffected(root, affectedPaths, _newValue);
+                RaiseAffectedBadgeRecursive(root);
         }
 
         // Generate comment previews if template is configured
@@ -1147,10 +2676,9 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         {
             if (IsManualMode)
             {
-                foreach (var path in _manualSelectedPaths)
+                foreach (var node in _manualSelectedPaths)
                 {
-                    var node = FindNodeByPath(path);
-                    if (node == null || !node.IsLeaf) continue;
+                    if (!node.IsLeaf) continue;
                     TryAddPreviewEntry(node);
                 }
             }
@@ -1158,7 +2686,10 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             {
                 foreach (var m in _selectedScope.MatchingMembers)
                 {
-                    var node = FindNodeByPath(m.Path);
+                    // Multi-DB safe: route by model reference, not path string.
+                    // Same path can exist in multiple DBs; FindVmByModel is
+                    // O(1) and always picks the right DB's tree VM.
+                    var node = FindVmByModel(m);
                     if (node == null || !node.IsLeaf) continue;
                     TryAddPreviewEntry(node);
                 }
@@ -1276,7 +2807,10 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     /// </summary>
     private string? ResolvePendingValue(MemberNode model)
     {
-        var vm = FindNodeByPath(model.Path);
+        // Multi-DB safe lookup: a model is owned by exactly one ActiveDb,
+        // so reference equality picks the right tree VM regardless of which
+        // DBs share the path string.
+        var vm = FindVmByModel(model);
         if (vm != null && vm.IsPendingInlineEdit)
             return vm.EditableStartValue;
         return model.StartValue;
@@ -1291,12 +2825,14 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         EnsureTagTableCache();
         var generator = new TemplateCommentGenerator(config, _tagTableCache);
         var previews = generator.GenerateForScope(
-            _dataBlockInfo, _selectedScope.MatchingMembers.ToList(),
+            _active.Info, _selectedScope.MatchingMembers.ToList(),
             valueResolver: ResolvePendingValue);
 
         foreach (var (target, comment) in previews)
         {
-            var vm = FindNodeByPath(target.Path);
+            // Comment previews target scope members → route by model
+            // reference for cross-DB safety (#58).
+            var vm = FindVmByModel(target);
             if (vm != null)
             {
                 vm.PreviewComment = comment;
@@ -1322,7 +2858,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
 
             foreach (var lang in _projectLanguages)
             {
-                var comment = templateGen!.Generate(_dataBlockInfo, node.Model, rule.CommentTemplate, lang, ResolvePendingValue);
+                var comment = templateGen!.Generate(_active.Info, node.Model, rule.CommentTemplate, lang, ResolvePendingValue);
                 xml = _writer.ModifyComment(xml, node.Model, comment, lang);
                 Log.Information("Comment updated: {Path} → {Comment} ({Lang})", node.Model.Path, comment, lang);
             }
@@ -1353,6 +2889,39 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         return null;
     }
 
+    /// <summary>
+    /// DB-scoped variant of <see cref="FindNodeByPath"/>. Callers pass this
+    /// when member Paths can repeat across DBs (the stash holds the bare
+    /// member path, not "DbName.MemberPath") — without scoping, a
+    /// reactivate-additive would replay edits onto whichever DB happened
+    /// to be checked first.
+    ///
+    /// Strict: callers must only invoke this when the active set is in
+    /// multi-DB shape (i.e. after the State cascade has populated
+    /// <see cref="_dbToSynthetic"/> for <paramref name="owner"/>). If the
+    /// synthetic root isn't found, returns null + warns — a future
+    /// ordering bug surfaces as "stashed edit dropped" in the log instead
+    /// of silently aliasing onto another DB.
+    /// </summary>
+    private MemberNodeViewModel? FindNodeByPathInDb(string path, ActiveDb owner)
+    {
+        if (!_dbToSynthetic.TryGetValue(owner, out var synthetic))
+        {
+            Log.Warning(
+                "FindNodeByPathInDb({Path}) called for {Db} but no synthetic " +
+                "root is registered — active set may not be in multi-DB shape " +
+                "yet; returning null to avoid cross-DB path aliasing",
+                path, owner.Info.Name);
+            return null;
+        }
+        foreach (var child in synthetic.Children)
+        {
+            var found = FindNodeByPathRecursive(child, path);
+            if (found != null) return found;
+        }
+        return null;
+    }
+
     private static MemberNodeViewModel? FindNodeByPathRecursive(MemberNodeViewModel node, string path)
     {
         if (node.Path == path) return node;
@@ -1364,63 +2933,114 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         return null;
     }
 
-    private void HighlightAffected(MemberNodeViewModel node, HashSet<string> affectedPaths, string newValue)
+    /// <summary>
+    /// Resolves a scope's <see cref="MemberNode"/> match list to the
+    /// owning DB's tree VMs via <see cref="FindVmByModel"/>. Multi-DB
+    /// safe — same path string in a different DB is an entirely
+    /// different model instance and won't end up in the result set.
+    /// </summary>
+    private HashSet<MemberNodeViewModel> ResolveScopeVms(IEnumerable<MemberNode> models)
     {
-        if (affectedPaths.Contains(node.Path))
+        var result = new HashSet<MemberNodeViewModel>();
+        foreach (var m in models)
         {
-            var effectiveValue = node.IsPendingInlineEdit
-                ? (node.EditableStartValue ?? node.StartValue ?? "")
-                : (node.StartValue ?? "");
-            var alreadyHasValue = !string.IsNullOrEmpty(newValue)
-                && string.Equals(effectiveValue, newValue, StringComparison.OrdinalIgnoreCase);
-
-            if (alreadyHasValue)
-                node.IsAlreadyMatching = true;
-            else
-                node.IsAffected = true;
-
-            node.EnsureVisible();
+            var vm = FindVmByModel(m);
+            if (vm != null) result.Add(vm);
         }
+        return result;
+    }
 
-        foreach (var child in node.Children)
-            HighlightAffected(child, affectedPaths, newValue);
+    private static void MarkAffected(MemberNodeViewModel vm, string newValue)
+    {
+        var effectiveValue = vm.IsPendingInlineEdit
+            ? (vm.EditableStartValue ?? vm.StartValue ?? "")
+            : (vm.StartValue ?? "");
+        var alreadyHasValue = !string.IsNullOrEmpty(newValue)
+            && string.Equals(effectiveValue, newValue, StringComparison.OrdinalIgnoreCase);
 
+        if (alreadyHasValue)
+            vm.IsAlreadyMatching = true;
+        else
+            vm.IsAffected = true;
+
+        vm.EnsureVisible();
+    }
+
+    private static void RaiseAffectedBadgeRecursive(MemberNodeViewModel node)
+    {
         node.RaisePropertyChanged(nameof(node.AffectedBadge));
+        foreach (var child in node.Children)
+            RaiseAffectedBadgeRecursive(child);
     }
 
     private void ApplyAllFilters()
     {
-        HashSet<string>? searchPaths = null;
+        // Multi-DB safe (#58): build per-DB search/exclude sets and route
+        // them to each synthetic root via _dbToSynthetic. Path strings are
+        // unique within a DB but identical across DBs that share the
+        // structure, so a single shared HashSet<string> would mis-mark same-
+        // path leaves in other active DBs as search hits.
+        var perDbSearchPaths = new Dictionary<ActiveDb, HashSet<string>>();
+        int totalSearchHits = 0;
         if (!string.IsNullOrWhiteSpace(_searchQuery))
         {
-            var searchResult = _searchService.Search(_dataBlockInfo, _searchQuery);
-            searchPaths = new HashSet<string>(searchResult.Matches.Select(m => m.Path));
-            SearchHitCount = searchResult.HitCount;
+            foreach (var db in AllActiveDbs)
+            {
+                var result = _searchService.Search(db.Info, _searchQuery);
+                perDbSearchPaths[db] =
+                    new HashSet<string>(result.Matches.Select(m => m.Path));
+                totalSearchHits += result.HitCount;
+            }
+        }
+        SearchHitCount = totalSearchHits;
+
+        var config = _configLoader.GetConfig();
+
+        // Per-DB exclude sets so HiddenByRuleCount + ApplyFilter use the
+        // owning DB's path set, not just the focused DB's.
+        var perDbExcludeSet = new Dictionary<ActiveDb, HashSet<string>>();
+        int totalHidden = 0;
+        foreach (var db in AllActiveDbs)
+        {
+            var excl = BuildExcludeSetFor(db.Info, config);
+            if (excl != null)
+            {
+                perDbExcludeSet[db] = excl;
+                totalHidden += db.Info.AllMembers().Count(m => m.IsLeaf && excl.Contains(m.Path));
+            }
+        }
+        HiddenByRuleCount = totalHidden;
+
+        if (HasMultipleActiveDbs)
+        {
+            // Route per synthetic root so each DB's filter sets only affect
+            // its own subtree.
+            foreach (var kvp in _dbToSynthetic)
+            {
+                var db = kvp.Key;
+                var syntheticRoot = kvp.Value;
+                perDbSearchPaths.TryGetValue(db, out var sp);
+                perDbExcludeSet.TryGetValue(db, out var ex);
+                syntheticRoot.ApplyFilter(
+                    ruleFilterActive: true,
+                    searchMatchPaths: sp,
+                    excludedByRules: ex,
+                    showSetpointsOnly: _showSetpointsOnly);
+                if (sp != null) SmartExpandSearchMatches(syntheticRoot, sp);
+            }
         }
         else
         {
-            SearchHitCount = 0;
-        }
-
-        var config = _configLoader.GetConfig();
-        var excludeSet = BuildExcludeSet(config);
-
-        HiddenByRuleCount = excludeSet == null
-            ? 0
-            : _dataBlockInfo.AllMembers().Count(m => m.IsLeaf && excludeSet.Contains(m.Path));
-
-        foreach (var root in RootMembers)
-            root.ApplyFilter(ruleFilterActive: true, searchPaths, excludeSet, _showSetpointsOnly);
-
-        // Smart-expand parents of search matches
-        if (searchPaths != null)
-        {
+            perDbSearchPaths.TryGetValue(_active, out var searchPaths);
+            perDbExcludeSet.TryGetValue(_active, out var excludeSet);
             foreach (var root in RootMembers)
-                SmartExpandSearchMatches(root, searchPaths);
+                root.ApplyFilter(ruleFilterActive: true, searchPaths, excludeSet, _showSetpointsOnly);
+            if (searchPaths != null)
+            {
+                foreach (var root in RootMembers)
+                    SmartExpandSearchMatches(root, searchPaths);
+            }
         }
-
-        // Pending inline edits no longer smart-expand (#10) — they're surfaced
-        // in the sidebar, so forcing the tree open was redundant and disruptive.
     }
 
     private void SmartExpandSearchMatches(MemberNodeViewModel node, HashSet<string> searchPaths)
@@ -1439,10 +3059,25 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     /// </summary>
     private void ReExpandNonAffected()
     {
-        if (!string.IsNullOrWhiteSpace(_searchQuery))
+        if (string.IsNullOrWhiteSpace(_searchQuery)) return;
+
+        if (HasMultipleActiveDbs)
         {
-            var searchResult = _searchService.Search(_dataBlockInfo, _searchQuery);
-            var searchPaths = new HashSet<string>(searchResult.Matches.Select(m => m.Path));
+            // Per-DB search so a path that's a hit in one DB doesn't smart-
+            // expand the same path in other active DBs that don't have a hit.
+            foreach (var kvp in _dbToSynthetic)
+            {
+                var db = kvp.Key;
+                var syntheticRoot = kvp.Value;
+                var result = _searchService.Search(db.Info, _searchQuery);
+                var searchPaths = new HashSet<string>(result.Matches.Select(m => m.Path));
+                SmartExpandSearchMatches(syntheticRoot, searchPaths);
+            }
+        }
+        else
+        {
+            var result = _searchService.Search(_active.Info, _searchQuery);
+            var searchPaths = new HashSet<string>(result.Matches.Select(m => m.Path));
             foreach (var root in RootMembers)
                 SmartExpandSearchMatches(root, searchPaths);
         }
@@ -1473,10 +3108,9 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
 
             string? firstError = null;
             string? firstErrorName = null;
-            foreach (var path in _manualSelectedPaths)
+            foreach (var node in _manualSelectedPaths)
             {
-                var node = FindNodeByPath(path);
-                if (node == null || !node.IsLeaf) continue;
+                if (!node.IsLeaf) continue;
                 var memberError = ValidateValueForMember(node, _newValue);
                 if (memberError != null)
                 {
@@ -1486,7 +3120,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
                     {
                         node.HasInlineError = true;
                         node.InlineErrorMessage = memberError;
-                        _bulkErrorPaths.Add(path);
+                        _bulkErrorPaths.Add(node.Path);
                     }
                     if (firstError == null)
                     {
@@ -1722,7 +3356,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
                 commentResolver.LoadFromDirectory(_udtDir);
             }
 
-            RefreshTree(_currentXml, resolver, commentResolver);
+            RefreshTree(_active.Xml, resolver, commentResolver);
 
             OnPropertyChanged(nameof(CanShowSetpointsOnly));
             OnPropertyChanged(nameof(ShowSetpointsOnlyTooltip));
@@ -1834,12 +3468,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     {
         if (IsManualMode)
         {
-            return _manualSelectedPaths.Count(p =>
-            {
-                var node = FindNodeByPath(p);
-                if (node == null || !node.IsLeaf) return false;
-                return WouldChange(node);
-            });
+            return _manualSelectedPaths.Count(node => node.IsLeaf && WouldChange(node));
         }
 
         if (_selectedScope == null) return 0;
@@ -1870,11 +3499,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     {
         if (IsManualMode)
         {
-            return _manualSelectedPaths.Count(p =>
-            {
-                var node = FindNodeByPath(p);
-                return node != null && node.IsLeaf;
-            });
+            return _manualSelectedPaths.Count(node => node.IsLeaf);
         }
         return _selectedScope?.MatchCount ?? 0;
     }
@@ -1895,12 +3520,16 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
 
         MaybeWarnLimitReachedOnce();
 
-        var affectedPaths = new HashSet<string>(
-            _selectedScope.MatchingMembers.Select(m => m.Path));
+        // Multi-DB safe (#58 review must-fix #2): resolve scope members to
+        // their owning DB's tree VMs by reference. Path-string staging used
+        // to bleed pending values into other active DBs that happened to
+        // have the same path; this routes each scope member to exactly its
+        // own tree node.
+        var affectedVms = ResolveScopeVms(_selectedScope.MatchingMembers);
         int count = 0;
 
-        foreach (var root in RootMembers)
-            count += SetPendingOnNodes(root, affectedPaths, _newValue);
+        foreach (var vm in affectedVms)
+            count += SetPendingOnSingleVm(vm, _newValue);
 
         // Clear bulk highlighting (values are now pending/yellow)
         foreach (var root in RootMembers)
@@ -1926,22 +3555,23 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         MaybeWarnLimitReachedOnce();
 
         int count = 0;
-        foreach (var path in _manualSelectedPaths)
+        foreach (var node in _manualSelectedPaths)
         {
-            var node = FindNodeByPath(path);
-            if (node == null || !node.IsLeaf) continue;
+            if (!node.IsLeaf) continue;
             var startsEqualsNew = string.Equals(node.StartValue, _newValue, StringComparison.OrdinalIgnoreCase);
             if (!startsEqualsNew)
             {
                 if (!string.Equals(node.PendingValue, _newValue, StringComparison.OrdinalIgnoreCase))
                 {
                     node.PendingValue = _newValue;
+                    _pendingEditStore.Set(node.Model, _newValue);
                     count++;
                 }
             }
             else if (node.IsPendingInlineEdit)
             {
                 node.ClearPending();
+                _pendingEditStore.Clear(node.Model);
                 count++;
             }
         }
@@ -1956,7 +3586,41 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         RefreshFlatList();
     }
 
-    private static int SetPendingOnNodes(MemberNodeViewModel node,
+    /// <summary>
+    /// Stages a pending value on a single resolved leaf VM (#58 review
+    /// must-fix #2). Same semantics as the legacy recursive
+    /// <see cref="SetPendingOnNodes"/> walk's leaf branch — overrides
+    /// existing pending, or clears stale pending when the bulk target
+    /// equals StartValue. Non-leaf VMs are skipped: the bulk operation
+    /// only makes sense on primitive leaves, and the analyzer's
+    /// MatchingMembers can include non-leaf array-of-UDT entries that
+    /// are best ignored here. (The legacy walk's recursion-into-children
+    /// was a no-op anyway: children's paths weren't in the affected set.)
+    /// </summary>
+    private int SetPendingOnSingleVm(MemberNodeViewModel vm, string newValue)
+    {
+        if (!vm.IsLeaf) return 0;
+        var startsEqualsNew = string.Equals(vm.StartValue, newValue, StringComparison.OrdinalIgnoreCase);
+        if (!startsEqualsNew)
+        {
+            if (!string.Equals(vm.PendingValue, newValue, StringComparison.OrdinalIgnoreCase))
+            {
+                vm.PendingValue = newValue;
+                _pendingEditStore.Set(vm.Model, newValue);
+                return 1;
+            }
+            return 0;
+        }
+        if (vm.IsPendingInlineEdit)
+        {
+            vm.ClearPending();
+            _pendingEditStore.Clear(vm.Model);
+            return 1;
+        }
+        return 0;
+    }
+
+    private int SetPendingOnNodes(MemberNodeViewModel node,
         HashSet<string> affectedPaths, string newValue)
     {
         int count = 0;
@@ -1970,6 +3634,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
                 if (!string.Equals(node.PendingValue, newValue, StringComparison.OrdinalIgnoreCase))
                 {
                     node.PendingValue = newValue;
+                    _pendingEditStore.Set(node.Model, newValue);
                     count++;
                 }
             }
@@ -1978,6 +3643,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
                 // Bulk targets the original value and there's a stale pending on this
                 // node — clear it so the node reverts to StartValue.
                 node.ClearPending();
+                _pendingEditStore.Clear(node.Model);
                 count++;
             }
         }
@@ -2036,8 +3702,22 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     /// </summary>
     private void ExecuteApply()
     {
+        // Multi-DB Apply (#58): when more than one DB is active, iterate
+        // every active DB, write each one's pending edits into its own xml,
+        // charge the total against the daily quota once, and call each DB's
+        // OnApply inside the same dialog tick. Host wires all OnApply
+        // invocations into a single ExclusiveAccess block so multi-DB Apply
+        // is one TIA undo step (matches issue #58 decision).
+        if (_activeDbs.Count > 1)
+        {
+            ExecuteApplyMultiDb();
+            return;
+        }
+
         _lastApplySucceeded = false;
-        var pendingEdits = CollectPendingInlineEdits(RootMembers);
+        // Store-based: single-DB mode has exactly one active DB, so GetAll()
+        // yields its pending entries without needing a per-DB filter.
+        var pendingEdits = _pendingEditStore.GetAll().ToList();
 
         if (pendingEdits.Count == 0 && !_hasPendingChanges)
             return;
@@ -2078,11 +3758,11 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             foreach (var (member, value) in pendingEdits)
             {
                 var writeResult = _writer.ModifyStartValues(
-                    _currentXml, new[] { member }, value);
+                    _active.Xml, new[] { member }, value);
 
                 if (writeResult.IsSuccess)
                 {
-                    _currentXml = writeResult.ModifiedXml;
+                    _active.Xml = writeResult.ModifiedXml;
                     totalChanged++;
                     Log.Information("Applied: {Path} → {Value}", member.Path, value);
                 }
@@ -2094,9 +3774,9 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             }
 
             // Apply comment previews
-            _currentXml = ApplyCommentPreviews(_currentXml);
+            _active.Xml = ApplyCommentPreviews(_active.Xml);
 
-            StatusText = Res.Format("Status_Changed", totalChanged, _dataBlockInfo.Name);
+            StatusText = Res.Format("Status_Changed", totalChanged, _active.Info.Name);
             _lastApplySucceeded = true;
 
             Log.Information("ExecuteApply: {Changed} values written to XML, importing to TIA...", totalChanged);
@@ -2124,17 +3804,22 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             if (totalChanged > 0 && !_usageTracker.RecordUsage(totalChanged))
             {
                 var remaining = _usageTracker.GetStatus().RemainingToday;
-                if (remaining > 0)
-                    _usageTracker.RecordUsage(remaining);
+                if (remaining > 0 && !_usageTracker.RecordUsage(remaining))
+                {
+                    Log.Warning(
+                        "ExecuteApply: second RecordUsage({Remaining}) also failed — " +
+                        "counter may have diverged from quota state",
+                        remaining);
+                }
                 StatusText = Res.Format("Status_AppliedOverCap",
-                    totalChanged, _dataBlockInfo.Name);
+                    totalChanged, _active.Info.Name);
                 Log.Warning(
                     "ExecuteApply: quota race — wrote {N} past cap; counter pinned to limit",
                     totalChanged);
             }
 
             // Re-export from TIA to get the canonical XML after import
-            RefreshTree(_currentXml);
+            RefreshTree(_active.Xml);
 
             // RefreshTree rebuilds RootMembers (all PendingValue=null), but computed
             // properties only refresh their bindings when PropertyChanged is raised.
@@ -2157,6 +3842,217 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
+    /// Multi-DB Apply (#58). Walks each top-level synthetic root in
+    /// <see cref="RootMembers"/>, resolves its owning <see cref="ActiveDb"/>
+    /// by name, collects pending edits from that subtree, writes them into
+    /// that DB's XML, and finally calls every DB's OnApply in one pass.
+    /// Quota is charged once on the sum across all DBs — a single
+    /// freemium counter increment (#58 decision: no separate multi-DB cap).
+    /// </summary>
+    private void ExecuteApplyMultiDb()
+    {
+        _lastApplySucceeded = false;
+
+        // Pair every synthetic root with its ActiveDb so each pending edit
+        // is routed to the correct XML buffer + OnApply callback. Multi-PLC
+        // safe (#58 review must-fix #4): _dbToSynthetic is keyed by
+        // ActiveDb reference, never by name — two PLCs hosting DBs with
+        // identical names map to two distinct synthetic roots.
+        var perDb = new List<(ActiveDb db, List<(MemberNode Member, string Value)> edits)>();
+        int totalChanges = 0;
+        // Order by AllActiveDbs so Phase-2 commits the focused DB first
+        // (matches the legacy ExecuteApply ordering).
+        foreach (var db in AllActiveDbs)
+        {
+            // Store-based: unambiguous in multi-PLC sessions; correct even if
+            // the tree hasn't rebuilt after a recent active-set transition.
+            var edits = _pendingEditStore.GetForDb(db, _modelToDb).ToList();
+            if (edits.Count == 0) continue;
+            totalChanges += edits.Count;
+            perDb.Add((db, edits));
+        }
+
+        if (totalChanges == 0 && !_hasPendingChanges) return;
+
+        // Pre-check the daily cap against the SUM across all DBs (#58:
+        // unified counter, no per-DB quota).
+        var status = _usageTracker.GetStatus();
+        if (totalChanges > status.RemainingToday)
+        {
+            StatusText = Res.Format("Status_WouldExceedLimit",
+                totalChanges, status.RemainingToday);
+            UpdateUsageStatus();
+            return;
+        }
+
+        Log.Information("ExecuteApplyMultiDb: {Total} pending changes across {DbCount} DBs",
+            totalChanges, perDb.Count);
+
+        string? backupPath = null;
+        try
+        {
+            backupPath = _onBackup?.Invoke();
+            Log.Information("Backup created: {BackupPath}", backupPath);
+        }
+        catch (Exception backupEx)
+        {
+            Log.Warning(backupEx, "Backup failed, continuing without backup");
+        }
+
+        try
+        {
+            int totalChanged = 0;
+
+            // Phase 1: write every DB's modified XML in memory. We don't
+            // hand any of them to the host yet — if a write fails partway
+            // through, no TIA mutation has happened so the abort is clean.
+            foreach (var (db, edits) in perDb)
+            {
+                foreach (var (member, value) in edits)
+                {
+                    var writeResult = _writer.ModifyStartValues(
+                        db.Xml, new[] { member }, value);
+                    if (writeResult.IsSuccess)
+                    {
+                        db.Xml = writeResult.ModifiedXml;
+                        totalChanged++;
+                    }
+                    else
+                    {
+                        Log.Warning("Failed for {Db}/{Path}: {Errors}",
+                            db.Info.Name, member.Path,
+                            string.Join("; ", writeResult.Errors));
+                    }
+                }
+            }
+
+            _lastApplySucceeded = true;
+            HasPendingChanges = true;
+
+            // Phase 2: hand each DB's modified XML to its host callback.
+            // The host wires these into a single ExclusiveAccess block per
+            // #58 (decision: one undo step across the whole multi-DB
+            // Apply). User-cancel inside any callback aborts the rest.
+            //
+            // Partial-commit accounting: if DB#1 succeeds and DB#2 cancels,
+            // DB#1's xml is already in TIA — we cannot roll it back from
+            // here. The honest path is to charge quota for the writes that
+            // DID succeed, surface a partial-commit status, and clear
+            // pending values on committed DBs (so they don't show up as
+            // pending forever). The cancelled DB's pending values stay in
+            // its tree so the user can retry it after compiling / fixing.
+            int committedChanges = 0;
+            int committedDbs = 0;
+            string? cancelledOnDb = null;
+            foreach (var (db, edits) in perDb)
+            {
+                try
+                {
+                    db.OnApply?.Invoke(db.Xml);
+                    committedChanges += edits.Count;
+                    committedDbs++;
+                }
+                catch (OperationCanceledException)
+                {
+                    cancelledOnDb = db.Info.Name;
+                    break;
+                }
+            }
+
+            if (cancelledOnDb != null)
+            {
+                // Charge the partial committed sum so the user can't
+                // accidentally double-spend on the next click. Counter
+                // race handling mirrors the all-success path.
+                if (committedChanges > 0 && !_usageTracker.RecordUsage(committedChanges))
+                {
+                    var remaining = _usageTracker.GetStatus().RemainingToday;
+                    if (remaining > 0 && !_usageTracker.RecordUsage(remaining))
+                    {
+                        Log.Warning(
+                            "ExecuteApplyMultiDb partial-commit: second RecordUsage({Remaining}) " +
+                            "also failed — counter may have diverged from quota state",
+                            remaining);
+                    }
+                }
+
+                // Surface what actually happened. Without this, UI just
+                // shows the empty status text and the user sees pending
+                // edits stuck on the cancelled DB with no explanation.
+                StatusText = Res.Format("Status_Changed",
+                    committedChanges,
+                    $"{committedDbs}/{perDb.Count} DB(s); '{cancelledOnDb}' cancelled");
+                Log.Warning(
+                    "ExecuteApplyMultiDb partial commit: {Committed}/{Total} DBs applied, cancelled on {Cancelled}",
+                    committedDbs, perDb.Count, cancelledOnDb);
+
+                // Clear pending state on the DBs that DID commit so they
+                // don't keep showing as pending after the partial-Apply.
+                for (int i = 0; i < committedDbs; i++)
+                {
+                    var (db, _) = perDb[i];
+                    ClearPendingValuesForDb(db);
+                }
+                _lastApplySucceeded = false;
+                HasPendingChanges = false;
+                UpdateUsageStatus();
+                return;
+            }
+
+            HasPendingChanges = false;
+
+            // Phase 3: charge the unified daily counter once for the sum
+            // (#58 decision: no separate multi-DB counter). Race handling
+            // mirrors the single-DB path.
+            if (totalChanged > 0 && !_usageTracker.RecordUsage(totalChanged))
+            {
+                var remaining = _usageTracker.GetStatus().RemainingToday;
+                if (remaining > 0 && !_usageTracker.RecordUsage(remaining))
+                {
+                    Log.Warning(
+                        "ExecuteApplyMultiDb full-commit: second RecordUsage({Remaining}) " +
+                        "also failed — counter may have diverged from quota state",
+                        remaining);
+                }
+                Log.Warning(
+                    "ExecuteApplyMultiDb: quota race — wrote {N} past cap; counter pinned to limit",
+                    totalChanged);
+            }
+
+            StatusText = Res.Format("Status_Changed", totalChanged,
+                $"{perDb.Count} DBs");
+
+            // Phase 4: re-parse each DB from its post-import XML and rebuild
+            // the synthetic-rooted tree so subsequent edits target the
+            // canonical structure. The simplest correct approach is to
+            // RefreshTree using the anchor DB's xml — every other active
+            // DB gets re-parsed inside RefreshTree's
+            // BuildRootMembersFromActiveDbs.
+            for (int i = 0; i < perDb.Count; i++)
+            {
+                var (db, _) = perDb[i];
+                if (ReferenceEquals(db, _active)) continue;
+                var parser = new SimaticMLParser(
+                    _tagTableCache != null
+                        ? new TagTableConstantResolver(_tagTableCache)
+                        : null,
+                    _udtResolver, _commentResolver);
+                db.Info = parser.Parse(db.Xml);
+            }
+            RefreshTree(_active.Xml);
+            RefreshPendingAndPreview();
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "Multi-DB Apply threw");
+            HandleErrorWithRollback(ex, backupPath);
+        }
+
+        UpdateUsageStatus();
+    }
+
+
+    /// <summary>
     /// F-031: Bulk-update all comments in the current scope using the configured
     /// comment generation rules.
     /// </summary>
@@ -2170,25 +4066,54 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         {
             EnsureTagTableCache();
             var templateGen = new TemplateCommentGenerator(config, _tagTableCache);
-            var scopeMembers = _selectedScope.MatchingMembers.ToList();
 
-            var modifiedXml = _currentXml;
-            int affectedCount = 0;
-            // Generate comments per language so {member.comment} resolves to the correct translation
-            foreach (var lang in _projectLanguages)
+            // Multi-DB safe (#58): group scope members by their owning DB
+            // and write each DB's xml separately. A cross-DB scope's
+            // MatchingMembers spans multiple DBs naturally; this routes
+            // each match to its own ActiveDb.Xml. Single-DB sessions
+            // collapse to a one-DB group, behaviour unchanged.
+            var byDb = new Dictionary<ActiveDb, List<MemberNode>>();
+            foreach (var member in _selectedScope.MatchingMembers)
             {
-                var targets = templateGen.GenerateForScope(_dataBlockInfo, scopeMembers, lang, ResolvePendingValue);
-                if (affectedCount == 0) affectedCount = targets.Count;
-                foreach (var (target, comment) in targets)
+                var owningDb = FindActiveDbForModel(member);
+                if (owningDb == null) continue;
+                if (!byDb.TryGetValue(owningDb, out var list))
                 {
-                    modifiedXml = _writer.ModifyComment(modifiedXml, target, comment, lang);
+                    list = new List<MemberNode>();
+                    byDb[owningDb] = list;
                 }
+                list.Add(member);
             }
 
-            _currentXml = modifiedXml;
-            StatusText = Res.Format("Comments_Updated", affectedCount, _dataBlockInfo.Name);
+            int totalAffected = 0;
+            foreach (var kvp in byDb)
+            {
+                var db = kvp.Key;
+                var members = kvp.Value;
+                var modifiedXml = db.Xml;
+                int dbAffected = 0;
+                foreach (var lang in _projectLanguages)
+                {
+                    var targets = templateGen.GenerateForScope(db.Info, members, lang, ResolvePendingValue);
+                    if (dbAffected == 0) dbAffected = targets.Count;
+                    foreach (var (target, comment) in targets)
+                    {
+                        modifiedXml = _writer.ModifyComment(modifiedXml, target, comment, lang);
+                    }
+                }
+                db.Xml = modifiedXml;
+                totalAffected += dbAffected;
+            }
+
+            var label = byDb.Count == 1
+                ? byDb.Keys.First().Info.Name
+                : $"{byDb.Count} DBs";
+            StatusText = Res.Format("Comments_Updated", totalAffected, label);
             HasPendingChanges = true;
-            RefreshTree(modifiedXml);
+            // RefreshTree re-parses every active DB's xml in
+            // BuildRootMembersFromActiveDbs, so the focused DB's xml is the
+            // only argument the helper needs.
+            RefreshTree(_active.Xml);
         }
         catch (Exception ex)
         {
@@ -2270,8 +4195,41 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     private void SubscribeStartValueEdited(MemberNodeViewModel node)
     {
         node.StartValueEdited += OnSingleValueEdited;
+        node.SelectedChanged += OnNodeSelected;
         foreach (var child in node.Children)
             SubscribeStartValueEdited(child);
+    }
+
+    private bool _inSelectionCascade;
+
+    /// <summary>
+    /// Global single-focus invariant (#95): when one node's
+    /// <see cref="MemberNodeViewModel.IsSelected"/> becomes true, every
+    /// other node in <see cref="RootMembers"/> drops its selection — so the
+    /// dialog never sees a leaf selected in DB A *and* a leaf selected in
+    /// DB B at the same time.
+    /// </summary>
+    private void OnNodeSelected(MemberNodeViewModel justSelected)
+    {
+        if (_inSelectionCascade) return;
+        _inSelectionCascade = true;
+        try
+        {
+            foreach (var root in RootMembers)
+            {
+                if (!ReferenceEquals(root, justSelected) && root.IsSelected)
+                    root.IsSelected = false;
+                foreach (var descendant in root.AllDescendants())
+                {
+                    if (!ReferenceEquals(descendant, justSelected) && descendant.IsSelected)
+                        descendant.IsSelected = false;
+                }
+            }
+        }
+        finally
+        {
+            _inSelectionCascade = false;
+        }
     }
 
     /// <summary>
@@ -2281,6 +4239,9 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     /// </summary>
     private void OnSingleValueEdited(MemberNodeViewModel memberVm, string newValue)
     {
+        Log.Information(
+            "[gesture] Inline edit on {Path}: '{Old}' → '{New}' | {State}",
+            memberVm.Path, memberVm.StartValue ?? "", newValue, SnapshotState());
         if (string.IsNullOrEmpty(newValue))
         {
             // Inline revert / cleared field: drop any stale validation error
@@ -2294,6 +4255,9 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             memberVm.InlineErrorMessage = null;
             if (StatusText.StartsWith(memberVm.Name + ":"))
                 StatusText = "";
+            // Evict cleared edit from the store so tree rebuilds don't
+            // re-populate a value the user just reverted.
+            _pendingEditStore.Clear(memberVm.Model);
             RefreshPendingAndPreview();
             return;
         }
@@ -2315,6 +4279,10 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         else if (StatusText.StartsWith(memberVm.Name + ":"))
             StatusText = "";
 
+        // Mirror the staged value to the store so tree rebuilds (active-set
+        // transitions) can seed fresh VMs without losing this edit.
+        _pendingEditStore.Set(memberVm.Model, newValue);
+
         // Pending edits no longer smart-expand ancestors (#10): they surface in the
         // sidebar, which is where the user looks for them. The tree's expansion
         // state stays under the user's control.
@@ -2327,14 +4295,23 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     /// <summary>
     /// Builds a set of member paths excluded by rules with ExcludeFromSetpoints=true.
     /// </summary>
-    private HashSet<string>? BuildExcludeSet(BulkChangeConfig? config)
+    private HashSet<string>? BuildExcludeSet(BulkChangeConfig? config) =>
+        BuildExcludeSetFor(_active.Info, config);
+
+    /// <summary>
+    /// Builds the exclude-from-setpoints path set for a specific DB (#58).
+    /// Multi-DB ApplyAllFilters calls this once per active DB to keep each
+    /// DB's path set distinct — a single shared set would mis-mark same-
+    /// path leaves in other active DBs as excluded.
+    /// </summary>
+    private HashSet<string>? BuildExcludeSetFor(DataBlockInfo info, BulkChangeConfig? config)
     {
         if (config == null) return null;
         var excludeRules = config.Rules.Where(r => r.ExcludeFromSetpoints && !string.IsNullOrEmpty(r.PathPattern)).ToList();
         if (excludeRules.Count == 0) return null;
 
         var excluded = new HashSet<string>();
-        foreach (var member in _dataBlockInfo.AllMembers())
+        foreach (var member in info.AllMembers())
         {
             foreach (var rule in excludeRules)
             {
@@ -2346,32 +4323,6 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             }
         }
         return excluded.Count > 0 ? excluded : null;
-    }
-
-    /// <summary>Collects all nodes with pending inline edits as (MemberNode, newValue) pairs.</summary>
-    private static List<(MemberNode Member, string Value)> CollectPendingInlineEdits(
-        IEnumerable<MemberNodeViewModel> nodes)
-    {
-        var result = new List<(MemberNode, string)>();
-        foreach (var node in nodes)
-        {
-            if (node.PendingValue != null)
-                result.Add((node.Model, node.PendingValue));
-            result.AddRange(CollectPendingInlineEdits(node.Children));
-        }
-        return result;
-    }
-
-    /// <summary>Counts nodes with pending inline edits.</summary>
-    private static int CountPendingInlineEdits(IEnumerable<MemberNodeViewModel> nodes)
-    {
-        int count = 0;
-        foreach (var node in nodes)
-        {
-            if (node.PendingValue != null) count++;
-            count += CountPendingInlineEdits(node.Children);
-        }
-        return count;
     }
 
     /// <summary>Clears all pending inline edits without applying them.</summary>
@@ -2395,13 +4346,16 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     /// </summary>
     public void DiscardPendingSilent()
     {
+        // Clear the store first so SeedVmsFromStore can't revive discarded
+        // edits if a tree rebuild happens before the next user gesture.
+        _pendingEditStore.ClearAll();
         ClearAllPendingInlineEdits(RootMembers);
         RefreshPendingAndPreview();
         StatusText = Res.Get("Status_Ready");
         RefreshFlatList();
     }
 
-    private static void ClearAllPendingInlineEdits(IEnumerable<MemberNodeViewModel> nodes)
+    private void ClearAllPendingInlineEdits(IEnumerable<MemberNodeViewModel> nodes)
     {
         foreach (var node in nodes)
         {
@@ -2434,16 +4388,17 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             ? new TagTableConstantResolver(_tagTableCache)
             : (IConstantResolver?)null;
         var parser = new SimaticMLParser(constantResolver, _udtResolver, _commentResolver);
-        _dataBlockInfo = parser.Parse(modifiedXml);
-        InlineRuleExtractor.ApplyTo(_configLoader.GetConfig(), _dataBlockInfo);
+        _active.Info = parser.Parse(modifiedXml);
+        InlineRuleExtractor.ApplyTo(_configLoader.GetConfig(), _active.Info);
+
+        // Parse produces new MemberNode instances for the active DB — the old
+        // keys in the store are now dead. Clear the store before rebuilding so
+        // SeedVmsFromStore doesn't populate fresh VMs with stale values from
+        // the committed (and now applied) edit set.
+        _pendingEditStore.ClearAll();
 
         RootMembers.Clear();
-        foreach (var member in _dataBlockInfo.Members)
-        {
-            var vm = new MemberNodeViewModel(member, null, _commentLanguagePolicy);
-            SubscribeStartValueEdited(vm);
-            RootMembers.Add(vm);
-        }
+        BuildRootMembersFromActiveDbs();
         RefreshRuleHints();
         RebuildExistingIssues();
 
@@ -2467,7 +4422,22 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
 
                 // Re-populate scopes for the restored selection using the same
                 // ordering as OnMemberSelected so index/position stay stable.
-                var result = _analyzer.Analyze(_dataBlockInfo, restored.Model);
+                // Multi-DB safe (#58 review must-fix #3): without this branch,
+                // RefreshTree post-multi-DB-Apply would always rebuild scopes
+                // from the within-DB analyzer only, dropping the cross-DB
+                // siblings + mega-scope and forcing the user to re-pick after
+                // every Apply.
+                AnalysisResult result;
+                if (HasMultipleActiveDbs)
+                {
+                    var owningDb = FindActiveDbForModel(restored.Model)?.Info ?? _active.Info;
+                    var allInfos = AllActiveDbs.Select(a => a.Info).ToList();
+                    result = _analyzer.AnalyzeMulti(allInfos, owningDb, restored.Model);
+                }
+                else
+                {
+                    result = _analyzer.Analyze(_active.Info, restored.Model);
+                }
                 AvailableScopes.Clear();
                 foreach (var scope in result.Scopes.Reverse())
                     AvailableScopes.Add(scope);
@@ -2625,7 +4595,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             try
             {
                 var info = await _updateCheckService.CheckAsync().ConfigureAwait(false);
-                _dispatcher.BeginInvoke(new Action(() => AvailableUpdate = info));
+                _ = _dispatcher.BeginInvoke(new Action(() => AvailableUpdate = info));
             }
             catch (Exception ex)
             {
@@ -2663,14 +4633,14 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         foreach (var m in addedList)
         {
             if (!m.IsLeaf) continue;
-            if (_manualSelectedPaths.Add(m.Path)) changed = true;
+            if (_manualSelectedPaths.Add(m)) changed = true;
         }
 
         if (!isFilterRehydration)
         {
             foreach (var m in removedList)
             {
-                if (_manualSelectedPaths.Remove(m.Path)) changed = true;
+                if (_manualSelectedPaths.Remove(m)) changed = true;
             }
         }
 
@@ -2746,10 +4716,8 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
 
     private void PinManuallySelectedVisibility()
     {
-        foreach (var path in _manualSelectedPaths)
+        foreach (var node in _manualSelectedPaths)
         {
-            var node = FindNodeByPath(path);
-            if (node == null) continue;
             var p = node.Parent;
             while (p != null)
             {
@@ -2793,10 +4761,9 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     private IReadOnlyCollection<string> GetSelectedDatatypes()
     {
         var types = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var path in _manualSelectedPaths)
+        foreach (var node in _manualSelectedPaths)
         {
-            var node = FindNodeByPath(path);
-            if (node is { IsLeaf: true })
+            if (node.IsLeaf)
                 types.Add(node.Datatype);
         }
         return types;
