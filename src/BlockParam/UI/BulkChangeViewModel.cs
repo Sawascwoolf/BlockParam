@@ -255,8 +255,8 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         // assignment (not via the setter) — RootMembers / StashedDbs
         // collections aren't constructed yet, so the cascade isn't
         // safe to fire here. The constructor's explicit
-        // BuildRootMembersFromActiveDbs / RebuildActiveDbChips calls
-        // below take the place of the cascade for the initial build.
+        // BuildRootMembersFromActiveDbs / RebuildPlcPills calls below
+        // take the place of the cascade for the initial build.
         _state = new ActiveSetState(
             _activeDbs.ToList(),
             new Dictionary<string, StashedDbState>(),
@@ -295,7 +295,6 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         RootMembers = new ObservableCollection<MemberNodeViewModel>();
         BuildRootMembersFromActiveDbs();
         RefreshRuleHints();
-        RebuildActiveDbChips();
         RebuildPlcPills();
 
         AvailableScopes = new ObservableCollection<ScopeLevel>();
@@ -1063,25 +1062,6 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     /// <summary>True when more than one DB is active in this session (#58).</summary>
     public bool HasMultipleActiveDbs => _activeDbs.Count > 1;
 
-    /// <summary>
-    /// Flat list of chips, one per active DB. Useful for tests and any code
-    /// that needs to enumerate every chip without descending into groups.
-    /// Use <see cref="ActiveDbChipGroups"/> for the toolbar UI — it bundles
-    /// chips by PLC so long PLC names render once as a group header instead
-    /// of repeating on every chip.
-    /// </summary>
-    public ObservableCollection<ActiveDbChipViewModel> ActiveDbChips { get; }
-        = new ObservableCollection<ActiveDbChipViewModel>();
-
-    /// <summary>
-    /// Chips bundled per owning PLC. The toolbar binds here so the long PLC
-    /// name appears once as a group header rather than on every chip. In
-    /// single-PLC sessions <see cref="ActiveDbChipGroupViewModel.HasPlcHeader"/>
-    /// is false on the only group, so the row reduces to bare DB chips.
-    /// </summary>
-    public ObservableCollection<ActiveDbChipGroupViewModel> ActiveDbChipGroups { get; }
-        = new ObservableCollection<ActiveDbChipGroupViewModel>();
-
     // ── Pill-row (#pill-refactor) ─────────────────────────────────────────────
 
     /// <summary>
@@ -1338,88 +1318,13 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     // ── End pill-row ──────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Per-PLC collapsed-group memory for the dropdown picker. The popup is
-    /// reinstantiated on every open so Expander.IsExpanded would otherwise
-    /// reset every time. The dialog wires Expander.Loaded /
-    /// Expander.Collapsed back to <see cref="IsPlcGroupExpanded"/> /
-    /// <see cref="SetPlcGroupExpanded"/> so a user's collapse choice
-    /// survives popup close + reopen and chip-set changes.
-    /// </summary>
-    private readonly HashSet<string> _collapsedPlcGroups =
-        new HashSet<string>(StringComparer.Ordinal);
-
-    public bool IsPlcGroupExpanded(string plcName) => !_collapsedPlcGroups.Contains(plcName);
-
-    public void SetPlcGroupExpanded(string plcName, bool expanded)
-    {
-        if (expanded) _collapsedPlcGroups.Remove(plcName);
-        else _collapsedPlcGroups.Add(plcName);
-    }
-
-    private void RebuildActiveDbChips()
-    {
-        ActiveDbChips.Clear();
-        ActiveDbChipGroups.Clear();
-        bool canClose = _activeDbs.Count > 1;
-
-        // Build chips first; group second. Preserve _activeDbs order both
-        // within a group (chips appear in active-set order) and across groups
-        // (the first PLC seen anchors the leftmost group, matching the
-        // anchor's owner). Stable order keeps the layout from jumping when
-        // peer DBs on the same PLC are added/removed.
-        var orderedPlcs = new List<string>();
-        var perPlc = new Dictionary<string, List<ActiveDbChipViewModel>>(
-            StringComparer.Ordinal);
-
-        for (int i = 0; i < _activeDbs.Count; i++)
-        {
-            var db = _activeDbs[i];
-            // Anchor (index 0) reads PLC name from _currentPlcName, peers
-            // carry their own — mirrors the rule used elsewhere (FindActiveDb,
-            // IsSameSummary). Cross-PLC adds via dropdown carry the right
-            // summary.PlcName, so multi-PLC projects produce one group per
-            // distinct owner.
-            var plc = (i == 0 ? _currentPlcName : db.PlcName) ?? "";
-            var chip = new ActiveDbChipViewModel(
-                displayName: db.Info.Name,
-                plcPrefix: "", // group header carries the PLC name now
-                canClose: canClose,
-                onClose: () => RequestRemoveActiveDb(db),
-                onSolo: () => SoloActiveDbByReference(db),
-                number: db.Info.Number);
-            ActiveDbChips.Add(chip);
-
-            if (!perPlc.TryGetValue(plc, out var list))
-            {
-                list = new List<ActiveDbChipViewModel>();
-                perPlc[plc] = list;
-                orderedPlcs.Add(plc);
-            }
-            list.Add(chip);
-        }
-
-        // Show the group header whenever the project itself is multi-PLC,
-        // not just when the active set spans multiple PLCs. The host signals
-        // multi-PLC by setting _currentPlcName non-empty (single-PLC projects
-        // get an empty PLC display name to suppress redundant chrome).
-        // Showing the header even when only one PLC's DBs are currently
-        // active gives the user immediate visibility into which machine they
-        // are on, instead of having to guess until they add a peer.
-        bool showHeader = !string.IsNullOrEmpty(_currentPlcName);
-        foreach (var plc in orderedPlcs)
-        {
-            ActiveDbChipGroups.Add(new ActiveDbChipGroupViewModel(
-                plc, perPlc[plc], showHeader));
-        }
-    }
-
-    /// <summary>
-    /// Chip × handler. Refuses the last-DB removal (matches the dropdown
-    /// last-uncheck rule) and routes everything else through the existing
+    /// Refuses the last-DB removal (matches the pill last-uncheck rule)
+    /// and routes everything else through the existing
     /// <see cref="RemoveActiveDb"/> path so the stash / Apply prompt fires
-    /// for DBs with pending edits.
+    /// for DBs with pending edits. Internal so tests can drive gestures
+    /// without going through chip / pill UI objects.
     /// </summary>
-    private void RequestRemoveActiveDb(ActiveDb db)
+    internal void RequestRemoveActiveDb(ActiveDb db)
     {
         Log.Information(
             "[gesture] Chip × on {Name} | {State}", db.Info.Name, SnapshotState());
@@ -1688,14 +1593,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             target.Info.Name, SnapshotState());
         if (State.Dbs.Count <= 1)
         {
-            // Already the only active DB — there's nothing to solo away. Use
-            // the click as a one-step "open the picker so I can switch" so
-            // single-DB users don't have to reach for the + button.
-            if (_enumerateDataBlocks != null
-                && OpenDataBlocksDropdownCommand.CanExecute(null))
-            {
-                OpenDataBlocksDropdownCommand.Execute(null);
-            }
+            // Already the only active DB — there's nothing to solo away.
             return;
         }
 
@@ -1862,9 +1760,6 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         Log.Information(
             "[cascade] RebuildAfterActiveSetChanged → rebuilding tree | {State}",
             SnapshotState());
-        // Always re-sync the row checkbox states from the authoritative
-        // active set so a refused toggle snaps back visually.
-        RefreshFilteredDataBlockItemsActiveState();
         // BuildRootMembersFromActiveDbs creates fresh MemberNodeViewModel
         // instances on every rebuild, so any selection / scope / manual-
         // selection state held by reference points at orphaned VMs from
@@ -1878,7 +1773,6 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         BuildRootMembersFromActiveDbs();
         ApplyAllFilters();
         RefreshFlatList();
-        RebuildActiveDbChips();
         RebuildPlcPills();
         // PendingEdits / BulkPreview hold MemberNodeViewModel references —
         // BuildRootMembersFromActiveDbs just minted fresh ones, so any

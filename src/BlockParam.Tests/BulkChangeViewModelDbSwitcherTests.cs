@@ -203,9 +203,9 @@ public class BulkChangeViewModelDbSwitcherTests
         var anchorRoot = vm.RootMembers.First(r => r.Name == aInfo.Name);
         anchorRoot.AllDescendants().First(n => n.IsLeaf).EditableStartValue = "111";
 
-        // Chip-× anchor → Keep (stash).
-        vm.ActiveDbChips.First(c => c.DisplayName == aInfo.Name)
-            .CloseCommand.Execute(null);
+        // Remove anchor → Keep (stash).
+        var anchorDbA1 = vm.AllActiveDbs.First(d => d.Info.Name == aInfo.Name);
+        vm.RequestRemoveActiveDb(anchorDbA1);
 
         vm.StashedDbs.Should().HaveCount(1);
         vm.StashedDbs[0].Summary.PlcName.Should().Be("PLC_Line1",
@@ -248,9 +248,9 @@ public class BulkChangeViewModelDbSwitcherTests
         var anchorRoot = vm.RootMembers.First(r => r.Name == aInfo.Name);
         anchorRoot.AllDescendants().First(n => n.IsLeaf).EditableStartValue = "777";
 
-        // Chip-× anchor → Keep (stash).
-        vm.ActiveDbChips.First(c => c.DisplayName == aInfo.Name)
-            .CloseCommand.Execute(null);
+        // Remove anchor → Keep (stash).
+        var anchorDbA2 = vm.AllActiveDbs.First(d => d.Info.Name == aInfo.Name);
+        vm.RequestRemoveActiveDb(anchorDbA2);
 
         vm.StashedDbs.Should().HaveCount(1);
         vm.StashedDbs[0].DbName.Should().Be(aInfo.Name);
@@ -298,9 +298,9 @@ public class BulkChangeViewModelDbSwitcherTests
         var anchorRoot = vm.RootMembers.First(r => r.Name == aInfo.Name);
         anchorRoot.AllDescendants().First(n => n.IsLeaf).EditableStartValue = "111";
 
-        // 2. Chip-× A with Keep → A stashed, B becomes sole active anchor.
-        vm.ActiveDbChips.First(c => c.DisplayName == aInfo.Name)
-            .CloseCommand.Execute(null);
+        // 2. Remove A with Keep → A stashed, B becomes sole active anchor.
+        var anchorDbA3 = vm.AllActiveDbs.First(d => d.Info.Name == aInfo.Name);
+        vm.RequestRemoveActiveDb(anchorDbA3);
         vm.AllActiveDbs.Should().ContainSingle()
             .Which.Info.Name.Should().Be(bInfo.Name);
         vm.StashedDbs.Should().HaveCount(1);
