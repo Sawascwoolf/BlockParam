@@ -299,16 +299,20 @@ internal sealed class PillMultiSelectInternalState : PillViewModelBase
     /// <summary>
     /// What the trigger pill renders for its selection summary. Routes
     /// through <see cref="DisplayFormatter"/> when one is set; otherwise
-    /// falls back to the simple comma-join used by the reference design.
+    /// falls back to a comma-join over the bundled trigger tokens
+    /// (fully-checked groups collapse to one "Engineering"-style token,
+    /// partial groups and ungrouped rows emit their abbreviations).
     /// </summary>
     public string SelectedAbbreviationsText
     {
         get
         {
             var selected = Items.Where(i => i.IsCheckedTrue).ToList();
-            return _displayFormatter != null
-                ? _displayFormatter(selected)
-                : string.Join(", ", selected.Select(i => i.Abbreviation));
+            if (_displayFormatter != null)
+                return _displayFormatter(selected);
+
+            var tokens = PillTriggerTokenBuilder.Build(selected);
+            return string.Join(", ", tokens.Select(t => t.Abbreviation));
         }
     }
 

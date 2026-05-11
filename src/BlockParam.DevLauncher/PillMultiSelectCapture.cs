@@ -159,6 +159,64 @@ internal static class PillMultiSelectCapture
     }
 
     /// <summary>
+    /// Bundled-trigger scenes (closed pill view). Demonstrates how a
+    /// fully-selected group collapses into one "Engineering"-style token
+    /// in the trigger summary instead of listing every member.
+    /// </summary>
+    public static void RunGroupedBundled(string outDir)
+    {
+        var scenes = new List<CaptureScene>
+        {
+            // 11 — one group fully selected (5 Engineering); other groups untouched.
+            // Trigger pill reads "Engineering" instead of 5 abbreviations.
+            BuildClosedGroupedScene(
+                fileName: "11_pill_grouped_bundled_one_group.png",
+                selectedAbbrevs: new[] { "AKO", "CHO", "EKR", "GWE", "IZN" },
+                outDir),
+
+            // 12 — every group fully selected (10/10 → 3 group tokens).
+            // Trigger reads "Engineering, Operations, Quality".
+            BuildClosedGroupedScene(
+                fileName: "12_pill_grouped_bundled_all_groups.png",
+                selectedAbbrevs: new[] { "AKO", "BSC", "CHO", "DLN", "EKR", "FBM", "GWE", "HRT", "IZN", "JFR" },
+                outDir),
+
+            // 13 — mixed: Engineering fully selected + 2 of 3 Operations.
+            // Trigger reads "Engineering, BSC, DLN" — group bundled,
+            // partial-group members listed individually.
+            BuildClosedGroupedScene(
+                fileName: "13_pill_grouped_bundled_mixed.png",
+                selectedAbbrevs: new[] { "AKO", "CHO", "EKR", "GWE", "IZN", "BSC", "DLN" },
+                outDir),
+        };
+
+        RunCaptureScenes(outDir, scenes);
+    }
+
+    private static CaptureScene BuildClosedGroupedScene(
+        string fileName,
+        string[] selectedAbbrevs,
+        string outDir)
+    {
+        return new CaptureScene(
+            Build: () =>
+            {
+                var (window, c) = BuildSceneWindow(grouped: true);
+                ApplySelectionByAbbrevDp(c, DemoEmployees, selectedAbbrevs);
+                SetIsOpen(c, open: false);
+                return window;
+            },
+            Capture: window =>
+            {
+                var outPath = Path.Combine(outDir, fileName);
+                // Closed pill view: a plain window-level RenderTargetBitmap
+                // captures the trigger pill correctly since no popup is open.
+                Program.CaptureWindowToPng(window, outPath, scale: 2.0);
+                Log.Information("Bundled trigger scene saved: {Path}", outPath);
+            });
+    }
+
+    /// <summary>
     /// Grouped-popup scenes: open with mixed-selection tri-state headers,
     /// user-collapsed group, and search-forces-expanded-group. Exercises
     /// the GroupKeyMemberPath / PillGroupViewModel rendering and the

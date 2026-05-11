@@ -77,6 +77,13 @@ class Program
             return;
         }
 
+        // --capture-pill-grouped-bundled <out-dir> Closed-pill bundling: fully-selected groups collapse to one token
+        if (args.Length >= 2 && args[0] == "--capture-pill-grouped-bundled")
+        {
+            PillMultiSelectCapture.RunGroupedBundled(Path.GetFullPath(args[1]));
+            return;
+        }
+
         // --demo-pill                              Interactive multi-PLC pill demo (no auto-close)
         if (args.Length >= 1 && args[0] == "--demo-pill")
         {

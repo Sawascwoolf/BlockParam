@@ -3,8 +3,9 @@
 #   2. Capture employee scenes (01-02) via --capture-pill.
 #   3. Capture multi-PLC DB scenes (03-07) via --capture-pill-db.
 #   4. Capture grouped-popup scenes (08-10) via --capture-pill-grouped.
-#   5. Stitch the 10 PNGs into one labeled composite.
-#   6. Open the composite for review.
+#   5. Capture bundled-trigger scenes (11-13) via --capture-pill-grouped-bundled.
+#   6. Stitch the 13 PNGs into one labeled composite.
+#   7. Open the composite for review.
 #
 # Designed for "I changed the control, show me what it looks like now" loops.
 # Output goes to a temp dir by default so canonical screenshots in
@@ -26,7 +27,7 @@ Set-Location $repoRoot
 $exe = Join-Path $repoRoot 'src/BlockParam.DevLauncher/bin/Debug/net48/BlockParam.DevLauncher.exe'
 
 if (-not $NoBuild) {
-    Write-Host '[1/5] Building BlockParam.DevLauncher (Debug)...' -ForegroundColor Cyan
+    Write-Host '[1/6] Building BlockParam.DevLauncher (Debug)...' -ForegroundColor Cyan
     & dotnet build (Join-Path $repoRoot 'src/BlockParam.DevLauncher') -c Debug -v minimal
     if ($LASTEXITCODE -ne 0) { throw 'Build failed.' }
 }
@@ -49,16 +50,19 @@ function Invoke-DevLauncher([string]$flag, [string]$dir) {
     if ($p.ExitCode -ne 0) { throw "DevLauncher $flag exited with $($p.ExitCode)." }
 }
 
-Write-Host "[2/5] Capturing pill scenes 01-02 -> $OutDir" -ForegroundColor Cyan
+Write-Host "[2/6] Capturing pill scenes 01-02 -> $OutDir" -ForegroundColor Cyan
 Invoke-DevLauncher '--capture-pill' $OutDir
 
-Write-Host "[3/5] Capturing DB scenes 03-07 -> $OutDir" -ForegroundColor Cyan
+Write-Host "[3/6] Capturing DB scenes 03-07 -> $OutDir" -ForegroundColor Cyan
 Invoke-DevLauncher '--capture-pill-db' $OutDir
 
-Write-Host "[4/5] Capturing grouped scenes 08-10 -> $OutDir" -ForegroundColor Cyan
+Write-Host "[4/6] Capturing grouped scenes 08-10 -> $OutDir" -ForegroundColor Cyan
 Invoke-DevLauncher '--capture-pill-grouped' $OutDir
 
-Write-Host '[5/5] Stitching composite...' -ForegroundColor Cyan
+Write-Host "[5/6] Capturing bundled-trigger scenes 11-13 -> $OutDir" -ForegroundColor Cyan
+Invoke-DevLauncher '--capture-pill-grouped-bundled' $OutDir
+
+Write-Host '[6/6] Stitching composite...' -ForegroundColor Cyan
 # Stitch is a pure-PowerShell script; it throws on failure rather than
 # setting $LASTEXITCODE. Don't read $LASTEXITCODE here - it carries over
 # from the last external EXE invocation and would spuriously flag success.

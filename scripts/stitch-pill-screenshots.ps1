@@ -1,14 +1,15 @@
-# Stitches the ten PillMultiSelect capture PNGs into one composite review
-# image using a masonry-style grid: each column stacks independently and the
-# packer places every next scene under whichever column is currently shortest.
-# This eliminates the per-row whitespace a strict left-to-right grid produces
-# when short cells share a row with tall popup screenshots.
+# Stitches the thirteen PillMultiSelect capture PNGs into one composite
+# review image using a masonry-style grid: each column stacks independently
+# and the packer places every next scene under whichever column is currently
+# shortest. This eliminates the per-row whitespace a strict left-to-right
+# grid produces when short cells share a row with tall popup screenshots.
 #
-# Prereq: <InputDir> contains 01_pill_closed.png ... 10_pill_grouped_search.png
+# Prereq: <InputDir> contains 01_pill_closed.png ... 13_pill_grouped_bundled_mixed.png
 # produced by
 #   DevLauncher --capture-pill <dir>
 #   DevLauncher --capture-pill-db <dir>
 #   DevLauncher --capture-pill-grouped <dir>
+#   DevLauncher --capture-pill-grouped-bundled <dir>
 # (See scripts/review-pill-screenshots.ps1 for an end-to-end wrapper.)
 #
 # Usage:
@@ -35,6 +36,9 @@ $labels = [ordered]@{
     '08_pill_grouped_open.png'     = 'Grouped popup: tri-state, checked, unchecked'
     '09_pill_grouped_collapsed.png'= 'Grouped popup: user collapsed Operations'
     '10_pill_grouped_search.png'   = 'Grouped popup: search expands collapsed group'
+    '11_pill_grouped_bundled_one_group.png'  = 'Bundling: 5/5 Engineering selected -> pill shows "Engineering"'
+    '12_pill_grouped_bundled_all_groups.png' = 'Bundling: all 10 selected -> pill shows three group names'
+    '13_pill_grouped_bundled_mixed.png'      = 'Bundling: full group + partial group -> "Engineering, BSC, DLN"'
 }
 
 $padX = 20

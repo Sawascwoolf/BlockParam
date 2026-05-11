@@ -408,6 +408,148 @@ public class PillGrouping_CollectionView_Tests
 // Tri-state row + SelectedItems contract
 // ─────────────────────────────────────────────────────────────────────────────
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Trigger token bundling: fully-selected groups collapse into one token
+// ─────────────────────────────────────────────────────────────────────────────
+
+public class PillTriggerTokenBundling_Tests
+{
+    [Fact]
+    public void No_grouping_emits_one_token_per_selected_row()
+    {
+        var fx = new GroupingFixture();
+        fx.Add(new TeamMember("Alice", "Eng"));
+        fx.Add(new TeamMember("Bob", "Eng"));
+        // Grouping NOT configured.
+
+        fx.State.Items[0].IsSelected = true;
+        fx.State.Items[1].IsSelected = true;
+
+        var summary = fx.State.SelectedAbbreviationsText;
+        // Without grouping, OwningGroup is null and bundling is a no-op.
+        summary.Should().Be("Alice, Bob");
+    }
+
+    [Fact]
+    public void Fully_selected_single_group_collapses_into_one_token()
+    {
+        var fx = new GroupingFixture();
+        fx.Add(new TeamMember("Alice", "Eng"));
+        fx.Add(new TeamMember("Bob", "Eng"));
+        fx.Add(new TeamMember("Carol", "Sales"));
+        fx.ItemSource.GroupKeyMemberPath = nameof(TeamMember.Department);
+
+        // Select all Engineering, leave Sales alone.
+        foreach (var row in fx.State.Items)
+            if (row.GroupKey?.ToString() == "Eng") row.IsSelected = true;
+
+        fx.State.SelectedAbbreviationsText.Should().Be("Eng");
+    }
+
+    [Fact]
+    public void Two_fully_selected_groups_emit_two_group_tokens()
+    {
+        var fx = new GroupingFixture();
+        fx.Add(new TeamMember("Alice", "Eng"));
+        fx.Add(new TeamMember("Bob", "Sales"));
+        fx.ItemSource.GroupKeyMemberPath = nameof(TeamMember.Department);
+
+        foreach (var row in fx.State.Items) row.IsSelected = true;
+
+        fx.State.SelectedAbbreviationsText.Should().Be("Eng, Sales");
+    }
+
+    [Fact]
+    public void Partial_group_emits_individual_row_tokens()
+    {
+        var fx = new GroupingFixture();
+        fx.Add(new TeamMember("Alice", "Eng"));
+        fx.Add(new TeamMember("Bob", "Eng"));
+        fx.Add(new TeamMember("Carol", "Eng"));
+        fx.ItemSource.GroupKeyMemberPath = nameof(TeamMember.Department);
+
+        fx.State.Items[0].IsSelected = true;
+        fx.State.Items[2].IsSelected = true;
+
+        // 2 of 3 selected → group is partial, no bundling.
+        fx.State.SelectedAbbreviationsText.Should().Be("Alice, Carol");
+    }
+
+    [Fact]
+    public void Mixed_full_and_partial_emits_group_then_individuals()
+    {
+        var fx = new GroupingFixture();
+        fx.Add(new TeamMember("Alice", "Eng"));
+        fx.Add(new TeamMember("Bob", "Eng"));
+        fx.Add(new TeamMember("Carol", "Sales"));
+        fx.Add(new TeamMember("Dave", "Sales"));
+        fx.Add(new TeamMember("Eve", "Sales"));
+        fx.ItemSource.GroupKeyMemberPath = nameof(TeamMember.Department);
+
+        // Engineering fully selected; Sales partial (Carol + Dave only).
+        fx.State.Items[0].IsSelected = true;
+        fx.State.Items[1].IsSelected = true;
+        fx.State.Items[2].IsSelected = true;
+        fx.State.Items[3].IsSelected = true;
+
+        fx.State.SelectedAbbreviationsText.Should().Be("Eng, Carol, Dave");
+    }
+
+    [Fact]
+    public void Group_token_appears_at_position_of_first_selected_member()
+    {
+        var fx = new GroupingFixture();
+        // Source order interleaves the two groups.
+        fx.Add(new TeamMember("Alice", "Eng"));    // Eng
+        fx.Add(new TeamMember("Bob", "Sales"));    // Sales
+        fx.Add(new TeamMember("Carol", "Eng"));    // Eng
+        fx.Add(new TeamMember("Dave", "Sales"));   // Sales
+        fx.ItemSource.GroupKeyMemberPath = nameof(TeamMember.Department);
+
+        foreach (var row in fx.State.Items) row.IsSelected = true;
+
+        // Both groups fully checked; group token appears at the FIRST selected
+        // member's slot. Source order: Alice(Eng), Bob(Sales), Carol(Eng), Dave(Sales)
+        // → tokens: Eng (at Alice), Sales (at Bob); subsequent Eng/Sales members absorbed.
+        fx.State.SelectedAbbreviationsText.Should().Be("Eng, Sales");
+    }
+
+    [Fact]
+    public void Indeterminate_group_does_not_bundle()
+    {
+        var fx = new GroupingFixture();
+        fx.Add(new TeamMember("Alice", "Eng"));
+        fx.Add(new TeamMember("Bob", "Eng"));
+        fx.ItemSource.GroupKeyMemberPath = nameof(TeamMember.Department);
+
+        // Mark one as indeterminate, the other true. Group aggregate is
+        // null (any-null rule), so it should NOT bundle.
+        fx.State.Items[0].IsSelected = null;
+        fx.State.Items[1].IsSelected = true;
+
+        // Only Bob is fully checked; bundling skips Eng (group.IsSelected != true);
+        // Alice is null so not included in the summary at all.
+        fx.State.SelectedAbbreviationsText.Should().Be("Bob");
+    }
+
+    [Fact]
+    public void Builder_emits_group_count_for_tooltip_use()
+    {
+        var fx = new GroupingFixture();
+        fx.Add(new TeamMember("Alice", "Eng"));
+        fx.Add(new TeamMember("Bob", "Eng"));
+        fx.Add(new TeamMember("Carol", "Eng"));
+        fx.ItemSource.GroupKeyMemberPath = nameof(TeamMember.Department);
+        foreach (var row in fx.State.Items) row.IsSelected = true;
+
+        var selected = fx.State.Items.Where(r => r.IsCheckedTrue).ToList();
+        var tokens = PillTriggerTokenBuilder.Build(selected);
+
+        tokens.Should().ContainSingle()
+            .Which.GroupMemberCount.Should().Be(3);
+    }
+}
+
 public class PillRow_TriState_Tests
 {
     [Fact]
