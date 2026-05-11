@@ -915,22 +915,19 @@ public partial class BulkChangeDialog : Window
             stashedDbList = string.Join(", ", vm.StashedDbs.Select(s => s.DbName));
         }
 
-        if (active > 0)
+        if (active > 0 && stashedCount > 0)
         {
-            var message = stashedCount > 0
-                ? Res.Format("Dialog_UnsavedChanges_Prompt_WithStash",
-                    active, stashedCount, stashedDbList)
-                : Res.Format("Dialog_UnsavedChanges_Prompt", active);
+            // Both active-DB edits and stashed-DB edits exist.
+            // Use a custom dialog with named buttons so the user is not misled
+            // by generic Yes/No/Cancel labels (#audit-message-boxes).
+            var closeResult = vm.MessageBoxService.AskCloseWithStash(
+                Res.Format("Dialog_UnsavedChanges_Prompt_WithStash",
+                    active, stashedCount, stashedDbList),
+                Res.Get("Dialog_UnsavedChanges_Title"));
 
-            var result = MessageBox.Show(
-                message,
-                Res.Get("Dialog_UnsavedChanges_Title"),
-                MessageBoxButton.YesNoCancel,
-                MessageBoxImage.Warning);
-
-            switch (result)
+            switch (closeResult)
             {
-                case MessageBoxResult.Yes:
+                case CloseWithStashResult.ApplyActive:
                     // Apply commits the active DB only. Stashed edits in other
                     // DBs still get discarded on close — the prompt text spells
                     // that out so the user picks knowingly. Apply-everything-
@@ -946,10 +943,37 @@ public partial class BulkChangeDialog : Window
                         return;
                     }
                     break;
-                case MessageBoxResult.No:
+                case CloseWithStashResult.DiscardAll:
                     // Discard pending edits. Use the silent variant — the user
-                    // already confirmed via the Yes/No/Cancel dialog above, a
-                    // second "are you sure?" is noise.
+                    // already confirmed via the named button above, a second
+                    // "are you sure?" is noise.
+                    vm.DiscardPendingSilent();
+                    break;
+                case CloseWithStashResult.Cancel:
+                    e.Cancel = true;
+                    return;
+            }
+        }
+        else if (active > 0)
+        {
+            // Active edits only, no stash — keep the existing two-button prompt.
+            var result = MessageBox.Show(
+                Res.Format("Dialog_UnsavedChanges_Prompt", active),
+                Res.Get("Dialog_UnsavedChanges_Title"),
+                MessageBoxButton.YesNoCancel,
+                MessageBoxImage.Warning);
+
+            switch (result)
+            {
+                case MessageBoxResult.Yes:
+                    vm.ApplyCommand.Execute(null);
+                    if (vm.PendingInlineEditCount > 0)
+                    {
+                        e.Cancel = true;
+                        return;
+                    }
+                    break;
+                case MessageBoxResult.No:
                     vm.DiscardPendingSilent();
                     break;
                 case MessageBoxResult.Cancel:

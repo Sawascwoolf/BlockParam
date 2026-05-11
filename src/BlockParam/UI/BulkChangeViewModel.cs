@@ -71,6 +71,9 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     private readonly SimaticMLWriter _writer = new();
     private readonly MemberSearchService _searchService = new();
     private readonly IMessageBoxService _messageBox;
+    // Exposed internally so the dialog code-behind can forward the 3-way
+    // close-confirm without duplicating the WpfMessageBoxService instantiation.
+    internal IMessageBoxService MessageBoxService => _messageBox;
     private readonly Action? _onRefreshTagTables;
     private readonly string? _tagTableDir;
     private readonly Action? _onRefreshUdtTypes;
@@ -1508,20 +1511,20 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         // current has only one DB == target).
         if (current.Dbs.Count >= 2)
         {
-            var decision = _messageBox.AskYesNoCancel(
+            var decision = _messageBox.AskAddOrReplace(
                 Res.Format("Reactivate_AdditiveOrReplace_Text", summary.Name),
                 Res.Get("Reactivate_AdditiveOrReplace_Title"));
-            if (decision == YesNoCancelResult.Cancel)
+            if (decision == AddOrReplaceResult.Cancel)
             {
                 Log.Information("Reactivate cancelled by user for {Name}", summary.Name);
                 return;
             }
-            if (decision == YesNoCancelResult.Yes)
+            if (decision == AddOrReplaceResult.Add)
             {
                 ReactivateStashedDbAdditive(stash);
                 return;
             }
-            // No falls through to the Replace path below.
+            // Replace falls through to the Replace path below.
         }
 
         if (target == null)
@@ -1738,9 +1741,9 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     /// <summary>
     /// User's choice in response to the "this DB has pending edits" prompt
     /// raised when removing a DB from the active set (#78). Centralised so
-    /// every remove path maps the underlying <see cref="YesNoCancelResult"/>
-    /// the same way: Yes→Apply, No→Stash, Cancel→Cancel. <c>NoEdits</c> is
-    /// the no-prompt fast path.
+    /// every remove path maps the <see cref="ApplyStashCancelResult"/>
+    /// the same way: ApplyAndSwitch→Apply, StashAndSwitch→Stash, Cancel→Cancel.
+    /// <c>NoEdits</c> is the no-prompt fast path.
     /// </summary>
     private enum PendingDecision { NoEdits, Apply, Stash, Cancel }
 
@@ -1764,7 +1767,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         Log.Information(
             "[prompt] Showing 3-way for {Name} (pending={Pending}) | {State}",
             db.Info.Name, pendingCount, SnapshotState());
-        var result = _messageBox.AskYesNoCancel(
+        var result = _messageBox.AskApplyStashCancel(
             Res.Format("Dialog_SwitchDb_KeepConfirm_Text",
                 pendingCount, db.Info.Name),
             Res.Get("Dialog_SwitchDb_KeepConfirm_Title"));
@@ -1772,8 +1775,8 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             "[prompt] User picked {Result} for {Name}", result, db.Info.Name);
         return result switch
         {
-            YesNoCancelResult.Yes => PendingDecision.Apply,
-            YesNoCancelResult.No => PendingDecision.Stash,
+            ApplyStashCancelResult.ApplyAndSwitch => PendingDecision.Apply,
+            ApplyStashCancelResult.StashAndSwitch => PendingDecision.Stash,
             _ => PendingDecision.Cancel,
         };
     }

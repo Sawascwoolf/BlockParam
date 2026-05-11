@@ -1,0 +1,35 @@
+<Window x:Class="BlockParam.UI.ThreeButtonDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Width="420" SizeToContent="Height"
+        ResizeMode="NoResize"
+        WindowStartupLocation="CenterOwner"
+        FontFamily="Segoe UI" FontSize="12">
+
+    <Grid Margin="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- Body text -->
+        <TextBlock Grid.Row="0" x:Name="MessageText"
+                   TextWrapping="Wrap" Margin="0,0,0,16"
+                   VerticalAlignment="Top"/>
+
+        <!-- Right-aligned button row -->
+        <StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Right">
+            <Button x:Name="PrimaryButton"
+                    Height="28" MinWidth="90" Padding="12,4" Margin="0,0,8,0"
+                    IsDefault="True"
+                    Click="OnPrimaryClick"/>
+            <Button x:Name="SecondaryButton"
+                    Height="28" MinWidth="90" Padding="12,4" Margin="0,0,8,0"
+                    Click="OnSecondaryClick"/>
+            <Button x:Name="CancelButton"
+                    Height="28" MinWidth="70" Padding="12,4"
+                    IsCancel="True"
+                    Click="OnCancelClick"/>
+        </StackPanel>
+    </Grid>
+</Window>

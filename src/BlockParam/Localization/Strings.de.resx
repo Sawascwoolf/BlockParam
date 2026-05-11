@@ -339,18 +339,14 @@ Datenbaustein jetzt kompilieren?</value></data>
 
 Fortfahren?</value><comment>{0} = Anzahl ausstehender Änderungen, {1} = Ziel-DB-Name</comment></data>
   <data name="Dialog_SwitchDb_KeepConfirm_Title" xml:space="preserve"><value>Vorgemerkte Änderungen vor dem Wechsel anwenden?</value></data>
-  <data name="Dialog_SwitchDb_KeepConfirm_Text" xml:space="preserve"><value>Sie haben {0} vorgemerkte Änderung(en) an '{1}'.
-
-Ja — In TIA Portal anwenden, dann wechseln.
-Nein — Zwischenspeichern und wechseln.
-Abbrechen — Bei '{1}' bleiben.</value><comment>{0} = Anzahl ausstehender Änderungen, {1} = aktueller DB-Name, {2} = Ziel-DB-Name (ungenutzt)</comment></data>
+  <data name="Dialog_SwitchDb_KeepConfirm_Text" xml:space="preserve"><value>Sie haben {0} vorgemerkte Änderung(en) an '{1}'.</value><comment>{0} = Anzahl ausstehender Änderungen, {1} = aktueller DB-Name</comment></data>
+  <data name="Dialog_SwitchDb_KeepConfirm_ApplyButton" xml:space="preserve"><value>Anwenden &amp; wechseln</value></data>
+  <data name="Dialog_SwitchDb_KeepConfirm_StashButton" xml:space="preserve"><value>Merken &amp; wechseln</value></data>
   <data name="Status_DbSwitch_ApplyBlocked" xml:space="preserve"><value>Vorgemerkte Änderungen können nicht angewendet werden — ungültige Einträge korrigieren oder auf das Zurücksetzen des Tageslimits warten.</value></data>
   <data name="Reactivate_AdditiveOrReplace_Title" xml:space="preserve"><value>Hinzufügen oder ersetzen?</value></data>
-  <data name="Reactivate_AdditiveOrReplace_Text" xml:space="preserve"><value>'{0}' zusätzlich zu den aktuellen DBs einblenden oder ersetzen?
-
-Ja — '{0}' zur aktuellen Sitzung hinzufügen.
-Nein — Aktuelle DBs durch '{0}' ersetzen.
-Abbrechen — Bei den aktuellen DBs bleiben.</value><comment>{0} = Name des wieder aktivierten DB</comment></data>
+  <data name="Reactivate_AdditiveOrReplace_Text" xml:space="preserve"><value>'{0}' zusätzlich zu den aktuellen DBs einblenden oder ersetzen?</value><comment>{0} = Name des wieder aktivierten DB</comment></data>
+  <data name="Reactivate_AdditiveOrReplace_AddButton" xml:space="preserve"><value>Hinzufügen</value></data>
+  <data name="Reactivate_AdditiveOrReplace_ReplaceButton" xml:space="preserve"><value>Ersetzen</value></data>
   <data name="Status_DbSwitched_StashRestored" xml:space="preserve"><value>Zu {0} gewechselt — {1} zwischengespeicherte Änderung(en) wiederhergestellt.</value><comment>{0} = DB-Name, {1} = Anzahl wiederhergestellt</comment></data>
   <data name="Status_DbSwitched_StashPartial" xml:space="preserve"><value>Zu {0} gewechselt — {1} zwischengespeicherte Änderung(en) wiederhergestellt; {2} passen nicht mehr zur aktuellen DB-Struktur.</value><comment>{0} = DB-Name, {1} = Anzahl wiederhergestellt, {2} = Anzahl verworfen</comment></data>
   <data name="Inspector_StashedDb_Header" xml:space="preserve"><value>AUSSTEHEND IN {0}</value><comment>{0} = zwischengespeicherter DB-Name (großgeschrieben, passend zu anderen Abschnittsüberschriften)</comment></data>
@@ -364,9 +360,9 @@ Abbrechen — Bei den aktuellen DBs bleiben.</value><comment>{0} = Name des wied
   <!-- Schließen-Prompt mit zwischengespeicherten Änderungen in anderen DBs (#59) -->
   <data name="Dialog_UnsavedChanges_Prompt_WithStash" xml:space="preserve"><value>Sie haben {0} ausstehende Änderung(en) am aktuellen DB und {1} zwischengespeicherte Änderung(en) in anderen DB(s): {2}.
 
-Ja — Aktuellen DB jetzt anwenden (zwischengespeicherte Änderungen in anderen DBs werden beim Schließen dennoch verworfen).
-Nein — Alles verwerfen und schließen.
-Abbrechen — Im Dialog bleiben.</value><comment>{0} = ausstehende Anzahl, {1} = zwischengespeicherte Anzahl, {2} = kommagetrennte DB-Namen</comment></data>
+Das Anwenden schreibt nur den aktuellen DB zurück — zwischengespeicherte Änderungen in anderen DBs werden beim Schließen dennoch verworfen.</value><comment>{0} = ausstehende Anzahl, {1} = zwischengespeicherte Anzahl, {2} = kommagetrennte DB-Namen</comment></data>
+  <data name="Dialog_UnsavedChanges_ApplyActiveButton" xml:space="preserve"><value>Aktiven anwenden (Zwischenspeicher verwerfen)</value></data>
+  <data name="Dialog_UnsavedChanges_DiscardAllButton" xml:space="preserve"><value>Alles verwerfen</value></data>
   <data name="Dialog_UnsavedChanges_StashOnly" xml:space="preserve"><value>Sie haben {0} zwischengespeicherte Änderung(en) in anderen DB(s): {1}.
 
 Beim Schließen des Dialogs werden sie verworfen. Trotzdem schließen?</value><comment>{0} = zwischengespeicherte Anzahl, {1} = kommagetrennte DB-Namen</comment></data>
