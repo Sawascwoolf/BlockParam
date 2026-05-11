@@ -2890,26 +2890,36 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
-    /// DB-scoped variant of <see cref="FindNodeByPath"/>. In multi-DB
-    /// shape, member Paths repeat across DBs (the stash holds the bare
+    /// DB-scoped variant of <see cref="FindNodeByPath"/>. Callers pass this
+    /// when member Paths can repeat across DBs (the stash holds the bare
     /// member path, not "DbName.MemberPath") — without scoping, a
     /// reactivate-additive would replay edits onto whichever DB happened
-    /// to be checked first. Scopes the recursion to <paramref name="owner"/>'s
-    /// synthetic subtree; falls back to the full tree in single-DB shape
-    /// where the question is moot.
+    /// to be checked first.
+    ///
+    /// Strict: callers must only invoke this when the active set is in
+    /// multi-DB shape (i.e. after the State cascade has populated
+    /// <see cref="_dbToSynthetic"/> for <paramref name="owner"/>). If the
+    /// synthetic root isn't found, returns null + warns — a future
+    /// ordering bug surfaces as "stashed edit dropped" in the log instead
+    /// of silently aliasing onto another DB.
     /// </summary>
     private MemberNodeViewModel? FindNodeByPathInDb(string path, ActiveDb owner)
     {
-        if (_dbToSynthetic.TryGetValue(owner, out var synthetic))
+        if (!_dbToSynthetic.TryGetValue(owner, out var synthetic))
         {
-            foreach (var child in synthetic.Children)
-            {
-                var found = FindNodeByPathRecursive(child, path);
-                if (found != null) return found;
-            }
+            Log.Warning(
+                "FindNodeByPathInDb({Path}) called for {Db} but no synthetic " +
+                "root is registered — active set may not be in multi-DB shape " +
+                "yet; returning null to avoid cross-DB path aliasing",
+                path, owner.Info.Name);
             return null;
         }
-        return FindNodeByPath(path);
+        foreach (var child in synthetic.Children)
+        {
+            var found = FindNodeByPathRecursive(child, path);
+            if (found != null) return found;
+        }
+        return null;
     }
 
     private static MemberNodeViewModel? FindNodeByPathRecursive(MemberNodeViewModel node, string path)
@@ -3794,8 +3804,13 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             if (totalChanged > 0 && !_usageTracker.RecordUsage(totalChanged))
             {
                 var remaining = _usageTracker.GetStatus().RemainingToday;
-                if (remaining > 0)
-                    _usageTracker.RecordUsage(remaining);
+                if (remaining > 0 && !_usageTracker.RecordUsage(remaining))
+                {
+                    Log.Warning(
+                        "ExecuteApply: second RecordUsage({Remaining}) also failed — " +
+                        "counter may have diverged from quota state",
+                        remaining);
+                }
                 StatusText = Res.Format("Status_AppliedOverCap",
                     totalChanged, _active.Info.Name);
                 Log.Warning(
@@ -3952,7 +3967,13 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
                 if (committedChanges > 0 && !_usageTracker.RecordUsage(committedChanges))
                 {
                     var remaining = _usageTracker.GetStatus().RemainingToday;
-                    if (remaining > 0) _usageTracker.RecordUsage(remaining);
+                    if (remaining > 0 && !_usageTracker.RecordUsage(remaining))
+                    {
+                        Log.Warning(
+                            "ExecuteApplyMultiDb partial-commit: second RecordUsage({Remaining}) " +
+                            "also failed — counter may have diverged from quota state",
+                            remaining);
+                    }
                 }
 
                 // Surface what actually happened. Without this, UI just
@@ -3986,7 +4007,13 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             if (totalChanged > 0 && !_usageTracker.RecordUsage(totalChanged))
             {
                 var remaining = _usageTracker.GetStatus().RemainingToday;
-                if (remaining > 0) _usageTracker.RecordUsage(remaining);
+                if (remaining > 0 && !_usageTracker.RecordUsage(remaining))
+                {
+                    Log.Warning(
+                        "ExecuteApplyMultiDb full-commit: second RecordUsage({Remaining}) " +
+                        "also failed — counter may have diverged from quota state",
+                        remaining);
+                }
                 Log.Warning(
                     "ExecuteApplyMultiDb: quota race — wrote {N} past cap; counter pinned to limit",
                     totalChanged);
@@ -4568,7 +4595,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             try
             {
                 var info = await _updateCheckService.CheckAsync().ConfigureAwait(false);
-                _dispatcher.BeginInvoke(new Action(() => AvailableUpdate = info));
+                _ = _dispatcher.BeginInvoke(new Action(() => AvailableUpdate = info));
             }
             catch (Exception ex)
             {

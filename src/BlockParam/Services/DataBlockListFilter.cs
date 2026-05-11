@@ -27,7 +27,7 @@ public static class DataBlockListFilter
     {
         if (string.IsNullOrWhiteSpace(query)) return blocks;
 
-        var trimmed = query.Trim();
+        var trimmed = query!.Trim();
         return blocks.Where(b => Matches(b, trimmed)).ToList();
     }
 
