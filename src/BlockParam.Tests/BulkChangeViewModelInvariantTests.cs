@@ -203,47 +203,114 @@ public class BulkChangeViewModelInvariantTests
     }
 
     [Fact]
-    public void Reactivate_StashHeader_OneOtherActiveNoEdits_SoloesAndRestores()
+    public void Reactivate_StashHeader_PromptAdditive_KeepsOtherActive()
     {
-        // Row 8 (simplified to one other for fixture economy): a stashed DB
-        // exists and one unrelated DB is active with no edits. Clicking the
-        // stash header re-adds the stashed DB, soloes (silently drops the
-        // other since no edits → no prompt), and restores the stash's edits
-        // onto the new live tree. The stash entry pops.
+        // Bug spec for #92 — Reactivate must prompt additive vs replace when
+        // there's another active DB. Today: ReactivateStashedDb calls
+        // ComposeRemoveOthers unconditionally, no top-level prompt fires,
+        // every other active DB is silently dropped (or pending-edit-
+        // prompted on remove). The user has no way to ask "add the stashed
+        // DB to the current session" — every reactivate is destructive.
         //
-        // We bootstrap the stash by closing a peer's chip with edits
-        // pending and the message-box returning Stash (No), then asserting
-        // the stash exists, *then* exercising the reactivate gesture.
+        // Resolution: when AllActiveDbs.Count >= 2, clicking the stash
+        // header fires a Yes/No/Cancel prompt (Yes=Additive, No=Replace,
+        // Cancel=abort). This row pins the Additive branch.
+        //
+        // Setup: 3 DBs total — anchor + ArrayDB peer (no edits) + peer
+        // NestedStructDB (with edits). Close NestedStructDB → stash (1st
+        // prompt). Reactivate it; [FlatDB, ArrayDB] active at that moment
+        // so the new prompt fires (2nd prompt). User picks Yes (Additive).
+        // End state: all three active, NestedStructDB's edit restored.
         var env = new ActiveSetTestBuilder()
             .WithAnchor("flat-db.xml")
             .WithPeer("nested-struct-db.xml")
+            .WithPeer("array-db.xml")
             .WithPendingEditsOn("NestedStructDB", count: 1)
-            // First prompt = stash on close; second prompt would fire if the
-            // anchor had edits during reactivate (it doesn't, so unused).
-            .WithPromptResults(YesNoCancelResult.No)
+            .WithPromptResults(
+                YesNoCancelResult.No,   // 1st: stash NestedStructDB on close
+                YesNoCancelResult.Yes)  // 2nd: additive on reactivate
             .Build();
 
         var pendingLeaf = FindFirstPendingLeaf(env.Vm, "NestedStructDB");
         var pendingValue = pendingLeaf.PendingValue!;
 
-        // Close the peer to create the stash.
+        // Bootstrap: close NestedStructDB to create the stash entry.
         env.Vm.ActiveDbChips.First(c => c.DisplayName == "NestedStructDB")
             .CloseCommand.Execute(null);
         env.Vm.HasStashedDbs.Should().BeTrue("setup: stash created via chip-close");
+        env.Vm.AllActiveDbs.Should().HaveCount(2,
+            "setup: FlatDB + ArrayDB active before reactivate, ≥2 → prompt fires");
 
-        // Reactivate via the stash header.
+        // Click the stash header. The new additive/replace prompt must fire
+        // (count >= 2). User picks Yes = additive.
+        var promptsBefore = env.Mbx.AskYesNoCancelCallCount;
         var stash = env.Vm.StashedDbs.Single();
         env.Vm.SwitchToStashedDbCommand.Execute(stash);
 
-        env.Vm.AllActiveDbs.Should().HaveCount(1, "solo collapses to just the reactivated DB");
-        env.Vm.AllActiveDbs[0].Info.Name.Should().Be("NestedStructDB");
-        env.Vm.HasStashedDbs.Should().BeFalse("RestoreStashFor pops the entry");
+        (env.Mbx.AskYesNoCancelCallCount - promptsBefore).Should().Be(1,
+            "reactivate with ≥2 active DBs must fire the additive/replace prompt");
+        env.Vm.AllActiveDbs.Should().HaveCount(3,
+            "Yes = Additive: the previously-active DBs stay, stashed DB added back");
+        env.Vm.AllActiveDbs.Select(d => d.Info.Name)
+            .Should().BeEquivalentTo(new[] { "FlatDB", "ArrayDB", "NestedStructDB" });
+        env.Vm.HasStashedDbs.Should().BeFalse(
+            "NestedStructDB's stash entry pops on restore");
 
-        // The stashed pending value made it back onto a live leaf.
+        // Stash edits replay onto the live tree.
         var restored = env.Vm.RootMembers
             .SelectMany(r => new[] { r }.Concat(r.AllDescendants()))
             .FirstOrDefault(n => n.IsLeaf && n.PendingValue == pendingValue);
-        restored.Should().NotBeNull("stash edits must replay onto the rebuilt tree");
+        restored.Should().NotBeNull("stashed edit must land on the rebuilt tree");
+        AssertInvariants(env.Vm);
+    }
+
+    [Fact]
+    public void Reactivate_StashHeader_PromptReplace_DropsOthers()
+    {
+        // Bug spec for #92 — Replace branch (companion to the Additive row
+        // above). Same setup, scripted second prompt = No (Replace). The
+        // reactivate must then walk the other active DBs through the usual
+        // pending-edit prompt (none have edits here → silent removal) and
+        // leave only the stashed DB.
+        //
+        // Today this happens to produce the same end state as the current
+        // (buggy) implementation, but for the wrong reason — no top-level
+        // prompt fires today, the others are dropped unconditionally. The
+        // failure mode here is the prompt-count assertion: today only 1
+        // prompt fires (the initial stash on close), not 2.
+        var env = new ActiveSetTestBuilder()
+            .WithAnchor("flat-db.xml")
+            .WithPeer("nested-struct-db.xml")
+            .WithPeer("array-db.xml")
+            .WithPendingEditsOn("NestedStructDB", count: 1)
+            .WithPromptResults(
+                YesNoCancelResult.No,   // 1st: stash NestedStructDB on close
+                YesNoCancelResult.No)   // 2nd: replace on reactivate
+            .Build();
+
+        var pendingLeaf = FindFirstPendingLeaf(env.Vm, "NestedStructDB");
+        var pendingValue = pendingLeaf.PendingValue!;
+
+        env.Vm.ActiveDbChips.First(c => c.DisplayName == "NestedStructDB")
+            .CloseCommand.Execute(null);
+        env.Vm.HasStashedDbs.Should().BeTrue("setup: stash created");
+
+        var promptsBefore = env.Mbx.AskYesNoCancelCallCount;
+        var stash = env.Vm.StashedDbs.Single();
+        env.Vm.SwitchToStashedDbCommand.Execute(stash);
+
+        (env.Mbx.AskYesNoCancelCallCount - promptsBefore).Should().Be(1,
+            "reactivate with ≥2 active DBs must fire the additive/replace prompt " +
+            "before any per-DB pending-edit prompts");
+        env.Vm.AllActiveDbs.Should().HaveCount(1,
+            "No = Replace: others dropped (silently here, no edits)");
+        env.Vm.AllActiveDbs[0].Info.Name.Should().Be("NestedStructDB");
+        env.Vm.HasStashedDbs.Should().BeFalse();
+
+        var restored = env.Vm.RootMembers
+            .SelectMany(r => new[] { r }.Concat(r.AllDescendants()))
+            .FirstOrDefault(n => n.IsLeaf && n.PendingValue == pendingValue);
+        restored.Should().NotBeNull("stashed edit lands on the single-DB tree");
         AssertInvariants(env.Vm);
     }
 
@@ -301,37 +368,51 @@ public class BulkChangeViewModelInvariantTests
     }
 
     [Fact]
-    public void DropdownRow_ToggleToAdd_AnchorHasEdits_PromptCancel_LeavesActiveSetUnchanged()
+    public void Add_DropdownCheck_AnchorHasEdits_NoPromptFires_PendingEditSurvives()
     {
-        // Row 11 — captures observed bug on PR #74 §B repro:
-        // Single-DB session (anchor A with pending edits). User opens the
-        // switcher dropdown and toggles peer B's IsActive=true. A 3-way
-        // prompt fires for A's pending edits. User picks Cancel.
+        // Bug spec for #93 — Dropdown-add must NOT fire the pending-edit
+        // prompt. Today AddActiveDbWithPendingEditPrompt loops over every
+        // currently-active DB and runs the 3-way Apply/Stash/Cancel prompt
+        // to "rescue" pending edits before the tree rebuild orphans them.
         //
-        // Expected: active set stays [A]; B is NOT added; tree shape and
-        // anchor's pending edit are byte-identical to the pre-toggle state.
-        // Reported behaviour: active set ends up [A, B] — the dropdown
-        // toggle mutates _activeDbs before the prompt resolves and Cancel
-        // doesn't roll the mutation back.
+        // That loop was a workaround for the orphaning class of bug — fixed
+        // properly in 9814a6e by PendingEditStore, which seeds pending
+        // values onto fresh VMs after a rebuild. With the store in place,
+        // the prompt is unnecessary: a pure-add never needs to consult the
+        // user. Resolution: remove the foreach loop.
+        //
+        // Setup deliberately omits WithPromptResults(...): if any prompt
+        // fires today, RecordingFakeMessageBox throws "no scripted
+        // response" — that throw IS the red signal that the prompt loop is
+        // still in place.
         var env = new ActiveSetTestBuilder()
             .WithAnchor("flat-db.xml")
             .WithDropdownPeer("nested-struct-db.xml")
             .WithPendingEditsOn("FlatDB", count: 1)
-            .WithPromptResults(YesNoCancelResult.Cancel)
             .Build();
 
-        var anchorLeaf = FindFirstPendingLeaf(env.Vm, "FlatDB");
-        var pendingValue = anchorLeaf.PendingValue;
+        var anchorLeafBefore = FindFirstPendingLeaf(env.Vm, "FlatDB");
+        var pendingValue = anchorLeafBefore.PendingValue;
 
         env.Vm.OpenDataBlocksDropdownCommand.Execute(null);
         var peerRow = env.Vm.FilteredDataBlockItems.First(i => i.Name == "NestedStructDB");
         peerRow.IsActive = true;
 
-        env.Vm.AllActiveDbs.Should().HaveCount(1, "Cancel must leave the active set untouched");
-        env.Vm.AllActiveDbs[0].Info.Name.Should().Be("FlatDB");
-        env.Vm.HasStashedDbs.Should().BeFalse("Cancel does not stash");
-        anchorLeaf.PendingValue.Should().Be(pendingValue, "anchor edit survives Cancel");
-        anchorLeaf.IsPendingInlineEdit.Should().BeTrue();
+        env.Mbx.AskYesNoCancelCallCount.Should().Be(0,
+            "pure-add no longer consults the user — PendingEditStore preserves " +
+            "the anchor's edit across the multi-DB rebuild");
+        env.Vm.AllActiveDbs.Should().HaveCount(2,
+            "peer added without prompt; anchor stays");
+        env.Vm.AllActiveDbs.Select(d => d.Info.Name)
+            .Should().BeEquivalentTo(new[] { "FlatDB", "NestedStructDB" });
+
+        // The anchor's pending edit survives the tree rebuild (the VM is
+        // a fresh instance now that the tree was rebuilt into multi-DB
+        // shape — find it again by walking the new tree).
+        var anchorLeafAfter = FindFirstPendingLeaf(env.Vm, "FlatDB");
+        anchorLeafAfter.PendingValue.Should().Be(pendingValue,
+            "PendingEditStore re-seeds the anchor's pending value onto the rebuilt VM");
+        env.Vm.PendingInlineEditCount.Should().Be(1);
         AssertInvariants(env.Vm);
     }
 
@@ -595,6 +676,121 @@ public class BulkChangeViewModelInvariantTests
             "store must not clear the pending edit on a cancelled remove gesture");
         env.Vm.PendingInlineEditCount.Should().Be(1,
             "pending count unchanged after cancel");
+        AssertInvariants(env.Vm);
+    }
+
+    [Fact]
+    public void Selection_PlainClickInDbA_ClearsPriorSelectionInDbB()
+    {
+        // Bug spec for #95 — Cross-DB focus row exclusivity. Today
+        // MemberNodeViewModel.IsSelected is a plain property with no
+        // cross-tree clearing logic, so when the user clicks a leaf in
+        // DB A while a leaf in DB B is already selected, both end up
+        // IsSelected=true. The dialog then computes scope/preview from
+        // an ambiguous selection.
+        //
+        // Resolution: single global focus row. Setting IsSelected=true on
+        // any leaf must clear the prior IsSelected=true leaf anywhere in
+        // RootMembers, including in other DBs' synthetic subtrees.
+        //
+        // Note: the WPF TreeView may carry its own per-tree selection
+        // state — this row pins the VM contract regardless. If WPF holds
+        // extra state, that's a separate (downstream) fix.
+        var env = new ActiveSetTestBuilder()
+            .WithAnchor("flat-db.xml")
+            .WithPeer("nested-struct-db.xml")
+            .Build();
+
+        env.Vm.RootMembers.Should().HaveCount(2,
+            "setup: multi-DB tree with one synthetic root per DB");
+
+        var dbARoot = env.Vm.RootMembers.First(r => r.Name == "FlatDB");
+        var dbBRoot = env.Vm.RootMembers.First(r => r.Name == "NestedStructDB");
+        var dbALeaf = new[] { dbARoot }.Concat(dbARoot.AllDescendants())
+            .First(n => n.IsLeaf);
+        var dbBLeaf = new[] { dbBRoot }.Concat(dbBRoot.AllDescendants())
+            .First(n => n.IsLeaf);
+
+        // Select a leaf in DB B first.
+        dbBLeaf.IsSelected = true;
+        // Then select a leaf in DB A — DB B's selection must clear.
+        dbALeaf.IsSelected = true;
+
+        var allLeaves = env.Vm.RootMembers
+            .SelectMany(r => new[] { r }.Concat(r.AllDescendants()))
+            .Where(n => n.IsLeaf)
+            .ToList();
+        allLeaves.Count(n => n.IsSelected).Should().Be(1,
+            "only the most recently clicked leaf may carry IsSelected=true");
+        dbALeaf.IsSelected.Should().BeTrue("most recent click stays selected");
+        dbBLeaf.IsSelected.Should().BeFalse(
+            "prior selection in another DB's subtree must clear when a new leaf is selected");
+        AssertInvariants(env.Vm);
+    }
+
+    [Fact]
+    public void Title_MultiDb_DoesNotContainAnySingleDbName()
+    {
+        // Bug spec for #91 — In multi-DB sessions the dialog title still
+        // renders one specific DB's name ("BlockParam v1.2.3: PLC_A /
+        // FlatDB"), which surfaces an "anchor" privilege the rest of the
+        // UI no longer has (#78 peer-DB model). The chip strip is the
+        // single source of truth for which DBs are in the session.
+        //
+        // Resolution: multi-DB sessions render a chip-only header (e.g.
+        // version + PLC chips) with no single-DB name. Single-DB sessions
+        // keep the current title shape.
+        //
+        // Today: BuildTitle(version, plcName, dbName) is called with
+        // _activeDbs[0].Info.Name even when count > 1 → the anchor name
+        // bleeds through.
+        var env = new ActiveSetTestBuilder()
+            .WithAnchor("flat-db.xml", plc: "PLC_A")
+            .WithPeer("nested-struct-db.xml", plc: "PLC_A")
+            .Build();
+
+        env.Vm.AllActiveDbs.Should().HaveCount(2, "setup: multi-DB session");
+        env.Vm.Title.Should().NotContain("FlatDB",
+            "multi-DB title must not surface the anchor DB's name");
+        env.Vm.Title.Should().NotContain("NestedStructDB",
+            "multi-DB title must not surface any single DB's name");
+        AssertInvariants(env.Vm);
+    }
+
+    [Fact]
+    public void Solo_ChipBody_TitleRefreshesOnCascade()
+    {
+        // Bug spec for #91 (sibling row) — solo via chip-body click must
+        // refresh Title to reflect the post-solo single-DB shape. Today
+        // SoloActiveDbByReference assigns State but never updates Title:
+        // Title is only rewritten inside RemoveActiveDb's wasAnchor branch.
+        // Soloing from [A, B, C] to B leaves Title still showing A.
+        //
+        // Resolution: every cascade that lands the dialog in single-DB
+        // shape must refresh Title (or the multi-DB chip-only header
+        // collapses back to a DB-named title).
+        var env = new ActiveSetTestBuilder()
+            .WithAnchor("flat-db.xml")
+            .WithPeer("nested-struct-db.xml")
+            .WithPeer("array-db.xml")
+            .Build();
+
+        var titleBefore = env.Vm.Title;
+        titleBefore.Should().NotContain("NestedStructDB",
+            "setup: 3-DB title doesn't already include the soloed name");
+
+        // Solo to NestedStructDB via chip-body click (SoloCommand routes
+        // through SoloActiveDbByReference).
+        var targetChip = env.Vm.ActiveDbChips.First(c => c.DisplayName == "NestedStructDB");
+        targetChip.SoloCommand.Execute(null);
+
+        env.Vm.AllActiveDbs.Should().HaveCount(1, "solo collapses to one DB");
+        env.Vm.AllActiveDbs[0].Info.Name.Should().Be("NestedStructDB");
+        env.Vm.Title.Should().Contain("NestedStructDB",
+            "single-DB shape after solo must surface the new lone DB's name " +
+            "(or, post-fix, the chip-only header must consistently re-render)");
+        env.Vm.Title.Should().NotContain("FlatDB",
+            "previous anchor's name must NOT linger after solo");
         AssertInvariants(env.Vm);
     }
 

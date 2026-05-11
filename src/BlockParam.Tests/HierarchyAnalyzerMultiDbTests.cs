@@ -165,6 +165,53 @@ public class HierarchyAnalyzerMultiDbTests
     }
 
     [Fact]
+    public void AnalyzeMulti_2dArraySymmetricInteriorLeaf_BothRowFixAndColFixSurvive()
+    {
+        // Bug spec for #90 — Two orthogonal 2D dim slices that happen to
+        // contain the same number of cells must not collapse to one option.
+        //
+        // SquareMatrix is Array[0..2, 0..2] of Int (added to array-db.xml
+        // for this case; rectangular Matrix[0..1, 0..2] has unique counts
+        // per slice and doesn't trigger the bug). Selecting cell [1,2]:
+        //   row-fix SquareMatrix[1,*] → 3 elements ([1,0], [1,1], [1,2])
+        //   col-fix SquareMatrix[*,2] → 3 elements ([0,2], [1,2], [2,2])
+        // Both MatchCount == 3 but target ORTHOGONAL node sets — only the
+        // selected cell [1,2] is in both.
+        //
+        // Today: DeduplicateByMatchCount keys on MatchCount alone and keeps
+        // the first scope per count → one slice is silently dropped, the
+        // user only sees row-fix OR col-fix in the scope picker.
+        // Resolution: dedupe key = (MatchCount, sorted member-path set).
+        var db1 = _parser.Parse(TestFixtures.LoadXml("array-db.xml"));
+        var db2 = _parser.Parse(TestFixtures.LoadXml("array-db.xml"));
+        var square = db1.Members.First(m => m.Name == "SquareMatrix");
+        var cell12 = square.Children.First(c => c.Name == "[1,2]");
+
+        var result = _analyzer.AnalyzeMulti(new[] { db1, db2 }, db1, cell12);
+
+        var rowFix = result.Scopes.FirstOrDefault(s => s.AncestorPath == "SquareMatrix[1,*]");
+        var colFix = result.Scopes.FirstOrDefault(s => s.AncestorPath == "SquareMatrix[*,2]");
+
+        rowFix.Should().NotBeNull(
+            "row-fix slice SquareMatrix[1,*] must survive dedupe — it covers " +
+            "cells [1,0], [1,1], [1,2] which col-fix does not");
+        colFix.Should().NotBeNull(
+            "col-fix slice SquareMatrix[*,2] must survive dedupe — it covers " +
+            "cells [0,2], [1,2], [2,2] which row-fix does not");
+        rowFix!.MatchCount.Should().Be(3);
+        colFix!.MatchCount.Should().Be(3);
+
+        var rowPaths = rowFix.MatchingMembers.Select(m => m.Path).ToHashSet();
+        var colPaths = colFix.MatchingMembers.Select(m => m.Path).ToHashSet();
+        rowPaths.Should().NotBeEquivalentTo(colPaths,
+            "orthogonal slices target different cell sets — collapsing them " +
+            "loses real bulk-edit options");
+        rowPaths.Intersect(colPaths).Should().ContainSingle()
+            .Which.Should().Be("SquareMatrix[1,2]",
+                "the slices intersect only at the selected cell");
+    }
+
+    [Fact]
     public void AnalyzeMulti_PerAncestorCrossDbScope_EmittedAndDeduped()
     {
         // Real-world structure the analyzer used to miss:

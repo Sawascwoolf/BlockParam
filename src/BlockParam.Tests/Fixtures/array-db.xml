@@ -29,6 +29,17 @@
               <Subelement Path="1,1"><StartValue>22</StartValue></Subelement>
               <Subelement Path="1,2"><StartValue>23</StartValue></Subelement>
             </Member>
+            <Member Name="SquareMatrix" Datatype="Array[0..2, 0..2] of Int" Accessibility="Public">
+              <Subelement Path="0,0"><StartValue>11</StartValue></Subelement>
+              <Subelement Path="0,1"><StartValue>12</StartValue></Subelement>
+              <Subelement Path="0,2"><StartValue>13</StartValue></Subelement>
+              <Subelement Path="1,0"><StartValue>21</StartValue></Subelement>
+              <Subelement Path="1,1"><StartValue>22</StartValue></Subelement>
+              <Subelement Path="1,2"><StartValue>23</StartValue></Subelement>
+              <Subelement Path="2,0"><StartValue>31</StartValue></Subelement>
+              <Subelement Path="2,1"><StartValue>32</StartValue></Subelement>
+              <Subelement Path="2,2"><StartValue>33</StartValue></Subelement>
+            </Member>
           </Section>
         </Sections>
       </Interface>
