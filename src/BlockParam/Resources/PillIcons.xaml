@@ -1,0 +1,13 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!--
+        Material database / cylinder icon (24x24). Used as the leading glyph
+        on every per-PLC pill in the DB-picker pill row.
+
+        Path sourced from PillMultiSelectCapture.DatabaseIconPath (DevLauncher).
+        Defined once here; merged wherever BulkChangeDialog resources are loaded.
+    -->
+    <Geometry x:Key="DatabaseIconGeometry">M12 3C7.58 3 4 4.79 4 7v10c0 2.21 3.59 4 8 4s8-1.79 8-4V7c0-2.21-3.58-4-8-4zm0 2c3.87 0 6 1.5 6 2s-2.13 2-6 2-6-1.5-6-2 2.13-2 6-2zm0 14c-3.87 0-6-1.5-6-2v-2.4c1.43.86 3.6 1.4 6 1.4s4.57-.54 6-1.4V17c0 .5-2.13 2-6 2zm0-5c-3.87 0-6-1.5-6-2V9.6c1.43.86 3.6 1.4 6 1.4s4.57-.54 6-1.4V12c0 .5-2.13 2-6 2z</Geometry>
+
+</ResourceDictionary>

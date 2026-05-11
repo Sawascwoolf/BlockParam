@@ -39,6 +39,20 @@ public class DataBlockListItem : ViewModelBase
     public string NumberLabel => Summary.Number is int n ? $"DB{n}" : "";
     public bool HasNumber => Summary.Number.HasValue;
 
+    // ── PillMultiSelect binding properties ────────────────────────────────────
+    // DisplayMemberPath="Display" and AbbreviationMemberPath="Abbreviation" on
+    // the PillMultiSelect control resolve to these. They mirror what
+    // PillMultiSelectCapture.DemoDb uses (Name → Display, "DB{Number}" → Abbreviation).
+
+    /// <summary>Display name shown in the pill popup list. Equals <see cref="Name"/>.</summary>
+    public string Display => Summary.Name;
+
+    /// <summary>
+    /// Short abbreviation shown next to each row and in the trigger pill summary.
+    /// Formatted as "DB{Number}" when a number is available; empty otherwise.
+    /// </summary>
+    public string Abbreviation => Summary.Number is int n ? $"DB{n}" : "";
+
     /// <summary>
     /// True when this DB is part of the dialog's current active set.
     /// Two-way bound to the row's checkbox.

@@ -3,6 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:local="clr-namespace:BlockParam.UI"
         xmlns:loc="clr-namespace:BlockParam.Localization"
+        xmlns:controls="clr-namespace:BlockParam.UI.Controls.PillMultiSelect"
         Title="{Binding Title}"
                 Width="1100" Height="700"
         MinWidth="800" MinHeight="500"
@@ -12,10 +13,14 @@
         FontFamily="Segoe UI" FontSize="12">
 
     <Window.Resources>
-        <local:BoolToVisibilityConverter x:Key="BoolToVis"/>
-        <local:NullToVisibilityConverter x:Key="NullToVis"/>
-        <local:StringNotEmptyToVisibilityConverter x:Key="StringToVis"/>
-        <local:InvertBoolConverter x:Key="InvertBool"/>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="/BlockParam;component/Resources/PillIcons.xaml"/>
+            </ResourceDictionary.MergedDictionaries>
+            <local:BoolToVisibilityConverter x:Key="BoolToVis"/>
+            <local:NullToVisibilityConverter x:Key="NullToVis"/>
+            <local:StringNotEmptyToVisibilityConverter x:Key="StringToVis"/>
+            <local:InvertBoolConverter x:Key="InvertBool"/>
 
         <!-- Suggestion row style: hover-preview paints the entry as if the
              mouse were over it. Set by capture scripts so a still frame
@@ -95,6 +100,7 @@
                 </Setter.Value>
             </Setter>
         </Style>
+        </ResourceDictionary>
     </Window.Resources>
 
     <Grid>
@@ -429,6 +435,60 @@
                             </DockPanel>
                         </Border>
                     </Popup>
+                </DockPanel>
+
+                <!-- Pill-row DB picker (#pill-refactor): replaces the chip row +
+                     DbSwitcherButton/Popup. One PillMultiSelect per PLC that has
+                     at least one active DB, plus a trailing "+ Add DB" button for
+                     picking a DB from a PLC that isn't in the active set yet.
+                     Visible on the same condition as the legacy chip row. -->
+                <DockPanel DockPanel.Dock="Top" Margin="0,0,0,6"
+                           Visibility="{Binding HasDataBlockSwitcher, Converter={StaticResource BoolToVis}}">
+                    <StackPanel Orientation="Horizontal">
+                        <ItemsControl ItemsSource="{Binding PlcPills}">
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                    <WrapPanel Orientation="Horizontal"/>
+                                </ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <controls:PillMultiSelect
+                                        ItemsSource="{Binding AvailableDbs}"
+                                        SelectedItems="{Binding SelectedDbs, Mode=TwoWay}"
+                                        IsOpen="{Binding IsOpen, Mode=TwoWay}"
+                                        Label="{Binding Label}"
+                                        DisplayMemberPath="Display"
+                                        AbbreviationMemberPath="Abbreviation"
+                                        Icon="{StaticResource DatabaseIconGeometry}"
+                                        TooltipMode="FullNames"
+                                        Margin="0,0,8,0"/>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                        <!-- "+ Add DB": opens a project-wide pill so the user can add a DB
+                             from a PLC that has no active DB yet. The pill groups by PlcName. -->
+                        <Button x:Name="AddDbButton"
+                                Content="{loc:Loc PillRow_AddDb}"
+                                Click="OnAddDbButtonClick"
+                                Background="White" BorderBrush="#CCC" BorderThickness="1"
+                                Padding="6,2" VerticalAlignment="Center" Cursor="Hand"/>
+                        <Popup IsOpen="{Binding IsAddDbPopupOpen, Mode=TwoWay}"
+                               PlacementTarget="{Binding ElementName=AddDbButton}"
+                               Placement="Bottom"
+                               StaysOpen="False"
+                               AllowsTransparency="True"
+                               PopupAnimation="Fade">
+                            <controls:PillMultiSelect
+                                ItemsSource="{Binding AllProjectDbs}"
+                                SelectedItems="{Binding AddDbPopupSelection, Mode=TwoWay}"
+                                GroupKeyMemberPath="PlcName"
+                                DisplayMemberPath="Display"
+                                AbbreviationMemberPath="Abbreviation"
+                                Icon="{StaticResource DatabaseIconGeometry}"
+                                IsOpen="True"/>
+                        </Popup>
+                    </StackPanel>
                 </DockPanel>
 
                 <!-- Toolbar -->

@@ -892,6 +892,20 @@ public partial class BulkChangeDialog : Window
         menu.Items.Add(collapseItem);
     }
 
+    // ---- "+ Add DB" trailing button (#pill-refactor) -----------------------
+
+    /// <summary>
+    /// Toggles the "+ Add DB" popup. Flips <c>IsAddDbPopupOpen</c> on the VM;
+    /// the VM's lazy-load logic populates <c>AllProjectDbs</c> on first open.
+    /// </summary>
+    private void OnAddDbButtonClick(object sender, RoutedEventArgs e)
+    {
+        if (DataContext is not BulkChangeViewModel vm) return;
+        vm.IsAddDbPopupOpen = !vm.IsAddDbPopupOpen;
+        if (vm.IsAddDbPopupOpen)
+            vm.EnsureAllProjectDbsLoaded();
+    }
+
     private void OnClose(object sender, RoutedEventArgs e)
     {
         Close();

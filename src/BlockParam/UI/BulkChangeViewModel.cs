@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Collections.Specialized;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
@@ -295,6 +296,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         BuildRootMembersFromActiveDbs();
         RefreshRuleHints();
         RebuildActiveDbChips();
+        RebuildPlcPills();
 
         AvailableScopes = new ObservableCollection<ScopeLevel>();
 
@@ -1080,6 +1082,261 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     public ObservableCollection<ActiveDbChipGroupViewModel> ActiveDbChipGroups { get; }
         = new ObservableCollection<ActiveDbChipGroupViewModel>();
 
+    // ── Pill-row (#pill-refactor) ─────────────────────────────────────────────
+
+    /// <summary>
+    /// One pill per PLC that has at least one active DB. Replaces the old
+    /// chip row + DbSwitcherButton / DbSwitcherPopup in the dialog toolbar.
+    /// Rebuilt by <see cref="RebuildPlcPills"/> whenever the active set changes.
+    /// </summary>
+    public ObservableCollection<PlcPillViewModel> PlcPills { get; }
+        = new ObservableCollection<PlcPillViewModel>();
+
+    // Re-entrancy guard: when the cascade rewrites SelectedDbs on each pill,
+    // the pill fires SelectionChanged → OnPillSelectionChanged. Without the
+    // guard we'd enter AddActiveDbToSet / RemoveActiveDb for every item in
+    // the selection sync, spiraling into multiple cascades.
+    private bool _syncingPillSelection;
+
+    // "Add DB" trailing affordance: project-wide pill to pick a DB from a PLC
+    // that has no active DB yet.
+    private bool _isAddDbPopupOpen;
+
+    public bool IsAddDbPopupOpen
+    {
+        get => _isAddDbPopupOpen;
+        set => SetProperty(ref _isAddDbPopupOpen, value);
+    }
+
+    // Lazy-loaded once on first "+ Add DB" open. Contains ALL project DBs,
+    // grouped by PlcName inside the pill via GroupKeyMemberPath="PlcName".
+    private ObservableCollection<DataBlockListItem>? _allProjectDbs;
+
+    public ObservableCollection<DataBlockListItem> AllProjectDbs =>
+        _allProjectDbs ??= new ObservableCollection<DataBlockListItem>();
+
+    // Transient selection inside the "+ Add DB" pill. CollectionChanged
+    // routes to AddActiveDbToSet / RemoveActiveDb.
+    private ObservableCollection<object>? _addDbPopupSelection;
+
+    public ObservableCollection<object> AddDbPopupSelection
+    {
+        get
+        {
+            if (_addDbPopupSelection == null)
+            {
+                _addDbPopupSelection = new ObservableCollection<object>();
+                _addDbPopupSelection.CollectionChanged += OnAddDbPopupSelectionChanged;
+            }
+            return _addDbPopupSelection;
+        }
+    }
+
+    private void OnAddDbPopupSelectionChanged(
+        object? sender,
+        NotifyCollectionChangedEventArgs e)
+    {
+        if (_syncingPillSelection) return;
+        _syncingPillSelection = true;
+        try
+        {
+            if (e.NewItems != null)
+            {
+                foreach (var item in e.NewItems)
+                {
+                    if (item is DataBlockListItem dbi && !GetActiveStatusFor(dbi.Summary).isActive)
+                        AddActiveDbFromSummary(dbi.Summary);
+                }
+            }
+            if (e.OldItems != null)
+            {
+                foreach (var item in e.OldItems)
+                {
+                    if (item is DataBlockListItem dbi)
+                    {
+                        if (State.Dbs.Count <= 1)
+                        {
+                            // Refuse last-DB removal: snap selection back.
+                            SyncAddDbPopupSelection();
+                            return;
+                        }
+                        var match = FindActiveDb(dbi.Summary);
+                        if (match != null) RemoveActiveDb(match);
+                    }
+                }
+            }
+        }
+        finally
+        {
+            _syncingPillSelection = false;
+        }
+    }
+
+    private void SyncAddDbPopupSelection()
+    {
+        if (_addDbPopupSelection == null) return;
+        _syncingPillSelection = true;
+        try
+        {
+            _addDbPopupSelection.Clear();
+            if (_allProjectDbs != null)
+            {
+                foreach (var item in _allProjectDbs)
+                {
+                    var (isActive, _) = GetActiveStatusFor(item.Summary);
+                    if (isActive)
+                        _addDbPopupSelection.Add(item);
+                }
+            }
+        }
+        finally
+        {
+            _syncingPillSelection = false;
+        }
+    }
+
+    private void RebuildPlcPills()
+    {
+        // Unsubscribe old pills before clearing.
+        foreach (var pill in PlcPills)
+            pill.SelectionChanged -= OnPillSelectionChanged;
+        PlcPills.Clear();
+
+        var newPills = PlcPillGroupsService.Build(
+            _activeDbs,
+            _currentPlcName,
+            loadDbsForPlc: LoadDbsForPlcAsync);
+
+        foreach (var pill in newPills)
+        {
+            pill.SelectionChanged += OnPillSelectionChanged;
+            PlcPills.Add(pill);
+        }
+    }
+
+    private void OnPillSelectionChanged(object? sender, PillSelectionChangedEventArgs e)
+    {
+        if (_syncingPillSelection) return;
+        _syncingPillSelection = true;
+        try
+        {
+            foreach (var summary in e.Added)
+            {
+                if (!GetActiveStatusFor(summary).isActive)
+                    AddActiveDbFromSummary(summary);
+            }
+            foreach (var summary in e.Removed)
+            {
+                if (State.Dbs.Count <= 1)
+                {
+                    Log.Information(
+                        "Refusing pill remove on {Name} — at least one DB must stay active",
+                        summary.Name);
+                    // Snap pill selection back so the UI doesn't show a deselected last DB.
+                    if (sender is PlcPillViewModel pill)
+                    {
+                        var activeItems = GetActiveItemsForPlc(pill);
+                        pill.SyncSelectedDbs(activeItems);
+                    }
+                    return;
+                }
+                var match = FindActiveDb(summary);
+                if (match != null) RemoveActiveDb(match);
+            }
+        }
+        finally
+        {
+            _syncingPillSelection = false;
+        }
+    }
+
+    private IReadOnlyList<DataBlockListItem> GetActiveItemsForPlc(PlcPillViewModel pill)
+    {
+        var result = new List<DataBlockListItem>();
+        for (int i = 0; i < _activeDbs.Count; i++)
+        {
+            var db = _activeDbs[i];
+            var plc = (i == 0 ? _currentPlcName : db.PlcName) ?? "";
+            if (!string.Equals(plc, pill.PlcName, StringComparison.Ordinal)) continue;
+            result.Add(new DataBlockListItem(
+                new DataBlockSummary(db.Info.Name, "", plcName: plc, number: db.Info.Number),
+                isActive: true,
+                isAnchor: i == 0));
+        }
+        return result;
+    }
+
+    /// <summary>
+    /// Lazy-loads the available DB list for a specific PLC. Called by each
+    /// <see cref="PlcPillViewModel"/> on first popup open.
+    ///
+    /// Reuses the same <see cref="_availableDataBlocks"/> cache that
+    /// <see cref="RefreshDataBlocksCommand"/> populates, then filters to the
+    /// requested PLC so each pill only shows its own DBs.
+    ///
+    /// Returns on the calling (UI) thread since <see cref="LoadAvailableDataBlocks"/>
+    /// already runs synchronously on the UI thread.
+    /// </summary>
+    internal Task<IReadOnlyList<DataBlockListItem>> LoadDbsForPlcAsync(string plcName)
+    {
+        if (_enumerateDataBlocks == null)
+            return Task.FromResult<IReadOnlyList<DataBlockListItem>>(Array.Empty<DataBlockListItem>());
+
+        LoadAvailableDataBlocks(force: false);
+
+        var source = _availableDataBlocks ?? Array.Empty<DataBlockSummary>();
+        var filtered = string.IsNullOrEmpty(plcName)
+            ? source
+            : source.Where(s => string.Equals(s.PlcName, plcName, StringComparison.Ordinal)).ToList();
+
+        var items = filtered
+            .Select(s =>
+            {
+                var (isActive, isAnchor) = GetActiveStatusFor(s);
+                var item = new DataBlockListItem(s, isActive, isAnchor);
+                item.ToggleRequested += OnDataBlockListItemToggled;
+                return item;
+            })
+            .ToList();
+
+        return Task.FromResult<IReadOnlyList<DataBlockListItem>>(items);
+    }
+
+    /// <summary>
+    /// Called by the "+ Add DB" click handler to populate <see cref="AllProjectDbs"/>
+    /// on first open. Uses the same cache as the existing DB enumeration so
+    /// no second fetch is needed.
+    /// </summary>
+    internal void EnsureAllProjectDbsLoaded()
+    {
+        if (_allProjectDbs != null && _allProjectDbs.Count > 0) return;
+        if (_enumerateDataBlocks == null) return;
+
+        LoadAvailableDataBlocks(force: false);
+
+        var source = _availableDataBlocks ?? Array.Empty<DataBlockSummary>();
+        var collection = AllProjectDbs; // triggers lazy init
+        _syncingPillSelection = true;
+        try
+        {
+            collection.Clear();
+            foreach (var s in source)
+            {
+                var (isActive, isAnchor) = GetActiveStatusFor(s);
+                var item = new DataBlockListItem(s, isActive, isAnchor);
+                item.ToggleRequested += OnDataBlockListItemToggled;
+                collection.Add(item);
+            }
+        }
+        finally
+        {
+            _syncingPillSelection = false;
+        }
+        SyncAddDbPopupSelection();
+    }
+
+    // ── End pill-row ──────────────────────────────────────────────────────────
+
     /// <summary>
     /// Per-PLC collapsed-group memory for the dropdown picker. The popup is
     /// reinstantiated on every open so Expander.IsExpanded would otherwise
@@ -1622,6 +1879,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         ApplyAllFilters();
         RefreshFlatList();
         RebuildActiveDbChips();
+        RebuildPlcPills();
         // PendingEdits / BulkPreview hold MemberNodeViewModel references —
         // BuildRootMembersFromActiveDbs just minted fresh ones, so any
         // surviving entries point at orphans from the prior tree. Without
