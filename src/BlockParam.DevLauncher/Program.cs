@@ -56,6 +56,27 @@ class Program
             return;
         }
 
+        // --capture-pill <out-dir>                 PillMultiSelect demo: closed + open popup
+        if (args.Length >= 2 && args[0] == "--capture-pill")
+        {
+            PillMultiSelectCapture.Run(Path.GetFullPath(args[1]));
+            return;
+        }
+
+        // --capture-pill-db <out-dir>              Multi-PLC DB pill demo (overflow + wrap)
+        if (args.Length >= 2 && args[0] == "--capture-pill-db")
+        {
+            PillMultiSelectCapture.RunDb(Path.GetFullPath(args[1]));
+            return;
+        }
+
+        // --demo-pill                              Interactive multi-PLC pill demo (no auto-close)
+        if (args.Length >= 1 && args[0] == "--demo-pill")
+        {
+            PillMultiSelectCapture.RunDbInteractive();
+            return;
+        }
+
         // --- Parse capture arguments ---
         // --capture <out.png> [<dbName>]          one-shot single scene
         // --capture-script <script.json>          multi-scene JSON-driven
