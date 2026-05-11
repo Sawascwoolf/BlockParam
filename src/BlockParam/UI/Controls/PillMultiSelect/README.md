@@ -5,8 +5,7 @@ search box, checkbox list, and a Select all / Reset footer. Modeled after
 modern web pill-dropdowns (Linear / Notion / Figma).
 
 See `assets/screenshots/pill/` (in the repo root) for the seven canonical
-states, and `src/BlockParam.PillSample/` for a standalone WPF app that
-consumes this control with **zero** reference to the rest of BlockParam.
+states.
 
 ## Vendoring
 
@@ -73,9 +72,6 @@ five string DPs (`SearchPlaceholder`, `ClearTooltip`, `SelectAllText`,
                       Label="Members"
                       SelectedItems="{Binding SelectedMembers, Mode=OneWay}" />
 ```
-
-See `src/BlockParam.PillSample/MainWindow.xaml` for three scenes
-(default formatting, overflow + tooltip, compact mode).
 
 ## Tests
 
