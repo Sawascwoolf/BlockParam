@@ -345,6 +345,12 @@ Ja — In TIA Portal anwenden, dann wechseln.
 Nein — Zwischenspeichern und wechseln.
 Abbrechen — Bei '{1}' bleiben.</value><comment>{0} = Anzahl ausstehender Änderungen, {1} = aktueller DB-Name, {2} = Ziel-DB-Name (ungenutzt)</comment></data>
   <data name="Status_DbSwitch_ApplyBlocked" xml:space="preserve"><value>Vorgemerkte Änderungen können nicht angewendet werden — ungültige Einträge korrigieren oder auf das Zurücksetzen des Tageslimits warten.</value></data>
+  <data name="Reactivate_AdditiveOrReplace_Title" xml:space="preserve"><value>Hinzufügen oder ersetzen?</value></data>
+  <data name="Reactivate_AdditiveOrReplace_Text" xml:space="preserve"><value>'{0}' zusätzlich zu den aktuellen DBs einblenden oder ersetzen?
+
+Ja — '{0}' zur aktuellen Sitzung hinzufügen.
+Nein — Aktuelle DBs durch '{0}' ersetzen.
+Abbrechen — Bei den aktuellen DBs bleiben.</value><comment>{0} = Name des wieder aktivierten DB</comment></data>
   <data name="Status_DbSwitched_StashRestored" xml:space="preserve"><value>Zu {0} gewechselt — {1} zwischengespeicherte Änderung(en) wiederhergestellt.</value><comment>{0} = DB-Name, {1} = Anzahl wiederhergestellt</comment></data>
   <data name="Status_DbSwitched_StashPartial" xml:space="preserve"><value>Zu {0} gewechselt — {1} zwischengespeicherte Änderung(en) wiederhergestellt; {2} passen nicht mehr zur aktuellen DB-Struktur.</value><comment>{0} = DB-Name, {1} = Anzahl wiederhergestellt, {2} = Anzahl verworfen</comment></data>
   <data name="Inspector_StashedDb_Header" xml:space="preserve"><value>AUSSTEHEND IN {0}</value><comment>{0} = zwischengespeicherter DB-Name (großgeschrieben, passend zu anderen Abschnittsüberschriften)</comment></data>

@@ -1498,6 +1498,32 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         var current = State;
         var target = FindActiveDb(summary);
 
+        // #92 — When the user has ≥2 active DBs and clicks a stash header,
+        // ask whether they want to *add* the stashed DB to the current
+        // session (additive) or *replace* the active set with it (the
+        // legacy single-DB behaviour). Single-DB sessions skip the prompt:
+        // there's nothing to "replace away" so the gesture is unambiguous
+        // and goes through the additive branch implicitly via the existing
+        // append-then-prune flow below (which becomes a no-op prune when
+        // current has only one DB == target).
+        if (current.Dbs.Count >= 2)
+        {
+            var decision = _messageBox.AskYesNoCancel(
+                Res.Format("Reactivate_AdditiveOrReplace_Text", summary.Name),
+                Res.Get("Reactivate_AdditiveOrReplace_Title"));
+            if (decision == YesNoCancelResult.Cancel)
+            {
+                Log.Information("Reactivate cancelled by user for {Name}", summary.Name);
+                return;
+            }
+            if (decision == YesNoCancelResult.Yes)
+            {
+                ReactivateStashedDbAdditive(stash);
+                return;
+            }
+            // No falls through to the Replace path below.
+        }
+
         if (target == null)
         {
             var built = BuildActiveDbFromSummary(summary);
@@ -1526,6 +1552,33 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         // State assignment so the cascade has already rebuilt RootMembers
         // — otherwise the new PendingValue assignments would land on VMs
         // the rebuild is about to discard.
+        var (restored, dropped) = RestoreStashOntoLive(stash);
+        if (restored > 0 || dropped > 0)
+        {
+            StatusText = dropped == 0
+                ? Res.Format("Status_DbSwitched_StashRestored", summary.Name, restored)
+                : Res.Format("Status_DbSwitched_StashPartial",
+                    summary.Name, restored, dropped);
+        }
+    }
+
+    /// <summary>
+    /// Additive branch of <see cref="ReactivateStashedDb"/>: append the
+    /// stashed DB to the active set without dropping any other active DBs,
+    /// pop its stash entry, replay its edits. One snapshot, one cascade.
+    /// </summary>
+    private void ReactivateStashedDbAdditive(StashedDbState stash)
+    {
+        var summary = stash.Summary;
+        var built = BuildActiveDbFromSummary(summary);
+        if (built == null) return;
+
+        var stashesNew = State.Stashes.ToDictionary(kv => kv.Key, kv => kv.Value);
+        stashesNew.Remove(StashKey(summary));
+        State = State.With(
+            dbs: State.Dbs.Concat(new[] { built }).ToList(),
+            stashes: stashesNew);
+
         var (restored, dropped) = RestoreStashOntoLive(stash);
         if (restored > 0 || dropped > 0)
         {

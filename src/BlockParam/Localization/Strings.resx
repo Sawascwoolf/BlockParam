@@ -876,6 +876,20 @@ Cancel — Stay on '{1}'.</value>
   <data name="Status_DbSwitch_ApplyBlocked" xml:space="preserve">
     <value>Cannot apply staged edits — fix invalid entries or wait for the daily limit to reset.</value>
   </data>
+  <!-- 3-way prompt fired when reactivating a stash with ≥2 DBs active (#92).
+       Yes = add the stashed DB alongside (additive), No = replace the
+       current active set with just the stashed DB, Cancel = stay put. -->
+  <data name="Reactivate_AdditiveOrReplace_Title" xml:space="preserve">
+    <value>Add or replace?</value>
+  </data>
+  <data name="Reactivate_AdditiveOrReplace_Text" xml:space="preserve">
+    <value>Bring back '{0}' alongside the current DBs, or replace them?
+
+Yes — Add '{0}' to the current session.
+No — Replace the current DBs with '{0}'.
+Cancel — Stay on the current DBs.</value>
+    <comment>{0} = stashed DB name being reactivated</comment>
+  </data>
   <data name="Status_DbSwitched_StashRestored" xml:space="preserve">
     <value>Switched to {0} — restored {1} stashed edit(s).</value>
     <comment>{0} = DB name, {1} = restored count</comment>
