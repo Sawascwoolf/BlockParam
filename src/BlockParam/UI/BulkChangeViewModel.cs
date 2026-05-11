@@ -1299,7 +1299,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
 
         if (wantActive && !wasActive)
         {
-            AddActiveDbWithPendingEditPrompt(item);
+            AddActiveDbToSet(item);
         }
         else if (!wantActive && wasActive)
         {
@@ -1323,58 +1323,21 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
-    /// Add path with pending-edit handling: assigning the new active set
-    /// triggers <see cref="RebuildAfterActiveSetChanged"/>, which discards
-    /// every <see cref="MemberNodeViewModel"/> and rebuilds the tree from
-    /// scratch — in-place pending edits on the existing active DBs are
-    /// orphaned. Run the same 3-way prompt the remove path uses for each
-    /// active DB with edits before committing the add. Compose one
-    /// snapshot so the cascade fires exactly once.
+    /// Pure-add path: append the dropdown-checked DB to the active set.
+    /// PendingEditStore (9814a6e) seeds pending values onto fresh VMs
+    /// after the rebuild, so the previously-required Apply/Stash/Cancel
+    /// rescue prompt on every other active DB is unnecessary — adding
+    /// a peer never destroys an in-progress edit (#93).
     /// </summary>
-    private void AddActiveDbWithPendingEditPrompt(DataBlockListItem item)
+    private void AddActiveDbToSet(DataBlockListItem item)
     {
-        var next = State;
-        foreach (var db in State.Dbs.ToList())
-        {
-            var decision = PromptForPendingEditsOnRemove(db);
-            if (decision == PendingDecision.NoEdits) continue;
-            if (decision == PendingDecision.Cancel)
-            {
-                Log.Information(
-                    "DB add cancelled by user at pending-edit prompt for {Name}",
-                    db.Info.Name);
-                RefreshFilteredDataBlockItemsActiveState();
-                return;
-            }
-            if (decision == PendingDecision.Apply)
-            {
-                if (!TryApplyActiveDbInPlace(db))
-                {
-                    Log.Information(
-                        "DB add aborted: pending Apply did not succeed for {Name}",
-                        db.Info.Name);
-                    RefreshFilteredDataBlockItemsActiveState();
-                    return;
-                }
-            }
-            else if (decision == PendingDecision.Stash)
-            {
-                var captured = CaptureStashForDb(db);
-                if (captured != null)
-                {
-                    var dict = next.Stashes.ToDictionary(kv => kv.Key, kv => kv.Value);
-                    dict[StashKey(captured.Summary)] = captured;
-                    next = next.With(stashes: dict);
-                }
-            }
-        }
         var built = BuildActiveDbFromSummary(item.Summary);
         if (built == null)
         {
             RefreshFilteredDataBlockItemsActiveState();
             return;
         }
-        State = next.With(dbs: next.Dbs.Concat(new[] { built }).ToList());
+        State = State.With(dbs: State.Dbs.Concat(new[] { built }).ToList());
         Log.Information("DB enabled via dropdown: {Name}", built.Info.Name);
     }
 
