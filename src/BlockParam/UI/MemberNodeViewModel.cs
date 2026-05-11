@@ -145,8 +145,20 @@ public class MemberNodeViewModel : ViewModelBase
     public bool IsSelected
     {
         get => _isSelected;
-        set => SetProperty(ref _isSelected, value);
+        set
+        {
+            if (SetProperty(ref _isSelected, value) && value)
+                SelectedChanged?.Invoke(this);
+        }
     }
+
+    /// <summary>
+    /// Fired when <see cref="IsSelected"/> transitions to <c>true</c>. The
+    /// owning <see cref="BulkChangeViewModel"/> subscribes per node and
+    /// clears <see cref="IsSelected"/> on every other node so the focus row
+    /// stays globally exclusive across DBs (#95).
+    /// </summary>
+    public event Action<MemberNodeViewModel>? SelectedChanged;
 
     /// <summary>True if this member is affected by the current bulk scope selection.</summary>
     public bool IsAffected

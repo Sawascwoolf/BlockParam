@@ -4115,8 +4115,41 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     private void SubscribeStartValueEdited(MemberNodeViewModel node)
     {
         node.StartValueEdited += OnSingleValueEdited;
+        node.SelectedChanged += OnNodeSelected;
         foreach (var child in node.Children)
             SubscribeStartValueEdited(child);
+    }
+
+    private bool _inSelectionCascade;
+
+    /// <summary>
+    /// Global single-focus invariant (#95): when one node's
+    /// <see cref="MemberNodeViewModel.IsSelected"/> becomes true, every
+    /// other node in <see cref="RootMembers"/> drops its selection — so the
+    /// dialog never sees a leaf selected in DB A *and* a leaf selected in
+    /// DB B at the same time.
+    /// </summary>
+    private void OnNodeSelected(MemberNodeViewModel justSelected)
+    {
+        if (_inSelectionCascade) return;
+        _inSelectionCascade = true;
+        try
+        {
+            foreach (var root in RootMembers)
+            {
+                if (!ReferenceEquals(root, justSelected) && root.IsSelected)
+                    root.IsSelected = false;
+                foreach (var descendant in root.AllDescendants())
+                {
+                    if (!ReferenceEquals(descendant, justSelected) && descendant.IsSelected)
+                        descendant.IsSelected = false;
+                }
+            }
+        }
+        finally
+        {
+            _inSelectionCascade = false;
+        }
     }
 
     /// <summary>
