@@ -9,12 +9,25 @@
     <RootNamespace>BlockParam.Tests</RootNamespace>
   </PropertyGroup>
 
+  <!-- WPF types leaking through BlockParam's public API (ICollectionView /
+       ListCollectionView in the PillMultiSelect VM) need their assemblies
+       referenced explicitly. We deliberately don't use <UseWPF>true</UseWPF>
+       here because that changes the SDK's implicit-usings set and breaks
+       System.IO references in unrelated tests. -->
+  <ItemGroup>
+    <Reference Include="WindowsBase" />
+    <Reference Include="PresentationCore" />
+    <Reference Include="PresentationFramework" />
+    <Reference Include="System.Xaml" />
+  </ItemGroup>
+
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.*" />
     <PackageReference Include="xunit" Version="2.*" />
     <PackageReference Include="xunit.runner.visualstudio" Version="2.*" />
     <PackageReference Include="FluentAssertions" Version="6.*" />
     <PackageReference Include="NSubstitute" Version="5.*" />
+    <PackageReference Include="Xunit.StaFact" Version="1.*" />
   </ItemGroup>
 
   <ItemGroup>

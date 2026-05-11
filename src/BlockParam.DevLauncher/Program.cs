@@ -57,6 +57,27 @@ class Program
             return;
         }
 
+        // --capture-pill <out-dir>                 PillMultiSelect demo: closed + open popup
+        if (args.Length >= 2 && args[0] == "--capture-pill")
+        {
+            PillMultiSelectCapture.Run(Path.GetFullPath(args[1]));
+            return;
+        }
+
+        // --capture-pill-db <out-dir>              Multi-PLC DB pill demo (overflow + wrap)
+        if (args.Length >= 2 && args[0] == "--capture-pill-db")
+        {
+            PillMultiSelectCapture.RunDb(Path.GetFullPath(args[1]));
+            return;
+        }
+
+        // --demo-pill                              Interactive multi-PLC pill demo (no auto-close)
+        if (args.Length >= 1 && args[0] == "--demo-pill")
+        {
+            PillMultiSelectCapture.RunDbInteractive();
+            return;
+        }
+
         // --plc <name>   Fake an owning PLC for the anchor DB (and any
         // unprefixed fixtures). Lets the multi-PLC title / chip-group-header
         // branch be exercised without TIA: the VM hides the PLC chrome iff
