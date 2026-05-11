@@ -132,16 +132,27 @@ public class HierarchyAnalyzer
 
     private static List<ScopeLevel> DeduplicateByMatchCount(List<ScopeLevel> scopes)
     {
-        // Order by ascending match count, keep the first scope at each count.
-        // Stable: ties go to the first occurrence (preserves the within-DB
-        // scope when its cross-DB sibling collapses to the same count).
-        var seen = new HashSet<int>();
+        // Dedupe key = (MatchCount, sorted member-path set). MatchCount alone
+        // collapsed two scopes that targeted the same number of cells but
+        // different ones — e.g. row-fix Matrix[1,*] and col-fix Matrix[*,2]
+        // on a square 2D array (#90). Keying on the path set as well means
+        // scopes only collapse when they actually point at the same nodes.
+        // Stable: ties on the same key go to the first occurrence.
+        var seen = new HashSet<string>(StringComparer.Ordinal);
         var result = new List<ScopeLevel>(scopes.Count);
         foreach (var s in scopes.OrderBy(x => x.MatchCount))
         {
-            if (seen.Add(s.MatchCount)) result.Add(s);
+            if (seen.Add(ScopeFingerprint(s))) result.Add(s);
         }
         return result;
+    }
+
+    private static string ScopeFingerprint(ScopeLevel s)
+    {
+        var paths = s.MatchingMembers
+            .Select(m => m.Path)
+            .OrderBy(p => p, StringComparer.Ordinal);
+        return $"{s.MatchCount}|{string.Join("", paths)}";
     }
 
     private List<ScopeLevel> AnalyzeWithinDb(DataBlockInfo db, MemberNode selectedMember)
@@ -460,8 +471,11 @@ public class HierarchyAnalyzer
     }
 
     /// <summary>
-    /// Removes scopes where the match count equals a broader (higher) scope,
-    /// as they would be redundant in the UI.
+    /// Removes scopes whose (MatchCount, sorted member-path set) duplicates
+    /// an adjacent (broader) scope's. Adjacent-only because the caller hands
+    /// in scopes in narrowest-first order — a scope that ties on count but
+    /// targets different nodes (e.g. row-fix vs col-fix on a square 2D
+    /// array, #90) is a real second option and must survive.
     /// </summary>
     private static List<ScopeLevel> DeduplicateScopes(List<ScopeLevel> scopes)
     {
@@ -471,7 +485,7 @@ public class HierarchyAnalyzer
         var result = new List<ScopeLevel> { scopes[0] };
         for (int i = 1; i < scopes.Count; i++)
         {
-            if (scopes[i].MatchCount != scopes[i - 1].MatchCount)
+            if (ScopeFingerprint(scopes[i]) != ScopeFingerprint(scopes[i - 1]))
             {
                 result.Add(scopes[i]);
             }
