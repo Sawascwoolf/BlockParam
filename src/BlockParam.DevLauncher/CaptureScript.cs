@@ -382,7 +382,7 @@ public static class SceneApplier
         if (scene.Sidebar != null)
         {
             if (scene.Sidebar.Collapsed.HasValue)
-                vm.IsInspectorCollapsed = scene.Sidebar.Collapsed.Value;
+                vm.Inspector.IsInspectorCollapsed = scene.Sidebar.Collapsed.Value;
         }
 
         if (scene.InlineEdit != null)
@@ -508,7 +508,7 @@ public static class SceneApplier
         // doesn't inherit them. DiscardPendingSilent skips the confirm dialog.
         if (vm.HasPendingEdits)
             vm.DiscardPendingSilent();
-        vm.IsInspectorCollapsed = false;
+        vm.Inspector.IsInspectorCollapsed = false;
         foreach (var root in vm.RootMembers)
             CollapseRecursive(root);
         vm.SelectedFlatMember = null;

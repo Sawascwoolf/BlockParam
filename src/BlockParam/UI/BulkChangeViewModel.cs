@@ -184,11 +184,6 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     private bool _lastApplySucceeded;
     private bool _hasPendingChanges;
     private bool _limitWarningShown;
-    private bool _isInspectorCollapsed;
-    private bool _isBulkEditExpanded = true;
-    private bool _isBulkPreviewExpanded = true;
-    private bool _isPendingExpanded = true;
-    private bool _isIssuesExpanded = true;
     private readonly IReadOnlyList<string> _projectLanguages;
     private readonly CommentLanguagePolicy _commentLanguagePolicy;
     private readonly Dispatcher _dispatcher;
@@ -312,11 +307,11 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         UpgradeToProCommand = new RelayCommand(ExecuteUpgradeToPro);
         ExpandAllCommand = new RelayCommand(ExecuteExpandAll);
         CollapseAllCommand = new RelayCommand(ExecuteCollapseAll);
-        ToggleInspectorCommand = new RelayCommand(() => IsInspectorCollapsed = !IsInspectorCollapsed);
-        ToggleBulkEditCommand = new RelayCommand(() => IsBulkEditExpanded = !IsBulkEditExpanded);
-        ToggleBulkPreviewCommand = new RelayCommand(() => IsBulkPreviewExpanded = !IsBulkPreviewExpanded);
-        TogglePendingCommand = new RelayCommand(() => IsPendingExpanded = !IsPendingExpanded);
-        ToggleIssuesCommand = new RelayCommand(() => IsIssuesExpanded = !IsIssuesExpanded);
+        // Inspector-panel expand/collapse state lives on its own slice VM
+        // (#80 slice 1). The dialog code-behind subscribes to
+        // `Inspector.PropertyChanged` directly for the splitter-column
+        // animation — no host-side relay needed.
+        Inspector = new InspectorPanelsViewModel();
         ClearManualSelectionCommand = new RelayCommand(ExecuteClearManualSelection,
             () => _manualSelectedPaths.Count > 0);
 
@@ -874,7 +869,6 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     public ICommand ExpandAllCommand { get; }
     public ICommand CollapseAllCommand { get; }
     public ICommand ClearManualSelectionCommand { get; }
-    public ICommand ToggleInspectorCommand { get; }
 
     // --- DB-switcher dropdown (#59) ---
 
@@ -2261,48 +2255,11 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(HasStashedDbs));
     }
 
-    public bool IsInspectorCollapsed
-    {
-        get => _isInspectorCollapsed;
-        set
-        {
-            if (_isInspectorCollapsed == value) return;
-            _isInspectorCollapsed = value;
-            OnPropertyChanged(nameof(IsInspectorCollapsed));
-            OnPropertyChanged(nameof(IsInspectorExpanded));
-        }
-    }
-
-    public bool IsInspectorExpanded => !_isInspectorCollapsed;
-
-    public bool IsBulkEditExpanded
-    {
-        get => _isBulkEditExpanded;
-        set { if (_isBulkEditExpanded != value) { _isBulkEditExpanded = value; OnPropertyChanged(nameof(IsBulkEditExpanded)); } }
-    }
-
-    public bool IsBulkPreviewExpanded
-    {
-        get => _isBulkPreviewExpanded;
-        set { if (_isBulkPreviewExpanded != value) { _isBulkPreviewExpanded = value; OnPropertyChanged(nameof(IsBulkPreviewExpanded)); } }
-    }
-
-    public bool IsPendingExpanded
-    {
-        get => _isPendingExpanded;
-        set { if (_isPendingExpanded != value) { _isPendingExpanded = value; OnPropertyChanged(nameof(IsPendingExpanded)); } }
-    }
-
-    public bool IsIssuesExpanded
-    {
-        get => _isIssuesExpanded;
-        set { if (_isIssuesExpanded != value) { _isIssuesExpanded = value; OnPropertyChanged(nameof(IsIssuesExpanded)); } }
-    }
-
-    public ICommand ToggleBulkEditCommand { get; }
-    public ICommand ToggleBulkPreviewCommand { get; }
-    public ICommand TogglePendingCommand { get; }
-    public ICommand ToggleIssuesCommand { get; }
+    /// <summary>
+    /// Inspector-panel expand/collapse state (#80 slice 1).
+    /// XAML binds via <c>{Binding Inspector.IsBulkEditExpanded}</c> etc.
+    /// </summary>
+    public InspectorPanelsViewModel Inspector { get; }
 
     /// <summary>
     /// Raised after the flat list has been refreshed so the view can rehydrate
