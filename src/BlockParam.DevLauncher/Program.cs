@@ -490,12 +490,30 @@ class Program
                 if (dbElement == null) continue;
 
                 var blockType = dbElement.Name.LocalName.Replace("SW.Blocks.", "");
+
+                // TIA exports the block number inside the DB element's
+                // AttributeList as <Number>4</Number>. ProjectDiscovery
+                // populates this for real Openness sessions; the DevLauncher
+                // enumerator must do the same or the pill trigger flips from
+                // "DB42" to a full name when the popup-open reload swaps in
+                // a number-less summary.
+                int? dbNumber = null;
+                var numberElement = dbElement.Descendants()
+                    .FirstOrDefault(e => e.Name.LocalName == "Number"
+                        && e.Parent?.Name.LocalName == "AttributeList");
+                if (numberElement != null
+                    && int.TryParse(numberElement.Value, out var parsed))
+                {
+                    dbNumber = parsed;
+                }
+
                 list.Add(new DataBlockSummary(
                     dbName,
                     folderPath: "",
                     blockType: blockType,
                     isInstanceDb: blockType == "InstanceDB",
-                    plcName: plcName));
+                    plcName: plcName,
+                    number: dbNumber));
             }
             catch (Exception ex)
             {
