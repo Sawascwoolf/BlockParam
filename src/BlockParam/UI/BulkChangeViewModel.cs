@@ -2856,7 +2856,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         }
     }
 
-    private string ApplyCommentPreviews(string xml)
+    internal string ApplyCommentPreviews(string xml)
     {
         var commentTargets = new List<MemberNodeViewModel>();
         CollectPendingCommentNodes(RootMembers, commentTargets);
