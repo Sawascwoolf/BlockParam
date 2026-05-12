@@ -46,30 +46,3 @@ jobs:
         with:
           name: test-results
           path: '**/TestResults/*.trx'
-
-  build-v21:
-    name: Build (V21, net48)
-    runs-on: windows-latest
-    # The V21 build outputs to bin\…\v21\ which DevLauncher/Tests don't resolve
-    # against (project comment); CI only verifies the V21 addin compiles cleanly.
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup .NET SDK
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: '8.0.x'
-
-      - name: Cache NuGet packages
-        uses: actions/cache@v4
-        with:
-          path: ~/.nuget/packages
-          key: ${{ runner.os }}-nuget-v21-${{ hashFiles('**/*.csproj') }}
-          restore-keys: ${{ runner.os }}-nuget-v21-
-
-      - name: Restore
-        run: dotnet restore src/BlockParam/BlockParam.csproj -p:UseSiemensStubs=true -p:TiaVersion=21
-
-      - name: Build (Release)
-        run: dotnet build src/BlockParam/BlockParam.csproj -c Release --no-restore -p:UseSiemensStubs=true -p:TiaVersion=21

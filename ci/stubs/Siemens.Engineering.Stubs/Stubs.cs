@@ -59,6 +59,21 @@ namespace Siemens.Engineering
         public object GetAttribute(string name) => throw new NotImplementedException();
         public T GetService<T>() where T : class => throw new NotImplementedException();
     }
+
+    // Shared by PlcBlock, PlcTagTable, PlcType — lives at the root namespace
+    // so any "using Siemens.Engineering;" caller can resolve it.
+    public enum ExportOptions
+    {
+        None = 0,
+        WithDefaults = 1,
+        WithReadOnly = 2,
+    }
+
+    public enum ImportOptions
+    {
+        None = 0,
+        Override = 1,
+    }
 }
 
 namespace Siemens.Engineering.HW
@@ -184,7 +199,7 @@ namespace Siemens.Engineering.SW.Blocks
 
     public class DataBlock : PlcBlock
     {
-        public void Export(FileInfo path, ExportOptions options) => throw new NotImplementedException();
+        public void Export(FileInfo path, Siemens.Engineering.ExportOptions options) => throw new NotImplementedException();
     }
 
     public class PlcBlockGroup : IEngineeringObject
@@ -200,24 +215,11 @@ namespace Siemens.Engineering.SW.Blocks
 
     public class PlcBlockComposition : List<PlcBlock>
     {
-        public void Import(FileInfo path, ImportOptions options) => throw new NotImplementedException();
+        public void Import(FileInfo path, Siemens.Engineering.ImportOptions options) => throw new NotImplementedException();
         public PlcBlock Find(string name) => throw new NotImplementedException();
     }
 
     public class PlcBlockGroupComposition : List<PlcBlockGroup> { }
-
-    public enum ExportOptions
-    {
-        None = 0,
-        WithDefaults = 1,
-        WithReadOnly = 2,
-    }
-
-    public enum ImportOptions
-    {
-        None = 0,
-        Override = 1,
-    }
 }
 
 namespace Siemens.Engineering.SW.Tags
@@ -239,7 +241,7 @@ namespace Siemens.Engineering.SW.Tags
     public class PlcTagTable : IEngineeringObject
     {
         public string Name => throw new NotImplementedException();
-        public void Export(FileInfo path, Blocks.ExportOptions options) => throw new NotImplementedException();
+        public void Export(FileInfo path, Siemens.Engineering.ExportOptions options) => throw new NotImplementedException();
         public IEngineeringObject Parent => throw new NotImplementedException();
         public void SetAttribute(string name, object value) => throw new NotImplementedException();
         public object GetAttribute(string name) => throw new NotImplementedException();
@@ -268,7 +270,7 @@ namespace Siemens.Engineering.SW.Types
         public string Name => throw new NotImplementedException();
         public DateTime ModifiedDate => throw new NotImplementedException();
         public DateTime InterfaceModifiedDate => throw new NotImplementedException();
-        public void Export(FileInfo path, Blocks.ExportOptions options) => throw new NotImplementedException();
+        public void Export(FileInfo path, Siemens.Engineering.ExportOptions options) => throw new NotImplementedException();
         public IEngineeringObject Parent => throw new NotImplementedException();
         public void SetAttribute(string name, object value) => throw new NotImplementedException();
         public object GetAttribute(string name) => throw new NotImplementedException();
