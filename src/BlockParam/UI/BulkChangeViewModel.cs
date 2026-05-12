@@ -1729,20 +1729,20 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         // current has only one DB == target).
         if (current.Dbs.Count >= 2)
         {
-            var decision = _messageBox.AskYesNoCancel(
+            var decision = _messageBox.AskAddOrReplace(
                 Res.Format("Reactivate_AdditiveOrReplace_Text", summary.Name),
                 Res.Get("Reactivate_AdditiveOrReplace_Title"));
-            if (decision == YesNoCancelResult.Cancel)
+            if (decision == AddOrReplaceResult.Cancel)
             {
                 Log.Information("Reactivate cancelled by user for {Name}", summary.Name);
                 return;
             }
-            if (decision == YesNoCancelResult.Yes)
+            if (decision == AddOrReplaceResult.Add)
             {
                 ReactivateStashedDbAdditive(stash);
                 return;
             }
-            // No falls through to the Replace path below.
+            // Replace falls through to the Replace path below.
         }
 
         if (target == null)
@@ -1956,9 +1956,9 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     /// <summary>
     /// User's choice in response to the "this DB has pending edits" prompt
     /// raised when removing a DB from the active set (#78). Centralised so
-    /// every remove path maps the underlying <see cref="YesNoCancelResult"/>
-    /// the same way: Yes→Apply, No→Stash, Cancel→Cancel. <c>NoEdits</c> is
-    /// the no-prompt fast path.
+    /// every remove path maps the <see cref="ApplyStashCancelResult"/>
+    /// the same way: ApplyAndSwitch→Apply, StashAndSwitch→Stash, Cancel→Cancel.
+    /// <c>NoEdits</c> is the no-prompt fast path.
     /// </summary>
     private enum PendingDecision { NoEdits, Apply, Stash, Cancel }
 
@@ -1982,7 +1982,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         Log.Information(
             "[prompt] Showing 3-way for {Name} (pending={Pending}) | {State}",
             db.Info.Name, pendingCount, SnapshotState());
-        var result = _messageBox.AskYesNoCancel(
+        var result = _messageBox.AskApplyStashCancel(
             Res.Format("Dialog_SwitchDb_KeepConfirm_Text",
                 pendingCount, db.Info.Name),
             Res.Get("Dialog_SwitchDb_KeepConfirm_Title"));
@@ -1990,10 +1990,26 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             "[prompt] User picked {Result} for {Name}", result, db.Info.Name);
         return result switch
         {
-            YesNoCancelResult.Yes => PendingDecision.Apply,
-            YesNoCancelResult.No => PendingDecision.Stash,
+            ApplyStashCancelResult.ApplyAndSwitch => PendingDecision.Apply,
+            ApplyStashCancelResult.StashAndSwitch => PendingDecision.Stash,
             _ => PendingDecision.Cancel,
         };
+    }
+
+    /// <summary>
+    /// Close-confirm prompt fired when both the active DB and stashed DBs
+    /// hold pending edits. Wrapped here so the dialog code-behind doesn't
+    /// need to reach into the VM's message-box service.
+    /// </summary>
+    internal CloseWithStashResult PromptForCloseWithStash()
+    {
+        var active = PendingInlineEditCount;
+        var stashedCount = StashedDbs.Sum(s => s.Count);
+        var stashedDbList = string.Join(", ", StashedDbs.Select(s => s.DbName));
+        return _messageBox.AskCloseWithStash(
+            Res.Format("Dialog_UnsavedChanges_Prompt_WithStash",
+                active, stashedCount, stashedDbList),
+            Res.Get("Dialog_UnsavedChanges_Title"));
     }
 
     /// <summary>
@@ -3058,7 +3074,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         }
     }
 
-    private string ApplyCommentPreviews(string xml)
+    internal string ApplyCommentPreviews(string xml)
     {
         var commentTargets = new List<MemberNodeViewModel>();
         CollectPendingCommentNodes(RootMembers, commentTargets);

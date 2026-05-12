@@ -922,6 +922,13 @@ public class BulkChangeViewModelInvariantTests
 
     // ───────────────────────── builder + fakes ─────────────────────────
 
+    /// <summary>
+    /// Convenience enum for scripting 3-way prompt responses in tests.
+    /// Yes/No/Cancel maps onto the named outcomes of each typed prompt method
+    /// (ApplyStashCancel, AddOrReplace, CloseWithStash).
+    /// </summary>
+    private enum YesNoCancelResult { Yes, No, Cancel }
+
     private sealed class ActiveSetTestBuilder
     {
         private readonly List<DbSpec> _activeDbs = new();
@@ -1103,6 +1110,7 @@ public class BulkChangeViewModelInvariantTests
             _results = results;
         }
 
+        /// <summary>Counts any 3-way prompt call (ApplyStashCancel, AddOrReplace, CloseWithStash).</summary>
         public int AskYesNoCancelCallCount { get; private set; }
         public int AskYesNoCallCount { get; private set; }
         public bool AskYesNo(string message, string title)
@@ -1112,14 +1120,45 @@ public class BulkChangeViewModelInvariantTests
         }
         public void ShowError(string message, string title) { }
         public void ShowInfo(string message, string title) { }
-        public YesNoCancelResult AskYesNoCancel(string message, string title)
+
+        private YesNoCancelResult Dequeue(string methodName, string message)
         {
             AskYesNoCancelCallCount++;
             if (_results.Count == 0)
                 throw new System.InvalidOperationException(
-                    $"RecordingFakeMessageBox: AskYesNoCancel call #{AskYesNoCancelCallCount} " +
+                    $"RecordingFakeMessageBox: {methodName} call #{AskYesNoCancelCallCount} " +
                     $"has no scripted response — extend WithPromptResults(...).\nMessage: {message}");
             return _results.Dequeue();
+        }
+
+        public ApplyStashCancelResult AskApplyStashCancel(string message, string title)
+        {
+            return Dequeue(nameof(AskApplyStashCancel), message) switch
+            {
+                YesNoCancelResult.Yes => ApplyStashCancelResult.ApplyAndSwitch,
+                YesNoCancelResult.No  => ApplyStashCancelResult.StashAndSwitch,
+                _                     => ApplyStashCancelResult.Cancel,
+            };
+        }
+
+        public AddOrReplaceResult AskAddOrReplace(string message, string title)
+        {
+            return Dequeue(nameof(AskAddOrReplace), message) switch
+            {
+                YesNoCancelResult.Yes => AddOrReplaceResult.Add,
+                YesNoCancelResult.No  => AddOrReplaceResult.Replace,
+                _                     => AddOrReplaceResult.Cancel,
+            };
+        }
+
+        public CloseWithStashResult AskCloseWithStash(string message, string title)
+        {
+            return Dequeue(nameof(AskCloseWithStash), message) switch
+            {
+                YesNoCancelResult.Yes => CloseWithStashResult.ApplyActive,
+                YesNoCancelResult.No  => CloseWithStashResult.DiscardAll,
+                _                     => CloseWithStashResult.Cancel,
+            };
         }
     }
 }
