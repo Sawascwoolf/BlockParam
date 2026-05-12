@@ -817,36 +817,25 @@ public class BulkChangeViewModelRegressionTests : IDisposable
     }
 
     /// <summary>
-    /// Test 15 — ApplyCommentPreviews is called as part of the Apply pipeline.
+    /// Test 15 — ApplyCommentPreviews writes comments into the XML for nodes
+    /// whose PreviewComment is set (i.e. ones matched by a config rule with a
+    /// commentTemplate). When no nodes have PreviewComment set, the XML is
+    /// returned unchanged.
     ///
-    /// ApplyCommentPreviews is private. We verify its effect indirectly:
-    /// after a pending inline edit is staged on a member whose rule has a
-    /// commentTemplate, running Apply produces modified XML that contains
-    /// non-trivial comment data (the writer modifies the XML).
-    ///
-    /// When there are no pending comment targets, the XML is returned unchanged.
-    ///
-    /// // TEST SEAM: ApplyCommentPreviews is private; we observe its effect by capturing
-    /// // the XML passed to onApply after the Apply pipeline completes.
-    /// // The internal ApplyCommentPreviews method is invoked from inside
-    /// // ExecuteApplyAsync → ApplyAllActiveDbsAsync → per-DB Apply flow.
-    /// // We assert by checking that the xml passed to onApply differs from the
-    /// // original when comment-template rules exist and matches it when they don't.
+    /// ApplyCommentPreviews is marked internal so this test can drive it
+    /// directly without running the full Apply pipeline.
     /// </summary>
     [Fact]
     public void ApplyCommentPreviews_ModifiesXmlForPendingCommentTargets()
     {
-        // SPEC AMBIGUITY: ApplyCommentPreviews in BulkChangeViewModel.cs writes
-        // comments for nodes where PreviewComment != null AND CommentState != "unchanged".
-        // This is triggered during Apply (line ~3777: _active.Xml = ApplyCommentPreviews(_active.Xml)).
-        // We test that the PreviewComment is populated before Apply fires by checking the
-        // state of the nodes after FlushPendingHighlighting, and verify the no-pending-target
-        // path (no comment targets → xml unchanged) as a no-op assertion.
-
+        // Positive path: a rule with commentTemplate matches the Msg_CommError
+        // parent UDT instance (GenerateForScope walks up from the ModuleId leaf
+        // to find the rule-matching parent). UpdateCommentPreviews runs as part
+        // of the scope-selection cascade and populates PreviewComment. Calling
+        // ApplyCommentPreviews directly then writes those comments into the XML.
         var configLoader = CreateConfigWithRule(@"{
             ""rules"": [{
-                ""pathPattern"": ""ModuleId"",
-                ""datatype"": ""Int"",
+                ""pathPattern"": ""Msg_CommError"",
                 ""commentTemplate"": ""{db}""
             }]
         }");
@@ -858,53 +847,44 @@ public class BulkChangeViewModelRegressionTests : IDisposable
         tracker.GetStatus().Returns(new UsageStatus(0, 1000));
         tracker.RecordUsage(Arg.Any<int>()).Returns(true);
 
-        string? capturedXml = null;
         var vm = new BulkChangeViewModel(db, xml, new HierarchyAnalyzer(),
             bulkService, tracker, configLoader,
-            onApply: x => capturedXml = x,
             messageBox: new NopMessageBox());
 
         FlatTreeManager.ExpandAll(vm.RootMembers);
         vm.RefreshFlatList();
 
-        // Select and stage a pending inline edit on a ModuleId leaf
+        // Select a ModuleId leaf and pick the broadest scope — same setup as
+        // test 14. The scope cascade populates PreviewComment on the
+        // Msg_CommError parents.
         var leaf = vm.FlatMembers.First(m => m.Name == "ModuleId" && m.IsLeaf);
         vm.SelectedFlatMember = leaf;
         vm.SelectedScope = vm.AvailableScopes.OrderByDescending(s => s.MatchCount).First();
-        leaf.EditableStartValue = "55"; // different from "42" → pending inline edit
-
+        vm.NewValue = "99";
         vm.FlushPendingHighlighting();
 
-        // Check PreviewComment was populated on scope members (prerequisite for ApplyCommentPreviews)
-        var withPreview = vm.RootMembers
-            .SelectMany(r => new[] { r }.Concat(r.AllDescendants()))
-            .Where(n => n.PreviewComment != null)
-            .ToList();
-        // This may be empty if CommentState=="unchanged" for all — that's also valid behaviour.
-        // The key assertion is: Apply runs without throwing.
-        vm.ApplyCommand.CanExecute(null).Should().BeTrue("pending edit staged");
-        vm.ApplyCommand.Execute(null);
+        var modifiedXml = vm.ApplyCommentPreviews(xml);
 
-        // After Apply, the onApply callback should have been called with the modified XML
-        capturedXml.Should().NotBeNull(
-            "onApply must have been called after successful Apply");
+        modifiedXml.Should().NotBe(xml,
+            "ApplyCommentPreviews must rewrite the XML when at least one node " +
+            "has a non-empty PreviewComment with CommentState != 'unchanged'");
 
-        // No-pending-comment-targets case: VM with no comment rule, no PreviewComment set
+        vm.Dispose();
+
+        // No-op path: VM with no commentTemplate rule. No node has
+        // PreviewComment set, so CollectPendingCommentNodes finds zero targets
+        // and ApplyCommentPreviews returns the input XML unchanged.
         var vm2 = CreateFlatDbVm();
-
         FlatTreeManager.ExpandAll(vm2.RootMembers);
         vm2.RefreshFlatList();
         vm2.RootMembers.First(m => m.Name == "Speed").EditableStartValue = "99";
 
-        // No comment nodes with PreviewComment != null → ApplyCommentPreviews returns xml unchanged
-        var noPreviewNodes = vm2.RootMembers
-            .SelectMany(r => new[] { r }.Concat(r.AllDescendants()))
-            .Where(n => n.PreviewComment != null)
-            .ToList();
-        noPreviewNodes.Should().BeEmpty(
-            "with no comment rule, no nodes should have PreviewComment set");
+        var flatXml = TestFixtures.LoadXml("flat-db.xml");
+        var unchanged = vm2.ApplyCommentPreviews(flatXml);
+        unchanged.Should().Be(flatXml,
+            "with no commentTemplate rule, ApplyCommentPreviews must return " +
+            "the input XML byte-for-byte unchanged");
 
-        vm.Dispose();
         vm2.Dispose();
     }
 
