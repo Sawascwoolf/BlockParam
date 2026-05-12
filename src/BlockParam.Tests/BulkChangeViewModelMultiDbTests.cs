@@ -1,3 +1,7 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
 using BlockParam.Config;
 using BlockParam.Licensing;
 using BlockParam.Models;
@@ -500,7 +504,7 @@ public class BulkChangeViewModelMultiDbTests
     }
 
     [Fact]
-    public void ActiveDbChips_RebuildOnAddRemove_LastChipCannotClose()
+    public void PlcPills_RebuildOnAddRemove_LastDbCannotBeRemoved()
     {
         // Single-DB session with a dropdown source so we can toggle a peer in.
         var focusedXml = TestFixtures.LoadXml("flat-db.xml");
@@ -527,67 +531,56 @@ public class BulkChangeViewModelMultiDbTests
                 ? new ActiveDb(peer, peerXml, onApply: null)
                 : null);
 
-        // Single-DB: one chip, × disabled (must keep ≥1 active DB).
-        vm.ActiveDbChips.Should().HaveCount(1);
-        vm.ActiveDbChips[0].DisplayName.Should().Be(focused.Name);
-        vm.ActiveDbChips[0].CanClose.Should().BeFalse(
+        // Single-DB: one pill with one selected entry; last DB cannot be removed.
+        vm.PlcPills.Should().HaveCount(1,
+            "one pill for the single active PLC");
+        vm.AllActiveDbs.Should().HaveCount(1);
+        var anchorDb = vm.AllActiveDbs[0];
+        vm.RequestRemoveActiveDb(anchorDb); // should be refused
+        vm.AllActiveDbs.Should().HaveCount(1,
             "the last remaining DB cannot be removed");
 
         // Add the peer via the dropdown checkbox path.
         vm.OpenDataBlocksDropdownCommand.Execute(null);
         vm.FilteredDataBlockItems.First(i => i.Name == peer.Name).IsActive = true;
 
-        // Both chips appear and × is now enabled on each.
-        vm.ActiveDbChips.Should().HaveCount(2);
-        vm.ActiveDbChips.Select(c => c.DisplayName).Should().BeEquivalentTo(
-            new[] { focused.Name, peer.Name });
-        vm.ActiveDbChips.Should().AllSatisfy(c =>
-            c.CanClose.Should().BeTrue(
-                "every chip is closeable while ≥2 DBs are active"));
+        // Two DBs active → still one pill (both on same PLC).
+        vm.AllActiveDbs.Should().HaveCount(2);
+        vm.PlcPills.Should().HaveCount(1,
+            "both DBs are on the same PLC → one pill");
 
-        // Close the peer chip → back to one chip, × disabled again.
-        vm.ActiveDbChips.First(c => c.DisplayName == peer.Name)
-            .CloseCommand.Execute(null);
-
-        vm.ActiveDbChips.Should().HaveCount(1);
-        vm.ActiveDbChips[0].DisplayName.Should().Be(focused.Name);
-        vm.ActiveDbChips[0].CanClose.Should().BeFalse();
+        // Remove the peer → back to one DB.
+        var peerDbRef = vm.AllActiveDbs.First(d => d.Info.Name == peer.Name);
+        vm.RequestRemoveActiveDb(peerDbRef);
+        vm.AllActiveDbs.Should().HaveCount(1);
+        vm.AllActiveDbs[0].Info.Name.Should().Be(focused.Name);
     }
 
     [Fact]
-    public void ChipSolo_ReplacesActiveSetWithJustThisDb()
+    public void Solo_ReplacesActiveSetWithJustThisDb()
     {
-        // Two active DBs from the start (no pending edits). Clicking the
-        // peer chip's body should solo it — drop the focused DB and
-        // leave only the peer active. One-click switch from the
-        // toolbar without touching the popup.
+        // Two active DBs from the start (no pending edits). Calling
+        // SoloActiveDbByReference on the peer should drop the anchor and
+        // leave only the peer active.
         var (vm, _, _, _, _) = CreateMultiDbVm();
         vm.AllActiveDbs.Should().HaveCount(2);
-        vm.ActiveDbChips.Should().HaveCount(2);
 
         var anchorName = vm.AllActiveDbs[0].Info.Name;
         var peerName = vm.AllActiveDbs[1].Info.Name;
-        var peerChip = vm.ActiveDbChips.First(c => c.DisplayName == peerName);
+        var peerDb = vm.AllActiveDbs.First(d => d.Info.Name == peerName);
 
-        peerChip.SoloCommand.Execute(null);
+        vm.SoloActiveDbByReference(peerDb);
 
         vm.AllActiveDbs.Should().HaveCount(1,
             "solo collapses the active set to a single DB");
         vm.AllActiveDbs[0].Info.Name.Should().Be(peerName,
             "the soloed DB stays; the others are dropped");
-        vm.ActiveDbChips.Should().HaveCount(1);
-        vm.ActiveDbChips[0].DisplayName.Should().Be(peerName);
-        vm.ActiveDbChips[0].CanClose.Should().BeFalse(
-            "back to single-DB → × disabled again");
     }
 
     [Fact]
-    public void ChipGroups_SplitByPlc_HeaderShownOnlyWhenMultiPlc()
+    public void PlcPills_SplitByPlc_TwoPillsForTwoDistinctPlcs()
     {
-        // Build a VM with two active DBs that report different owning PLCs.
-        // This exercises the cross-PLC chip grouping introduced when the
-        // dropdown started enumerating across the whole project, not just
-        // the launch PLC.
+        // Two active DBs on different PLCs → two separate pills.
         var focusedXml = TestFixtures.LoadXml("flat-db.xml");
         var peerXml = TestFixtures.LoadXml("nested-struct-db.xml");
         var focused = new SimaticMLParser().Parse(focusedXml);
@@ -598,9 +591,7 @@ public class BulkChangeViewModelMultiDbTests
         var tracker = Substitute.For<IUsageTracker>();
         tracker.GetStatus().Returns(new UsageStatus(0, 100));
 
-        // Peer declares a different PLC than the anchor.
-        var peerDb = new ActiveDb(
-            peer, peerXml, onApply: null, plcName: "PLC_Other");
+        var peerDb = new ActiveDb(peer, peerXml, onApply: null, plcName: "PLC_Other");
 
         var vm = new BulkChangeViewModel(
             focused, focusedXml,
@@ -608,26 +599,33 @@ public class BulkChangeViewModelMultiDbTests
             currentPlcName: "PLC_Anchor",
             additionalActiveDbs: new[] { peerDb });
 
-        // Two distinct PLCs → two groups, headers visible on each.
-        vm.ActiveDbChipGroups.Should().HaveCount(2);
-        vm.ActiveDbChipGroups.Select(g => g.PlcName).Should().BeEquivalentTo(
+        // Two distinct PLCs → two pills, one per PLC.
+        vm.PlcPills.Should().HaveCount(2);
+        vm.PlcPills.Select(p => p.PlcName).Should().BeEquivalentTo(
             new[] { "PLC_Anchor", "PLC_Other" });
-        vm.ActiveDbChipGroups.Should().AllSatisfy(g =>
-            g.HasPlcHeader.Should().BeTrue(
-                "with ≥2 PLCs each group's PLC name disambiguates its chips"));
-
-        // Each group carries its own DB(s) — never bleeding across PLCs.
-        vm.ActiveDbChipGroups[0].Chips.Single().DisplayName.Should().Be(focused.Name);
-        vm.ActiveDbChipGroups[1].Chips.Single().DisplayName.Should().Be(peer.Name);
+        vm.PlcPills[0].SelectedDbs.Should().HaveCount(1);
+        vm.PlcPills[1].SelectedDbs.Should().HaveCount(1);
     }
 
     [Fact]
-    public void ChipGroups_MultiPlcProject_HeaderShownEvenWithSingleActiveDb()
+    public void PlcPills_SinglePlc_OnePill_LabelEmpty()
+    {
+        // Same-PLC active set → one pill, label empty (PLC name not shown
+        // when there's only one PLC).
+        var (vm, _, _, _, _) = CreateMultiDbVm();
+
+        vm.PlcPills.Should().HaveCount(1,
+            "both DBs are on the same PLC — only one pill");
+        vm.PlcPills[0].Label.Should().BeEmpty(
+            "single-PLC sessions omit the PLC label on the pill");
+    }
+
+    [Fact]
+    public void PlcPills_MultiPlcProject_SingleActiveDb_AnchorPillHasPlcName()
     {
         // Multi-PLC project (host signals it by passing a non-empty
-        // currentPlcName) with only one DB active. The PLC header must
-        // still show — users want to see which PLC they're on without
-        // first adding a peer to make multiplicity visible.
+        // currentPlcName) with only one DB active. The pill must carry
+        // the PLC name so the user knows which machine they're on.
         var xml = TestFixtures.LoadXml("flat-db.xml");
         var info = new SimaticMLParser().Parse(xml);
         var configLoader = new ConfigLoader(null);
@@ -640,56 +638,10 @@ public class BulkChangeViewModelMultiDbTests
             new HierarchyAnalyzer(), bulkService, tracker, configLoader,
             currentPlcName: "PLC_Anchor");
 
-        vm.ActiveDbChipGroups.Should().HaveCount(1);
-        vm.ActiveDbChipGroups[0].HasPlcHeader.Should().BeTrue(
-            "multi-PLC project: PLC name is part of context even with one DB");
-        vm.ActiveDbChipGroups[0].PlcName.Should().Be("PLC_Anchor");
-    }
-
-    [Fact]
-    public void ChipGroups_SinglePlc_HeaderHidden()
-    {
-        // Same-PLC active set → one group, header suppressed so the row
-        // stays clean (long PLC names like CPU-LB-6-1_V26_01_13_SL_MM
-        // would otherwise eat the toolbar).
-        var (vm, _, _, _, _) = CreateMultiDbVm();
-
-        vm.ActiveDbChipGroups.Should().HaveCount(1);
-        vm.ActiveDbChipGroups[0].HasPlcHeader.Should().BeFalse(
-            "single-PLC sessions hide the group header");
-        vm.ActiveDbChipGroups[0].Chips.Should().HaveCount(2,
-            "both DBs land in the one shared-PLC group");
-    }
-
-    [Fact]
-    public void ChipBodyClick_SingleDb_OpensPicker()
-    {
-        // Single-DB session with a wired enumerator. Clicking the only
-        // chip's body has nothing to solo away, so it should fall through
-        // to opening the picker — one-click "switch DB" gesture.
-        var focusedXml = TestFixtures.LoadXml("flat-db.xml");
-        var focused = new SimaticMLParser().Parse(focusedXml);
-        var configLoader = new ConfigLoader(null);
-        var bulkService = new BulkChangeService(new ChangeLogger(), configLoader);
-        var tracker = Substitute.For<IUsageTracker>();
-        tracker.GetStatus().Returns(new UsageStatus(0, 100));
-
-        var vm = new BulkChangeViewModel(
-            focused, focusedXml,
-            new HierarchyAnalyzer(), bulkService, tracker, configLoader,
-            enumerateDataBlocks: () => new[]
-            {
-                new DataBlockSummary(focused.Name, ""),
-            },
-            switchToDataBlock: _ => focusedXml);
-
-        vm.IsDataBlocksDropdownOpen.Should().BeFalse();
-
-        vm.ActiveDbChips.Should().HaveCount(1);
-        vm.ActiveDbChips[0].SoloCommand.Execute(null);
-
-        vm.IsDataBlocksDropdownOpen.Should().BeTrue(
-            "the only chip's click falls through to opening the picker");
+        vm.PlcPills.Should().HaveCount(1);
+        vm.PlcPills[0].PlcName.Should().Be("PLC_Anchor");
+        vm.PlcPills[0].Label.Should().Be("PLC_Anchor",
+            "multi-PLC context: pill label shows the PLC name");
     }
 
     [Fact]
@@ -748,10 +700,10 @@ public class BulkChangeViewModelMultiDbTests
         var pending = original == "0" ? "1" : "0";
         peerLeaf.EditableStartValue = pending;
 
-        // Close the peer chip — pending edit triggers the 3-way prompt;
+        // Remove the peer — pending edit triggers the 3-way prompt;
         // FakeMessageBox returns "No" so the edits get stashed.
-        var peerChip = vm.ActiveDbChips.First(c => c.DisplayName == peer.Name);
-        peerChip.CloseCommand.Execute(null);
+        var peerDbRef = vm.AllActiveDbs.First(d => d.Info.Name == peer.Name);
+        vm.RequestRemoveActiveDb(peerDbRef);
 
         vm.AllActiveDbs.Should().HaveCount(1, "peer was removed from active set");
         vm.HasStashedDbs.Should().BeTrue("Keep branch must stash edits for restore");
@@ -779,6 +731,330 @@ public class BulkChangeViewModelMultiDbTests
             .SelectMany(r => new[] { r }.Concat(r.AllDescendants()))
             .First(n => n.IsLeaf && n.PendingValue == pending);
         restoredLeaf.PendingValue.Should().Be(pending);
+    }
+
+    // ── Pill-row tests (#pill-refactor) ──────────────────────────────────────
+
+    [Fact]
+    public void PlcPills_PillSelectionChange_AddsDbToActiveSet()
+    {
+        // Simulating a user checking a DB in a pill's popup: when SelectedDbs
+        // gains a new DataBlockListItem the VM must add it to the active set.
+        var focusedXml = TestFixtures.LoadXml("flat-db.xml");
+        var peerXml = TestFixtures.LoadXml("nested-struct-db.xml");
+        var focused = new SimaticMLParser().Parse(focusedXml);
+        var peer = new SimaticMLParser().Parse(peerXml);
+
+        var configLoader = new ConfigLoader(null);
+        var bulkService = new BulkChangeService(new ChangeLogger(), configLoader);
+        var tracker = Substitute.For<IUsageTracker>();
+        tracker.GetStatus().Returns(new UsageStatus(0, 100));
+
+        var available = new[]
+        {
+            new DataBlockSummary(focused.Name, ""),
+            new DataBlockSummary(peer.Name, ""),
+        };
+
+        var vm = new BulkChangeViewModel(
+            focused, focusedXml,
+            new HierarchyAnalyzer(), bulkService, tracker, configLoader,
+            enumerateDataBlocks: () => available,
+            buildActiveDbForSummary: s => s.Name == peer.Name
+                ? new ActiveDb(peer, peerXml, onApply: null)
+                : null);
+
+        vm.AllActiveDbs.Should().HaveCount(1, "single-DB session to start");
+        vm.PlcPills.Should().HaveCount(1);
+
+        // Simulate pill selection gaining the peer (as if the user opened
+        // the pill popup and checked the peer row).
+        var peerSummary = new DataBlockSummary(peer.Name, "");
+        var peerItem = new DataBlockListItem(peerSummary, isActive: false, isAnchor: false);
+        var pill = vm.PlcPills[0];
+        pill.AvailableDbs.Add(peerItem);   // mimic lazy-loaded list
+        pill.SelectedDbs.Add(peerItem);    // mimic user checking the row
+
+        vm.AllActiveDbs.Should().HaveCount(2,
+            "adding a DB to pill.SelectedDbs must trigger AddActiveDbFromSummary");
+    }
+
+    [Fact]
+    public void PlcPills_LastDbRemoval_Refused()
+    {
+        // When there is exactly one active DB, removing it from the pill's
+        // SelectedDbs must be refused — the dialog always keeps ≥1 active DB.
+        var xml = TestFixtures.LoadXml("flat-db.xml");
+        var info = new SimaticMLParser().Parse(xml);
+        var configLoader = new ConfigLoader(null);
+        var bulkService = new BulkChangeService(new ChangeLogger(), configLoader);
+        var tracker = Substitute.For<IUsageTracker>();
+        tracker.GetStatus().Returns(new UsageStatus(0, 100));
+
+        var vm = new BulkChangeViewModel(
+            info, xml,
+            new HierarchyAnalyzer(), bulkService, tracker, configLoader);
+
+        vm.AllActiveDbs.Should().HaveCount(1);
+        vm.PlcPills.Should().HaveCount(1);
+        var pill = vm.PlcPills[0];
+        var initial = pill.SelectedDbs.Count;
+
+        // Attempt to deselect the only item.
+        if (initial > 0)
+            pill.SelectedDbs.RemoveAt(0);
+
+        // Active set must remain unchanged.
+        vm.AllActiveDbs.Should().HaveCount(1,
+            "pill removal of the last DB must be refused by the cascade");
+    }
+
+    [Fact]
+    public void PlcPills_CascadeReentrancy_NoInfiniteLoop()
+    {
+        // When the cascade rewrites pill.SelectedDbs via SyncSelectedDbs, the
+        // re-entrancy guard must prevent a second cascade from firing.
+        // This test ensures the scenario completes without hanging or throwing.
+        var focusedXml = TestFixtures.LoadXml("flat-db.xml");
+        var peerXml = TestFixtures.LoadXml("nested-struct-db.xml");
+        var focused = new SimaticMLParser().Parse(focusedXml);
+        var peer = new SimaticMLParser().Parse(peerXml);
+
+        var configLoader = new ConfigLoader(null);
+        var bulkService = new BulkChangeService(new ChangeLogger(), configLoader);
+        var tracker = Substitute.For<IUsageTracker>();
+        tracker.GetStatus().Returns(new UsageStatus(0, 100));
+
+        var peerDb = new ActiveDb(peer, peerXml, onApply: null);
+
+        var vm = new BulkChangeViewModel(
+            focused, focusedXml,
+            new HierarchyAnalyzer(), bulkService, tracker, configLoader,
+            additionalActiveDbs: new[] { peerDb });
+
+        vm.AllActiveDbs.Should().HaveCount(2);
+        vm.PlcPills.Should().HaveCount(1, "both DBs on same PLC → one pill");
+
+        // Remove one DB — this triggers RebuildPlcPills which calls
+        // SyncSelectedDbs on the pill. The guard must prevent a second cascade.
+        var peerDbRef = vm.AllActiveDbs.First(d => d.Info.Name == peer.Name);
+        var act = () => vm.RequestRemoveActiveDb(peerDbRef);
+        act.Should().NotThrow("cascade re-entrancy guard must prevent infinite recursion");
+        vm.AllActiveDbs.Should().HaveCount(1);
+    }
+
+    [Fact]
+    public void PlcPillViewModel_IsOpen_LazyLoadsOnce()
+    {
+        // PlcPillViewModel.IsOpen = true triggers a lazy load; the second
+        // open skips the fetch (IsLoaded guard).
+        int loadCallCount = 0;
+        var pill = new PlcPillViewModel(
+            plcName: "PLC_A",
+            isAnchor: true,
+            initialActiveItems: Array.Empty<DataBlockListItem>(),
+            loadDbs: _ =>
+            {
+                loadCallCount++;
+                return Task.FromResult<IReadOnlyList<DataBlockListItem>>(
+                    Array.Empty<DataBlockListItem>());
+            });
+
+        pill.IsLoaded.Should().BeFalse("not loaded until first open");
+
+        // First open — triggers load.
+        pill.IsOpen = true;
+        pill.IsLoaded.Should().BeTrue("loaded after first open");
+        loadCallCount.Should().Be(1, "exactly one fetch on first open");
+
+        // Second open — must not re-fetch.
+        pill.IsOpen = false;
+        pill.IsOpen = true;
+        loadCallCount.Should().Be(1, "cache hit: no second fetch");
+    }
+
+    [Fact]
+    public void PlcPillViewModel_FirstOpen_FallsBackToInitialActiveItems()
+    {
+        // When SelectedDbs is empty at first popup-open (no cascade ever
+        // mutated it), OnIsOpenFlippedToTrue's snapshot is empty and must
+        // fall back to _initialActiveItems so the load's matching items
+        // become selected. Without the fallback the row would render with
+        // zero selections after loading.
+        var summary = new DataBlockSummary("DB_Initial", "", plcName: "PLC_X", number: 7);
+        var initialItem = new DataBlockListItem(summary, isActive: true, isAnchor: true);
+
+        // Loader returns a fresh DataBlockListItem with the same identity —
+        // matches what LoadDbsForPlcAsync does in production (fresh wrappers
+        // around cached DataBlockSummary objects).
+        var loadedItem = new DataBlockListItem(summary, isActive: true, isAnchor: true);
+
+        var pill = new PlcPillViewModel(
+            plcName: "PLC_X",
+            isAnchor: true,
+            initialActiveItems: new[] { initialItem },
+            loadDbs: _ => Task.FromResult<IReadOnlyList<DataBlockListItem>>(
+                new[] { loadedItem }));
+
+        // Don't touch SelectedDbs — the constructor seeds it from
+        // initialActiveItems, but the test models the "user clears it
+        // before first open" case by clearing here. Both states (untouched
+        // or pre-cleared to empty) take the fallback branch.
+        pill.SelectedDbs.Clear();
+
+        pill.IsOpen = true;
+
+        pill.SelectedDbs.Should().HaveCount(1,
+            "fallback re-syncs against _initialActiveItems when SelectedDbs is empty");
+        pill.SelectedDbs[0].Should().BeSameAs(loadedItem,
+            "selection must reference the loaded instance, not the initialActiveItems one");
+    }
+
+    [Fact]
+    public void PlcPills_RemoveLastDbForPLC_PillVanishes()
+    {
+        // When the last active DB for a PLC is removed, the pill for that
+        // PLC must disappear from PlcPills (RebuildPlcPills re-runs on cascade).
+        var focusedXml = TestFixtures.LoadXml("flat-db.xml");
+        var peerXml = TestFixtures.LoadXml("nested-struct-db.xml");
+        var focused = new SimaticMLParser().Parse(focusedXml);
+        var peer = new SimaticMLParser().Parse(peerXml);
+
+        var configLoader = new ConfigLoader(null);
+        var bulkService = new BulkChangeService(new ChangeLogger(), configLoader);
+        var tracker = Substitute.For<IUsageTracker>();
+        tracker.GetStatus().Returns(new UsageStatus(0, 100));
+
+        // Two DBs on two different PLCs → two pills.
+        var peerDb = new ActiveDb(peer, peerXml, onApply: null, plcName: "PLC_B");
+
+        var vm = new BulkChangeViewModel(
+            focused, focusedXml,
+            new HierarchyAnalyzer(), bulkService, tracker, configLoader,
+            currentPlcName: "PLC_A",
+            additionalActiveDbs: new[] { peerDb });
+
+        vm.PlcPills.Should().HaveCount(2, "two PLCs → two pills");
+
+        // Remove the peer (PLC_B's only DB).
+        var peerDbRef = vm.AllActiveDbs.First(d => d.Info.Name == peer.Name);
+        vm.RequestRemoveActiveDb(peerDbRef);
+
+        vm.AllActiveDbs.Should().HaveCount(1);
+        vm.PlcPills.Should().HaveCount(1,
+            "PLC_B's pill must vanish when its last DB is removed");
+        vm.PlcPills[0].PlcName.Should().Be("PLC_A");
+    }
+
+    // ── "+ PLC" workflow tests (#pill-refactor empty-pill path) ──────────────
+
+    /// <summary>
+    /// Shared fixture for the "+ PLC"-flow tests: one active DB on PLC_A,
+    /// plus two project-only PLCs (PLC_B with a DB, PLC_C with a DB) that
+    /// have no active DB so they show up in <see cref="BulkChangeViewModel.InactiveProjectPlcs"/>.
+    /// </summary>
+    private static BulkChangeViewModel BuildVmForAddPlcTests()
+    {
+        var focusedXml = TestFixtures.LoadXml("flat-db.xml");
+        var focused = new SimaticMLParser().Parse(focusedXml);
+        var configLoader = new ConfigLoader(null);
+        var bulkService = new BulkChangeService(new ChangeLogger(), configLoader);
+        var tracker = Substitute.For<IUsageTracker>();
+        tracker.GetStatus().Returns(new UsageStatus(0, 100));
+
+        var available = new[]
+        {
+            new DataBlockSummary(focused.Name, "", plcName: "PLC_A"),
+            new DataBlockSummary("DB_OnB",    "", plcName: "PLC_B"),
+            new DataBlockSummary("DB_OnC",    "", plcName: "PLC_C"),
+        };
+
+        return new BulkChangeViewModel(
+            focused, focusedXml,
+            new HierarchyAnalyzer(), bulkService, tracker, configLoader,
+            currentPlcName: "PLC_A",
+            enumerateDataBlocks: () => available,
+            // Both callbacks wired so HasDataBlockSwitcher = true and the
+            // InactiveProjectPlcs / CanAddPlc properties evaluate their
+            // real logic (they short-circuit to "empty" when switching is
+            // unwired).
+            switchToDataBlock: _ => focusedXml,
+            buildActiveDbForSummary: _ => null);
+    }
+
+    [Fact]
+    public void AddPlcToRow_AddsEmptyPillForCandidate()
+    {
+        var vm = BuildVmForAddPlcTests();
+        vm.PlcPills.Should().HaveCount(1, "one PLC active to start");
+        vm.InactiveProjectPlcs.Should().BeEquivalentTo(new[] { "PLC_B", "PLC_C" });
+
+        vm.AddPlcToRow("PLC_B");
+
+        vm.PlcPills.Should().HaveCount(2, "PLC_B's empty pill joins the row");
+        vm.PlcPills.Select(p => p.PlcName).Should().Contain("PLC_B");
+        var newPill = vm.PlcPills.First(p => p.PlcName == "PLC_B");
+        newPill.SelectedDbs.Should().BeEmpty("the pill is added with no DB active yet");
+        vm.InactiveProjectPlcs.Should().BeEquivalentTo(new[] { "PLC_C" },
+            "PLC_B is now in the row, so it drops off the candidate list");
+    }
+
+    [Fact]
+    public void AddPlcToRow_RejectsUnknownPlcName()
+    {
+        var vm = BuildVmForAddPlcTests();
+        var pillsBefore = vm.PlcPills.Count;
+
+        // Garbage input the click stream could produce after a project refresh
+        // dropped that PLC, or via a hostile caller.
+        vm.AddPlcToRow("DoesNotExist");
+
+        vm.PlcPills.Count.Should().Be(pillsBefore,
+            "unknown PLC must be silently rejected, no pill added");
+        // Critically: the bad name must NOT have landed in _extraPillPlcs (we
+        // verify this indirectly: a subsequent valid add stays clean).
+        vm.AddPlcToRow("PLC_B");
+        vm.PlcPills.Should().HaveCount(pillsBefore + 1);
+        vm.PlcPills.Select(p => p.PlcName).Should().NotContain("DoesNotExist");
+    }
+
+    [Fact]
+    public void AddPlcToRow_RejectsAlreadyActivePlc()
+    {
+        var vm = BuildVmForAddPlcTests();
+        var pillsBefore = vm.PlcPills.Count;
+
+        // PLC_A is the anchor — already in the row.
+        vm.AddPlcToRow("PLC_A");
+
+        vm.PlcPills.Count.Should().Be(pillsBefore,
+            "PLC already in row → no-op, no duplicate pill");
+    }
+
+    [Fact]
+    public void InactiveProjectPlcs_ReflectsCurrentRow()
+    {
+        var vm = BuildVmForAddPlcTests();
+        vm.InactiveProjectPlcs.Should().BeEquivalentTo(new[] { "PLC_B", "PLC_C" });
+
+        vm.AddPlcToRow("PLC_B");
+        vm.InactiveProjectPlcs.Should().BeEquivalentTo(new[] { "PLC_C" });
+
+        vm.AddPlcToRow("PLC_C");
+        vm.InactiveProjectPlcs.Should().BeEmpty("every PLC is in the row now");
+    }
+
+    [Fact]
+    public void CanAddPlc_FlipsAsRowFills()
+    {
+        var vm = BuildVmForAddPlcTests();
+        vm.CanAddPlc.Should().BeTrue("two PLCs still inactive");
+
+        vm.AddPlcToRow("PLC_B");
+        vm.CanAddPlc.Should().BeTrue("PLC_C still available");
+
+        vm.AddPlcToRow("PLC_C");
+        vm.CanAddPlc.Should().BeFalse("every project PLC is now in the row");
     }
 
     /// <summary>

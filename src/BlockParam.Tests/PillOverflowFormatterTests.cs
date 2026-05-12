@@ -193,6 +193,25 @@ public class PillOverflowFormatterTests
     }
 
     [Fact]
+    public void Abbreviation_mode_falls_back_to_display_when_abbreviation_is_empty()
+    {
+        // Overflow trips (4 entries > 3-entry threshold) so the formatter
+        // switches to abbreviations. One row has no abbreviation — without
+        // the fallback the trigger would render ", DB2, DB3, DB4" (empty
+        // first token, which reads as ugly leading commas). With the
+        // fallback the row keeps its full display even in abbreviation
+        // mode. Used by real TIA DBs that lack a Number.
+        var items = Items(
+            ("DB_NoNumber", ""),
+            ("DB_HasTwo",   "DB2"),
+            ("DB_HasThree", "DB3"),
+            ("DB_HasFour",  "DB4"));
+
+        Format(items, new PillOverflowOptions { AbbreviateAfterEntries = 3 })
+            .Should().Be("DB_NoNumber, DB2, DB3, DB4");
+    }
+
+    [Fact]
     public void Generic_overload_works_on_arbitrary_source_type()
     {
         // Verify T is not coupled to PillRowViewModel — use an int[] where
