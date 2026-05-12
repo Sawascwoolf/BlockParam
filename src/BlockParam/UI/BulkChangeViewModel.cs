@@ -270,7 +270,10 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
 
         InlineRuleExtractor.ApplyTo(configLoader.GetConfig(), dataBlockInfo);
 
-        BulkPreview = new ObservableCollection<BulkPreviewEntry>();
+        // Bulk-preview collection slice (#80 slice 5). NewValue is host-owned;
+        // pass it via callback so the slice's Summary stays in sync without
+        // pulling NewValue into the slice's surface.
+        BulkPreview = new BulkPreviewViewModel(() => _newValue);
         // Pending-edits + existing-issues collections slice (#80 slice 4).
         // The underlying PendingEditStore stays on the host VM — too many
         // call sites mutate it directly to make moving it worth the churn
@@ -415,12 +418,11 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     public ObservableCollection<ScopeLevel> AvailableScopes { get; }
 
     /// <summary>
-    /// Live preview of the rows that would be staged if the user clicked "Set".
-    /// Rebuilt reactively whenever target / scope / value changes — it does
-    /// NOT itself mutate any node. On Set, entries are transferred to
-    /// pending and the collection is cleared.
+    /// Bulk-preview collection slice (#80 slice 5). Owns the live preview
+    /// rows plus the section-header summary / conflict-overlap readouts.
+    /// XAML binds via <c>{Binding BulkPreview.Entries}</c> etc.
     /// </summary>
-    public ObservableCollection<BulkPreviewEntry> BulkPreview { get; }
+    public BulkPreviewViewModel BulkPreview { get; }
 
     /// <summary>
     /// Pending-edits + existing-issues slice (#80 slice 4). Owns the
@@ -438,44 +440,6 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     public ObservableCollection<StashedDbState> StashedDbs { get; }
 
     public bool HasStashedDbs => StashedDbs.Count > 0;
-
-    public bool HasBulkPreview => BulkPreview.Count > 0;
-    public int BulkPreviewCount => BulkPreview.Count;
-
-    /// <summary>Preview rows whose node already has a pending edit — they'd overwrite it on Set.</summary>
-    public int BulkPreviewConflictCount => BulkPreview.Count(e => e.HasPendingConflict);
-
-    public bool HasBulkPreviewConflict => BulkPreviewConflictCount > 0;
-
-    public string BulkPreviewConflictWarning
-    {
-        get
-        {
-            int n = BulkPreviewConflictCount;
-            if (n == 0) return "";
-            return n == 1
-                ? "\u26A0 1 overlap with pending edits \u2014 will be overwritten."
-                : $"\u26A0 {n} overlap with pending edits \u2014 will be overwritten.";
-        }
-    }
-
-    /// <summary>
-    /// Summary shown in the section header, e.g. "90 ⇢ 85" when all rows share
-    /// the same original value, or "{count} targets" otherwise.
-    /// </summary>
-    public string BulkPreviewSummary
-    {
-        get
-        {
-            if (BulkPreview.Count == 0) return "";
-            var firstOrig = BulkPreview[0].OriginalValue;
-            bool homogeneous = BulkPreview.All(e =>
-                string.Equals(e.OriginalValue, firstOrig, StringComparison.Ordinal));
-            if (homogeneous && !string.IsNullOrEmpty(firstOrig))
-                return $"{firstOrig} \u21E2 {_newValue}";
-            return $"{BulkPreview.Count} targets";
-        }
-    }
 
     /// <summary>Flat list for the ListView (proper column alignment).</summary>
     public ObservableCollection<MemberNodeViewModel> FlatMembers => _flatTreeManager.FlatList;
@@ -2667,14 +2631,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
 
         // Only raise bindings when the result might actually have changed.
         if (wasNonEmpty || BulkPreview.Count > 0)
-        {
-            OnPropertyChanged(nameof(HasBulkPreview));
-            OnPropertyChanged(nameof(BulkPreviewCount));
-            OnPropertyChanged(nameof(BulkPreviewSummary));
-            OnPropertyChanged(nameof(BulkPreviewConflictCount));
-            OnPropertyChanged(nameof(HasBulkPreviewConflict));
-            OnPropertyChanged(nameof(BulkPreviewConflictWarning));
-        }
+            BulkPreview.RaiseDerivedChanged();
     }
 
     private void TryAddPreviewEntry(MemberNodeViewModel node)
@@ -2715,7 +2672,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     private void RebuildPendingEdits()
     {
         var bulkPaths = BulkPreview.Count > 0
-            ? new HashSet<string>(BulkPreview.Select(e => e.Path), StringComparer.Ordinal)
+            ? new HashSet<string>(BulkPreview.Entries.Select(e => e.Path), StringComparer.Ordinal)
             : null;
         Pending.Rebuild(RootMembers, bulkPaths);
     }

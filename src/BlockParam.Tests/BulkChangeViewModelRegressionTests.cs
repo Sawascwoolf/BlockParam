@@ -251,7 +251,7 @@ public class BulkChangeViewModelRegressionTests : IDisposable
         vm.NewValue = "";
         vm.FlushPendingHighlighting();
 
-        vm.BulkPreview.Should().BeEmpty(
+        vm.BulkPreview.Entries.Should().BeEmpty(
             "empty NewValue must produce no BulkPreview entries (hasInput guard at ComputeBulkPreview)");
     }
 
@@ -281,14 +281,14 @@ public class BulkChangeViewModelRegressionTests : IDisposable
         vm.NewValue = "42";
         vm.FlushPendingHighlighting();
 
-        vm.BulkPreview.Count.Should().Be(0,
+        vm.BulkPreview.Entries.Count.Should().Be(0,
             "all 4 leaves already hold the target value — skip-already-matching must produce 0 entries");
 
         // Now a different value — all 4 differ
         vm.NewValue = "99";
         vm.FlushPendingHighlighting();
 
-        vm.BulkPreview.Count.Should().Be(4,
+        vm.BulkPreview.Entries.Count.Should().Be(4,
             "all 4 leaves differ from target '99' — all must appear in BulkPreview");
     }
 
@@ -324,10 +324,10 @@ public class BulkChangeViewModelRegressionTests : IDisposable
         vm.NewValue = "99";
         vm.FlushPendingHighlighting();
 
-        vm.BulkPreviewConflictCount.Should().Be(1,
+        vm.BulkPreview.ConflictCount.Should().Be(1,
             "one leaf has a pending inline edit that the bulk Set would overwrite");
-        vm.HasBulkPreviewConflict.Should().BeTrue();
-        vm.BulkPreviewConflictWarning.Should().Contain("1 overlap",
+        vm.BulkPreview.HasConflict.Should().BeTrue();
+        vm.BulkPreview.ConflictWarning.Should().Contain("1 overlap",
             "warning must mention the count of overlapping edits");
     }
 
@@ -354,8 +354,8 @@ public class BulkChangeViewModelRegressionTests : IDisposable
         vm.NewValue = "85";
         vm.FlushPendingHighlighting();
 
-        vm.BulkPreview.Should().HaveCount(4, "all 4 differ from 85");
-        vm.BulkPreviewSummary.Should().Be("42 ⇢ 85",
+        vm.BulkPreview.Entries.Should().HaveCount(4, "all 4 differ from 85");
+        vm.BulkPreview.Summary.Should().Be("42 ⇢ 85",
             "homogeneous originals should produce 'orig ⇢ new' format");
 
         // Make one leaf heterogeneous by staging a pending edit
@@ -391,7 +391,7 @@ public class BulkChangeViewModelRegressionTests : IDisposable
 
         // Speed.StartValue="1500", Enable.StartValue="true" — different originals
         vm2.BulkPreview.Count.Should().BeGreaterThan(0, "both differ from 'ON'");
-        vm2.BulkPreviewSummary.Should().MatchRegex(@"^\d+ targets$",
+        vm2.BulkPreview.Summary.Should().MatchRegex(@"^\d+ targets$",
             "heterogeneous originals (Speed='1500' vs Enable='true') must use '{N} targets' format");
 
         vm2.Dispose();

@@ -862,7 +862,7 @@ public class BulkChangeViewModelInvariantTests
         // a transition path forgets to call it, the stale rows survive.
         if (!vm.HasScope && !vm.IsManualMode)
         {
-            vm.BulkPreview.Should().BeEmpty(
+            vm.BulkPreview.Entries.Should().BeEmpty(
                 "invariant 7: BulkPreview must be empty when no scope is " +
                 "selected and not in manual mode");
         }
@@ -871,7 +871,7 @@ public class BulkChangeViewModelInvariantTests
         // from the live tree — same shape as invariant 6 for PendingEdits.
         // Removing a DB from the active set must vacate any preview rows or
         // manual-selection paths that pointed at its leaves (§H3).
-        var orphanedPreview = vm.BulkPreview
+        var orphanedPreview = vm.BulkPreview.Entries
             .Where(e => !reachableNodes.Contains(e.Node))
             .Select(e => e.Path)
             .ToList();

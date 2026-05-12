@@ -649,8 +649,8 @@
                                     HorizontalAlignment="Right" VerticalAlignment="Top"
                                     Padding="3,0" Margin="0,-2,-2,0"
                                     IsHitTestVisible="False"
-                                    Visibility="{Binding HasBulkPreview, Converter={StaticResource BoolToVis}}">
-                                <TextBlock Text="{Binding BulkPreviewCount}" FontSize="8"
+                                    Visibility="{Binding BulkPreview.HasEntries, Converter={StaticResource BoolToVis}}">
+                                <TextBlock Text="{Binding BulkPreview.Count}" FontSize="8"
                                            FontWeight="Bold" Foreground="White"
                                            HorizontalAlignment="Center" VerticalAlignment="Center"/>
                             </Border>
@@ -908,8 +908,8 @@
                                         <!-- Overlap warning: bulk will overwrite existing pending edits -->
                                         <Border Margin="12,0,12,12" Padding="6,4"
                                                 Background="#fffbef" BorderBrush="#e0a93a" BorderThickness="1"
-                                                Visibility="{Binding HasBulkPreviewConflict, Converter={StaticResource BoolToVis}}">
-                                            <TextBlock Text="{Binding BulkPreviewConflictWarning}"
+                                                Visibility="{Binding BulkPreview.HasConflict, Converter={StaticResource BoolToVis}}">
+                                            <TextBlock Text="{Binding BulkPreview.ConflictWarning}"
                                                        FontSize="10.5" Foreground="#6b4a0a"
                                                        TextWrapping="Wrap"/>
                                         </Border>
@@ -980,12 +980,12 @@
                                     <Border DockPanel.Dock="Left" Margin="6,0,0,0" Padding="5,0"
                                             Background="#1f6feb" CornerRadius="8"
                                             VerticalAlignment="Center"
-                                            Visibility="{Binding HasBulkPreview, Converter={StaticResource BoolToVis}}">
-                                        <TextBlock Text="{Binding BulkPreviewCount}"
+                                            Visibility="{Binding BulkPreview.HasEntries, Converter={StaticResource BoolToVis}}">
+                                        <TextBlock Text="{Binding BulkPreview.Count}"
                                                    FontSize="10" FontWeight="Bold" Foreground="White"/>
                                     </Border>
                                     <TextBlock DockPanel.Dock="Right" HorizontalAlignment="Right"
-                                               Text="{Binding BulkPreviewSummary}"
+                                               Text="{Binding BulkPreview.Summary}"
                                                FontSize="10" Foreground="#5b6471"
                                                FontFamily="Consolas,Courier New"
                                                VerticalAlignment="Center" Margin="0,0,10,0"/>
@@ -1000,7 +1000,7 @@
                                             <MultiDataTrigger>
                                                 <MultiDataTrigger.Conditions>
                                                     <Condition Binding="{Binding Inspector.IsBulkPreviewExpanded}" Value="True"/>
-                                                    <Condition Binding="{Binding HasBulkPreview}" Value="False"/>
+                                                    <Condition Binding="{Binding BulkPreview.HasEntries}" Value="False"/>
                                                 </MultiDataTrigger.Conditions>
                                                 <Setter Property="Visibility" Value="Visible"/>
                                             </MultiDataTrigger>
@@ -1012,7 +1012,7 @@
                                            TextWrapping="Wrap"/>
                             </Border>
                             <!-- List -->
-                            <ItemsControl ItemsSource="{Binding BulkPreview}"
+                            <ItemsControl ItemsSource="{Binding BulkPreview.Entries}"
                                           Background="White">
                                 <ItemsControl.Style>
                                     <Style TargetType="ItemsControl">
@@ -1021,7 +1021,7 @@
                                             <MultiDataTrigger>
                                                 <MultiDataTrigger.Conditions>
                                                     <Condition Binding="{Binding Inspector.IsBulkPreviewExpanded}" Value="True"/>
-                                                    <Condition Binding="{Binding HasBulkPreview}" Value="True"/>
+                                                    <Condition Binding="{Binding BulkPreview.HasEntries}" Value="True"/>
                                                 </MultiDataTrigger.Conditions>
                                                 <Setter Property="Visibility" Value="Visible"/>
                                             </MultiDataTrigger>
