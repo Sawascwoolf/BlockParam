@@ -1,0 +1,4 @@
+# Shell scripts must stay LF-ended so they execute correctly under git-bash on
+# Windows CI runners. Without this, autocrlf converts the shebang to "#!/usr/bin/env bash\r"
+# and bash exits 127 ("command not found").
+*.sh    text eol=lf

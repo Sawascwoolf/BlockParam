@@ -1,22 +1,16 @@
 name: Screenshots
 
 # Triggers:
-#  - pull_request:    auto-run when UI-touching files change (path filter)
 #  - push:            opt-in via "[run-shots]" anywhere in the HEAD commit message
 #  - workflow_dispatch: manual button on any branch
 #
-# Produces hero shots + search-filter MP4 only — the slow narrated workflow
-# video lives in workflow-video.yml so the cheap pipeline isn't held hostage
-# by the expensive one.
+# Intentionally no pull_request trigger — visual assets are deliberate
+# regeneration steps, not per-PR output worth ~2 min/run. Use the marker
+# or the Actions UI button when you actually want fresh artifacts.
+#
+# Produces hero shots + search-filter MP4 only; the slow narrated workflow
+# video lives in workflow-video.yml.
 on:
-  pull_request:
-    branches: [main]
-    paths:
-      - 'src/BlockParam/**'
-      - 'src/BlockParam.DevLauncher/**'
-      - 'assets/screenshots/scripts/**'
-      - 'ci/stubs/**'
-      - '.github/workflows/screenshots.yml'
   push:
   workflow_dispatch:
 
