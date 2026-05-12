@@ -1,12 +1,8 @@
 name: Screenshots
 
-# Generates marketing artifacts (website shots, workflow video, search MP4)
-# from DevLauncher --capture and uploads them. No diffing, no commits — the
-# review surface is "download the artifact and eyeball the PR's UI output".
-#
-# Only runs when files that could change visuals are touched, otherwise
-# the runtime cost (build DevLauncher + 3 ffmpeg pipelines, ~5-10 min) is
-# pure waste.
+# Auto-run on UI changes: hero shots + search-filter MP4 only. The workflow
+# video pipeline is the slow one (~5 min by itself) and lives in
+# workflow-video.yml as a manual workflow_dispatch run.
 on:
   pull_request:
     paths:
@@ -23,7 +19,7 @@ concurrency:
 
 jobs:
   capture:
-    name: Capture screenshots + videos
+    name: Hero shots + search-filter MP4
     runs-on: windows-latest
     # The build itself uses Siemens stubs (no TIA Portal on hosted runner);
     # DevLauncher's capture path reads DB XML from disk, so no real Openness
@@ -55,13 +51,6 @@ jobs:
       - name: Verify ffmpeg
         run: ffmpeg -version
 
-      - name: Render workflow video frames + stitch
-        shell: bash
-        run: |
-          src/BlockParam.DevLauncher/bin/Debug/net48/BlockParam.DevLauncher.exe \
-            --capture-script assets/screenshots/scripts/workflow_inline.json
-          bash assets/screenshots/scripts/build_workflow_video.sh
-
       - name: Render search-filter frames + stitch
         shell: bash
         run: |
@@ -70,6 +59,11 @@ jobs:
           bash assets/screenshots/scripts/build_search_gif.sh
 
       - name: Build website hero shots
+        # build_website_shots.sh crops the bulk + inline tiles from the
+        # workflow_inline.mp4 source PNGs that are committed to the repo.
+        # We do NOT regenerate those frames here — that's the manual
+        # workflow-video.yml run. The rules tile is captured live by
+        # DevLauncher --capture-rules so it always reflects current UI.
         shell: bash
         run: bash assets/screenshots/scripts/build_website_shots.sh
 
@@ -78,15 +72,11 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: screenshots
-          # Everything the pipelines emit. Keep the structure so reviewers
-          # can compare side-by-side with the committed assets/ tree.
           path: |
             web/assets/workflow_bulk.png
             web/assets/workflow_inline.png
             web/assets/workflow_rules.png
-            assets/screenshots/workflow/workflow_inline.mp4
             assets/screenshots/search/search_filter.mp4
-            assets/screenshots/workflow/wf*.png
             assets/screenshots/search/gif_search_*.png
           if-no-files-found: warn
           retention-days: 14
