@@ -874,6 +874,43 @@ public class BulkChangeViewModelMultiDbTests
     }
 
     [Fact]
+    public void PlcPillViewModel_FirstOpen_FallsBackToInitialActiveItems()
+    {
+        // When SelectedDbs is empty at first popup-open (no cascade ever
+        // mutated it), OnIsOpenFlippedToTrue's snapshot is empty and must
+        // fall back to _initialActiveItems so the load's matching items
+        // become selected. Without the fallback the row would render with
+        // zero selections after loading.
+        var summary = new DataBlockSummary("DB_Initial", "", plcName: "PLC_X", number: 7);
+        var initialItem = new DataBlockListItem(summary, isActive: true, isAnchor: true);
+
+        // Loader returns a fresh DataBlockListItem with the same identity —
+        // matches what LoadDbsForPlcAsync does in production (fresh wrappers
+        // around cached DataBlockSummary objects).
+        var loadedItem = new DataBlockListItem(summary, isActive: true, isAnchor: true);
+
+        var pill = new PlcPillViewModel(
+            plcName: "PLC_X",
+            isAnchor: true,
+            initialActiveItems: new[] { initialItem },
+            loadDbs: _ => Task.FromResult<IReadOnlyList<DataBlockListItem>>(
+                new[] { loadedItem }));
+
+        // Don't touch SelectedDbs — the constructor seeds it from
+        // initialActiveItems, but the test models the "user clears it
+        // before first open" case by clearing here. Both states (untouched
+        // or pre-cleared to empty) take the fallback branch.
+        pill.SelectedDbs.Clear();
+
+        pill.IsOpen = true;
+
+        pill.SelectedDbs.Should().HaveCount(1,
+            "fallback re-syncs against _initialActiveItems when SelectedDbs is empty");
+        pill.SelectedDbs[0].Should().BeSameAs(loadedItem,
+            "selection must reference the loaded instance, not the initialActiveItems one");
+    }
+
+    [Fact]
     public void PlcPills_RemoveLastDbForPLC_PillVanishes()
     {
         // When the last active DB for a PLC is removed, the pill for that

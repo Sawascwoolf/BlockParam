@@ -194,7 +194,12 @@ public class PlcPillViewModel : ViewModelBase
             }
             // Fall back to the constructor snapshot if SelectedDbs is empty —
             // covers the "no cascade ever fired" case where _initialActiveItems
-            // is still the authoritative initial selection.
+            // is still the authoritative initial selection. Safe because
+            // pre-load there's no UI path to deselect items (the popup is
+            // closed); the only way SelectedDbs becomes empty before load
+            // is the cascade calling SyncSelectedDbs([]) when the PLC has
+            // no active DBs — and in that case _initialActiveItems is
+            // already empty too, so this loop is a no-op.
             if (keepKeys.Count == 0)
             {
                 foreach (var active in _initialActiveItems)

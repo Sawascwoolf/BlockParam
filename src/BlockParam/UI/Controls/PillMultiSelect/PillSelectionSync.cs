@@ -50,6 +50,14 @@ namespace BlockParam.UI.Controls.PillMultiSelect;
 /// initial read still syncs IsSelected. External mutations to that property will
 /// NOT be reflected in the checkbox — the same constraint WPF data binding has.
 /// </para>
+/// <para>
+/// <b>Reference equality contract</b>: items in <c>SelectedItems</c> are matched
+/// to their backing rows by <see cref="object.ReferenceEquals"/> (see
+/// <c>ContainsRef</c> / <c>RemoveRef</c>). Hosts that swap the row collection
+/// — e.g., diagnostic capture code that rebuilds <c>AvailableDbs</c> from
+/// fresh instances — must also re-point <c>SelectedItems</c> at those same
+/// instances, otherwise the checkbox-to-host edge silently breaks.
+/// </para>
 /// </remarks>
 internal sealed class PillSelectionSync
 {
