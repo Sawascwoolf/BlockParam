@@ -374,41 +374,70 @@ internal static class PillRowCapture
         IReadOnlyList<DataBlockSummary>? addPlcSource = null,
         int hoverTooltipIndex = -1)
     {
-        // PillMultiSelect: one per PLC. Always show the PLC label, matching
-        // PlcPillGroupsService.Build. Scenes whose seed has an empty
-        // OverridePlc will render with no label — that's the accurate
-        // single-PLC-without-name state.
-        var pillVms = new List<PlcPillViewModel>(seeds.Count);
+        // Route pill construction through PlcPillGroupsService.Build so the
+        // capture stays honest if Build's ordering / anchor / extraPlcs
+        // logic changes later. We fabricate ActiveDb seeds (with stub
+        // DataBlockInfo and no XML — capture never reads either) and let
+        // Build pick the order, label, and PLC groupings.
+        var perPlcItems = new Dictionary<string, IReadOnlyList<DataBlockListItem>>(
+            StringComparer.Ordinal);
+        var activeDbs = new List<ActiveDb>();
+        var extraPlcs = new List<string>();
+
         foreach (var seed in seeds)
         {
+            var plc = seed.OverridePlc;
             var items = seed.Source
                 .Select(db => new DataBlockListItem(
-                    summary: RebrandPlc(db, seed.OverridePlc),
+                    summary: RebrandPlc(db, plc),
                     isActive: seed.ActiveNames.Contains(db.Name, StringComparer.Ordinal),
                     isAnchor: false))
                 .ToList();
-            var initialActive = items.Where(it => it.IsActive).ToList();
+            perPlcItems[plc] = items;
 
-            var vm = new PlcPillViewModel(
-                plcName: seed.OverridePlc,
-                isAnchor: false,
-                initialActiveItems: initialActive,
-                loadDbs: _ => Task.FromResult<IReadOnlyList<DataBlockListItem>>(items));
-            vm.Label = seed.OverridePlc;
+            foreach (var sourceDb in seed.Source)
+            {
+                if (!seed.ActiveNames.Contains(sourceDb.Name, StringComparer.Ordinal))
+                    continue;
+                var info = new DataBlockInfo(
+                    name: sourceDb.Name,
+                    number: sourceDb.Number ?? 0,
+                    memoryLayout: "Optimized",
+                    blockType: "GlobalDB",
+                    members: System.Array.Empty<MemberNode>());
+                activeDbs.Add(new ActiveDb(info, xml: "", onApply: null, plcName: plc));
+            }
+            if (seed.ActiveNames.Count == 0)
+                extraPlcs.Add(plc);
+        }
 
-            // PlcPillViewModel's constructor pre-populates AvailableDbs
-            // from initialActiveItems only, which is correct for the live
-            // app where LoadCommand later swaps in the full list. The
-            // capture bypasses LoadCommand entirely, so we have to seed
-            // AvailableDbs with every source DB up-front so the popup-open
-            // scenes render the full candidate list (and the closed-pill
-            // scenes stay unaffected because the trigger only reads the
-            // selected subset).
+        Func<string, Task<IReadOnlyList<DataBlockListItem>>> loadDbs = plc =>
+            Task.FromResult(perPlcItems.TryGetValue(plc, out var items)
+                ? items
+                : System.Array.Empty<DataBlockListItem>());
+
+        var anchorPlc = seeds.Count > 0 ? seeds[0].OverridePlc : "";
+        var pillVms = PlcPillGroupsService.Build(
+            activeDbs: activeDbs,
+            anchorPlcName: anchorPlc,
+            loadDbsForPlc: loadDbs,
+            extraPlcs: extraPlcs).ToList();
+
+        // The capture bypasses each pill's async LoadCommand entirely (so
+        // popup-open scenes render synchronously). Pre-populate AvailableDbs
+        // with the full per-PLC list, then re-point SelectedDbs at the same
+        // instances — PillSelectionSync uses reference equality, so the
+        // selected items have to be the very objects backing the rows or
+        // the trigger renders an empty count.
+        foreach (var vm in pillVms)
+        {
+            if (!perPlcItems.TryGetValue(vm.PlcName, out var items)) continue;
             vm.AvailableDbs.Clear();
             foreach (var it in items)
                 vm.AvailableDbs.Add(it);
-
-            pillVms.Add(vm);
+            vm.SelectedDbs.Clear();
+            foreach (var it in items)
+                if (it.IsActive) vm.SelectedDbs.Add(it);
         }
 
         var wrap = new WrapPanel { Orientation = Orientation.Horizontal };

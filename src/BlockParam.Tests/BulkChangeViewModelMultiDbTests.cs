@@ -909,6 +909,117 @@ public class BulkChangeViewModelMultiDbTests
         vm.PlcPills[0].PlcName.Should().Be("PLC_A");
     }
 
+    // ── "+ PLC" workflow tests (#pill-refactor empty-pill path) ──────────────
+
+    /// <summary>
+    /// Shared fixture for the "+ PLC"-flow tests: one active DB on PLC_A,
+    /// plus two project-only PLCs (PLC_B with a DB, PLC_C with a DB) that
+    /// have no active DB so they show up in <see cref="BulkChangeViewModel.InactiveProjectPlcs"/>.
+    /// </summary>
+    private static BulkChangeViewModel BuildVmForAddPlcTests()
+    {
+        var focusedXml = TestFixtures.LoadXml("flat-db.xml");
+        var focused = new SimaticMLParser().Parse(focusedXml);
+        var configLoader = new ConfigLoader(null);
+        var bulkService = new BulkChangeService(new ChangeLogger(), configLoader);
+        var tracker = Substitute.For<IUsageTracker>();
+        tracker.GetStatus().Returns(new UsageStatus(0, 100));
+
+        var available = new[]
+        {
+            new DataBlockSummary(focused.Name, "", plcName: "PLC_A"),
+            new DataBlockSummary("DB_OnB",    "", plcName: "PLC_B"),
+            new DataBlockSummary("DB_OnC",    "", plcName: "PLC_C"),
+        };
+
+        return new BulkChangeViewModel(
+            focused, focusedXml,
+            new HierarchyAnalyzer(), bulkService, tracker, configLoader,
+            currentPlcName: "PLC_A",
+            enumerateDataBlocks: () => available,
+            // Both callbacks wired so HasDataBlockSwitcher = true and the
+            // InactiveProjectPlcs / CanAddPlc properties evaluate their
+            // real logic (they short-circuit to "empty" when switching is
+            // unwired).
+            switchToDataBlock: _ => focusedXml,
+            buildActiveDbForSummary: _ => null);
+    }
+
+    [Fact]
+    public void AddPlcToRow_AddsEmptyPillForCandidate()
+    {
+        var vm = BuildVmForAddPlcTests();
+        vm.PlcPills.Should().HaveCount(1, "one PLC active to start");
+        vm.InactiveProjectPlcs.Should().BeEquivalentTo(new[] { "PLC_B", "PLC_C" });
+
+        vm.AddPlcToRow("PLC_B");
+
+        vm.PlcPills.Should().HaveCount(2, "PLC_B's empty pill joins the row");
+        vm.PlcPills.Select(p => p.PlcName).Should().Contain("PLC_B");
+        var newPill = vm.PlcPills.First(p => p.PlcName == "PLC_B");
+        newPill.SelectedDbs.Should().BeEmpty("the pill is added with no DB active yet");
+        vm.InactiveProjectPlcs.Should().BeEquivalentTo(new[] { "PLC_C" },
+            "PLC_B is now in the row, so it drops off the candidate list");
+    }
+
+    [Fact]
+    public void AddPlcToRow_RejectsUnknownPlcName()
+    {
+        var vm = BuildVmForAddPlcTests();
+        var pillsBefore = vm.PlcPills.Count;
+
+        // Garbage input the click stream could produce after a project refresh
+        // dropped that PLC, or via a hostile caller.
+        vm.AddPlcToRow("DoesNotExist");
+
+        vm.PlcPills.Count.Should().Be(pillsBefore,
+            "unknown PLC must be silently rejected, no pill added");
+        // Critically: the bad name must NOT have landed in _extraPillPlcs (we
+        // verify this indirectly: a subsequent valid add stays clean).
+        vm.AddPlcToRow("PLC_B");
+        vm.PlcPills.Should().HaveCount(pillsBefore + 1);
+        vm.PlcPills.Select(p => p.PlcName).Should().NotContain("DoesNotExist");
+    }
+
+    [Fact]
+    public void AddPlcToRow_RejectsAlreadyActivePlc()
+    {
+        var vm = BuildVmForAddPlcTests();
+        var pillsBefore = vm.PlcPills.Count;
+
+        // PLC_A is the anchor — already in the row.
+        vm.AddPlcToRow("PLC_A");
+
+        vm.PlcPills.Count.Should().Be(pillsBefore,
+            "PLC already in row → no-op, no duplicate pill");
+    }
+
+    [Fact]
+    public void InactiveProjectPlcs_ReflectsCurrentRow()
+    {
+        var vm = BuildVmForAddPlcTests();
+        vm.InactiveProjectPlcs.Should().BeEquivalentTo(new[] { "PLC_B", "PLC_C" });
+
+        vm.AddPlcToRow("PLC_B");
+        vm.InactiveProjectPlcs.Should().BeEquivalentTo(new[] { "PLC_C" });
+
+        vm.AddPlcToRow("PLC_C");
+        vm.InactiveProjectPlcs.Should().BeEmpty("every PLC is in the row now");
+    }
+
+    [Fact]
+    public void CanAddPlc_FlipsAsRowFills()
+    {
+        var vm = BuildVmForAddPlcTests();
+        vm.CanAddPlc.Should().BeTrue("two PLCs still inactive");
+
+        vm.AddPlcToRow("PLC_B");
+        vm.CanAddPlc.Should().BeTrue("PLC_C still available");
+
+        vm.AddPlcToRow("PLC_C");
+        vm.CanAddPlc.Should().BeFalse("every project PLC is now in the row");
+    }
+
     /// <summary>
     /// Convenience enum shared across multi-DB tests. Yes/No/Cancel maps
     /// onto the three named outcomes for each typed prompt method.

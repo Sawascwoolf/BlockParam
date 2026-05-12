@@ -4,6 +4,7 @@ using System.Collections.ObjectModel;
 using System.Collections.Specialized;
 using System.Threading.Tasks;
 using System.Windows.Input;
+using BlockParam.Diagnostics;
 using BlockParam.Models;
 
 namespace BlockParam.UI;
@@ -178,28 +179,44 @@ public class PlcPillViewModel : ViewModelBase
         {
             IReadOnlyList<DataBlockListItem> items = await _loadDbs(_plcName);
 
+            // Snapshot the CURRENT selection by (Name, PlcName) identity
+            // before clearing AvailableDbs. Reading SelectedDbs (not the
+            // construction-time _initialActiveItems) preserves any
+            // mutations the cascade pushed in via SyncSelectedDbs between
+            // construction and first popup open — without this snapshot,
+            // those mutations would be silently overwritten when we
+            // re-sync against the freshly loaded list below.
+            var keepKeys = new HashSet<(string Name, string Plc)>();
+            foreach (var obj in SelectedDbs)
+            {
+                if (obj is DataBlockListItem dbi)
+                    keepKeys.Add((dbi.Name ?? "", dbi.PlcName ?? ""));
+            }
+            // Fall back to the constructor snapshot if SelectedDbs is empty —
+            // covers the "no cascade ever fired" case where _initialActiveItems
+            // is still the authoritative initial selection.
+            if (keepKeys.Count == 0)
+            {
+                foreach (var active in _initialActiveItems)
+                    keepKeys.Add((active.Name ?? "", active.PlcName ?? ""));
+            }
+
             // Populate AvailableDbs on the dispatcher thread.
             AvailableDbs.Clear();
             foreach (var item in items)
                 AvailableDbs.Add(item);
 
-            // Sync selection: items that are in the initial active set stay
-            // selected. Use (Name, PlcName) identity, same as FindActiveDb.
+            // Re-sync selection: items in AvailableDbs whose identity is in
+            // the kept set become selected. Use (Name, PlcName) identity,
+            // same as FindActiveDb.
             _syncingSelection = true;
             try
             {
                 SelectedDbs.Clear();
                 foreach (var item in AvailableDbs)
                 {
-                    foreach (var active in _initialActiveItems)
-                    {
-                        if (string.Equals(item.Name, active.Name, StringComparison.Ordinal)
-                            && string.Equals(item.PlcName, active.PlcName, StringComparison.Ordinal))
-                        {
-                            SelectedDbs.Add(item);
-                            break;
-                        }
-                    }
+                    if (keepKeys.Contains((item.Name ?? "", item.PlcName ?? "")))
+                        SelectedDbs.Add(item);
                 }
             }
             finally
@@ -212,9 +229,10 @@ public class PlcPillViewModel : ViewModelBase
         }
         catch (Exception ex)
         {
-            // Silently swallow load failures — the pill just stays empty.
-            // The VM should have already logged.
-            _ = ex;
+            // Pill is left empty when the load fails. Log so the failure is
+            // visible instead of vanishing — the host-side LoadDbsForPlcAsync
+            // doesn't log on its own.
+            Log.Warning(ex, "PlcPillViewModel: DB load failed for PLC {Plc}", _plcName);
         }
     }
 

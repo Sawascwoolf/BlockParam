@@ -1084,13 +1084,15 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     /// <summary>
     /// Adds <paramref name="plcName"/> to the row as an empty pill. The
     /// new pill loads its DB list lazily on first popup open, same as the
-    /// active-set-derived pills. No-op if the PLC is already represented.
+    /// active-set-derived pills. No-op if the PLC isn't a current candidate
+    /// (already in row, or not present in the project's DB list at all) —
+    /// this keeps <see cref="_extraPillPlcs"/> from accumulating stale
+    /// names if the click stream races a project mutation.
     /// </summary>
     public void AddPlcToRow(string plcName)
     {
         if (string.IsNullOrEmpty(plcName)) return;
-        if (PlcPills.Any(p => string.Equals(p.PlcName, plcName, StringComparison.Ordinal)))
-            return;
+        if (!InactiveProjectPlcs.Contains(plcName, StringComparer.Ordinal)) return;
         _extraPillPlcs.Add(plcName);
         RebuildPlcPills();
         OnPropertyChanged(nameof(InactiveProjectPlcs));
@@ -1148,99 +1150,24 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         set => SetProperty(ref _isAddDbPopupOpen, value);
     }
 
-    // Lazy-loaded once on first "+ Add DB" open. Contains ALL project DBs,
-    // grouped by PlcName inside the pill via GroupKeyMemberPath="PlcName".
-    private ObservableCollection<DataBlockListItem>? _allProjectDbs;
-
-    public ObservableCollection<DataBlockListItem> AllProjectDbs =>
-        _allProjectDbs ??= new ObservableCollection<DataBlockListItem>();
-
-    // Transient selection inside the "+ Add DB" pill. CollectionChanged
-    // routes to AddActiveDbToSet / RemoveActiveDb.
-    private ObservableCollection<object>? _addDbPopupSelection;
-
-    public ObservableCollection<object> AddDbPopupSelection
-    {
-        get
-        {
-            if (_addDbPopupSelection == null)
-            {
-                _addDbPopupSelection = new ObservableCollection<object>();
-                _addDbPopupSelection.CollectionChanged += OnAddDbPopupSelectionChanged;
-            }
-            return _addDbPopupSelection;
-        }
-    }
-
-    private void OnAddDbPopupSelectionChanged(
-        object? sender,
-        NotifyCollectionChangedEventArgs e)
-    {
-        if (_syncingPillSelection) return;
-        _syncingPillSelection = true;
-        try
-        {
-            if (e.NewItems != null)
-            {
-                foreach (var item in e.NewItems)
-                {
-                    if (item is DataBlockListItem dbi && !GetActiveStatusFor(dbi.Summary).isActive)
-                        AddActiveDbFromSummary(dbi.Summary);
-                }
-            }
-            if (e.OldItems != null)
-            {
-                foreach (var item in e.OldItems)
-                {
-                    if (item is DataBlockListItem dbi)
-                    {
-                        if (State.Dbs.Count <= 1)
-                        {
-                            // Refuse last-DB removal: snap selection back.
-                            SyncAddDbPopupSelection();
-                            return;
-                        }
-                        var match = FindActiveDb(dbi.Summary);
-                        if (match != null) RemoveActiveDb(match);
-                    }
-                }
-            }
-        }
-        finally
-        {
-            _syncingPillSelection = false;
-        }
-    }
-
-    private void SyncAddDbPopupSelection()
-    {
-        if (_addDbPopupSelection == null) return;
-        _syncingPillSelection = true;
-        try
-        {
-            _addDbPopupSelection.Clear();
-            if (_allProjectDbs != null)
-            {
-                foreach (var item in _allProjectDbs)
-                {
-                    var (isActive, _) = GetActiveStatusFor(item.Summary);
-                    if (isActive)
-                        _addDbPopupSelection.Add(item);
-                }
-            }
-        }
-        finally
-        {
-            _syncingPillSelection = false;
-        }
-    }
-
     private void RebuildPlcPills()
     {
         // Unsubscribe old pills before clearing.
         foreach (var pill in PlcPills)
             pill.SelectionChanged -= OnPillSelectionChanged;
         PlcPills.Clear();
+
+        // Prune _extraPillPlcs of names that no longer correspond to any
+        // project PLC. Without this, a manually-added pill survives even
+        // after its PLC disappears from the project (e.g., after a
+        // refresh), and the orphan stays in the row indefinitely.
+        if (_extraPillPlcs.Count > 0 && _availableDataBlocks != null)
+        {
+            var projectPlcs = new HashSet<string>(
+                _availableDataBlocks.Select(d => d.PlcName ?? ""),
+                StringComparer.Ordinal);
+            _extraPillPlcs.RemoveWhere(p => !projectPlcs.Contains(p));
+        }
 
         var newPills = PlcPillGroupsService.Build(
             _activeDbs,
@@ -1348,39 +1275,6 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         return Task.FromResult<IReadOnlyList<DataBlockListItem>>(items);
     }
 
-    /// <summary>
-    /// Called by the "+ Add DB" click handler to populate <see cref="AllProjectDbs"/>
-    /// on first open. Uses the same cache as the existing DB enumeration so
-    /// no second fetch is needed.
-    /// </summary>
-    internal void EnsureAllProjectDbsLoaded()
-    {
-        if (_allProjectDbs != null && _allProjectDbs.Count > 0) return;
-        if (_enumerateDataBlocks == null) return;
-
-        LoadAvailableDataBlocks(force: false);
-
-        var source = _availableDataBlocks ?? Array.Empty<DataBlockSummary>();
-        var collection = AllProjectDbs; // triggers lazy init
-        _syncingPillSelection = true;
-        try
-        {
-            collection.Clear();
-            foreach (var s in source)
-            {
-                var (isActive, isAnchor) = GetActiveStatusFor(s);
-                var item = new DataBlockListItem(s, isActive, isAnchor);
-                item.ToggleRequested += OnDataBlockListItemToggled;
-                collection.Add(item);
-            }
-        }
-        finally
-        {
-            _syncingPillSelection = false;
-        }
-        SyncAddDbPopupSelection();
-    }
-
     // ── End pill-row ──────────────────────────────────────────────────────────
 
     /// <summary>
@@ -1393,11 +1287,11 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     internal void RequestRemoveActiveDb(ActiveDb db)
     {
         Log.Information(
-            "[gesture] Chip × on {Name} | {State}", db.Info.Name, SnapshotState());
+            "[gesture] PillRemove on {Name} | {State}", db.Info.Name, SnapshotState());
         if (State.Dbs.Count <= 1)
         {
             Log.Information(
-                "Refusing chip-close on {Name} — at least one DB must stay active",
+                "Refusing pill removal on {Name} — at least one DB must stay active",
                 db.Info.Name);
             return;
         }
@@ -1646,16 +1540,17 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
-    /// Reference-based variant of <see cref="SoloActiveDb"/> used by the
-    /// chip-body click. Avoids the summary round-trip (chip already holds
-    /// the live <see cref="ActiveDb"/>). Same prompts on every dropped DB
-    /// with pending edits; if the user cancels mid-solo, the remaining
-    /// drops are skipped and the active set is whatever survived.
+    /// Reference-based variant of <see cref="SoloActiveDb"/>. Originally
+    /// called from the chip body click; surviving as a public seam used by
+    /// tests and (in future) any "solo this DB" pill affordance. Same
+    /// prompts on every dropped DB with pending edits; if the user cancels
+    /// mid-solo, the remaining drops are skipped and the active set is
+    /// whatever survived.
     /// </summary>
     public void SoloActiveDbByReference(ActiveDb target)
     {
         Log.Information(
-            "[gesture] Chip body click → solo {Name} | {State}",
+            "[gesture] SoloByReference → {Name} | {State}",
             target.Info.Name, SnapshotState());
         if (State.Dbs.Count <= 1)
         {

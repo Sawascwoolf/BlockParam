@@ -370,4 +370,6 @@ Beim Schließen des Dialogs werden sie verworfen. Trotzdem schließen?</value><c
   <data name="PillMultiSelect_Reset" xml:space="preserve"><value>Zurücksetzen</value></data>
   <data name="PillMultiSelect_Clear" xml:space="preserve"><value>Leeren</value><comment>Tooltip auf der X-Schaltfläche, die die Auswahl der Pill-Schaltfläche leert</comment></data>
   <data name="PillMultiSelect_PlusMore" xml:space="preserve"><value>+{0} weitere</value><comment>{0} = Anzahl der ausgeblendeten ausgewählten Einträge</comment></data>
+  <!-- Pill-row DB picker (#pill-refactor): trailing affordance to add a PLC's pill to the row. -->
+  <data name="PillRow_AddDb" xml:space="preserve"><value>+ SPS</value><comment>Schaltfläche, die den projektweiten SPS-Picker öffnet, um eine SPS-Pille zur Zeile hinzuzufügen</comment></data>
 </root>
