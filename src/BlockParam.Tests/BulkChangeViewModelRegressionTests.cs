@@ -935,8 +935,12 @@ public class BulkChangeViewModelRegressionTests : IDisposable
         public bool AskYesNo(string message, string title) => true;
         public void ShowError(string message, string title) { }
         public void ShowInfo(string message, string title) { }
-        public YesNoCancelResult AskYesNoCancel(string message, string title)
-            => YesNoCancelResult.Cancel;
+        public ApplyStashCancelResult AskApplyStashCancel(string message, string title)
+            => ApplyStashCancelResult.Cancel;
+        public AddOrReplaceResult AskAddOrReplace(string message, string title)
+            => AddOrReplaceResult.Cancel;
+        public CloseWithStashResult AskCloseWithStash(string message, string title)
+            => CloseWithStashResult.Cancel;
     }
 
     /// <summary>
