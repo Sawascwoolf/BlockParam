@@ -1,11 +1,18 @@
 name: CI
 
 on:
+  # Pushes give pre-PR feedback on any branch. PRs re-run against the
+  # merge-with-base so an out-of-date branch can't sneak in a broken merge.
+  # Concurrency group cancels superseded runs on the same ref so the
+  # push + PR-sync double trigger doesn't double-bill.
+  push:
+    branches-ignore:
+      - 'gh-pages'
   pull_request:
     branches: [main]
 
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
