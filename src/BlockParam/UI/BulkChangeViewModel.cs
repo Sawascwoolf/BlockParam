@@ -161,9 +161,6 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     // current selection are skipped while this is true, so user-entered input
     // isn't clobbered by selection changes.
     private bool _newValueTouched;
-    private GlobSuggestionProvider? _suggestionProvider;
-    private IReadOnlyList<AutocompleteSuggestion> _suggestions = Array.Empty<AutocompleteSuggestion>();
-    private IReadOnlyList<AutocompleteSuggestion> _filteredSuggestions = Array.Empty<AutocompleteSuggestion>();
     private string _statusText = "";
     private string _validationError = "";
     private string _constraintInfo = "";
@@ -177,7 +174,6 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     private bool _constantsForced;
     private string _tagTableAge = "";
     private bool _isRefreshing;
-    private bool _suppressSuggestions;
     private bool _lastApplySucceeded;
     private bool _hasPendingChanges;
     private readonly IReadOnlyList<string> _projectLanguages;
@@ -255,6 +251,8 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         _autocompleteProvider = tagTableCache != null
             ? new AutocompleteProvider(configLoader, tagTableCache)
             : null;
+        // Autocomplete suggestion slice (#80 slice 3).
+        Autocomplete = new AutocompleteViewModel();
 
         UpdateTagTableAge();
 
@@ -2300,32 +2298,12 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         }
     }
 
-    /// <summary>Suggestion provider for autocomplete (null = no suggestions).</summary>
-    public GlobSuggestionProvider? SuggestionProvider
-    {
-        get => _suggestionProvider;
-        private set => SetProperty(ref _suggestionProvider, value);
-    }
-
-    /// <summary>All autocomplete suggestions for the current member.</summary>
-    public IReadOnlyList<AutocompleteSuggestion> Suggestions
-    {
-        get => _suggestions;
-        private set => SetProperty(ref _suggestions, value);
-    }
-
-    /// <summary>Filtered suggestions based on current text input.</summary>
-    public IReadOnlyList<AutocompleteSuggestion> FilteredSuggestions
-    {
-        get => _filteredSuggestions;
-        private set
-        {
-            if (SetProperty(ref _filteredSuggestions, value))
-                OnPropertyChanged(nameof(HasFilteredSuggestions));
-        }
-    }
-
-    public bool HasFilteredSuggestions => _filteredSuggestions.Count > 0;
+    /// <summary>
+    /// Autocomplete suggestion slice (#80 slice 3). Owns the candidate
+    /// pool, the filtered subset, and the glob provider. XAML binds via
+    /// <c>{Binding Autocomplete.FilteredSuggestions}</c> etc.
+    /// </summary>
+    public AutocompleteViewModel Autocomplete { get; }
 
     /// <summary>Returns filtered suggestions for a specific member (used by inline autocomplete).</summary>
     public IReadOnlyList<AutocompleteSuggestion> GetSuggestionsForMember(MemberNodeViewModel memberVm, string filter)
@@ -2349,15 +2327,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         else
             return Array.Empty<AutocompleteSuggestion>();
 
-        if (string.IsNullOrWhiteSpace(filter))
-            return all;
-
-        var terms = filter.Trim().Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
-        return all.Where(s => terms.All(term =>
-            s.DisplayName.IndexOf(term, StringComparison.OrdinalIgnoreCase) >= 0 ||
-            s.Value.IndexOf(term, StringComparison.OrdinalIgnoreCase) >= 0 ||
-            (s.Comment != null && s.Comment.IndexOf(term, StringComparison.OrdinalIgnoreCase) >= 0)))
-            .ToList();
+        return AutocompleteViewModel.Match(all, filter);
     }
 
     /// <summary>
@@ -2379,57 +2349,15 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         _newValue = value; // Set backing field to avoid re-triggering filter
         OnPropertyChanged(nameof(NewValue));
         ValidateValue();
-        FilteredSuggestions = Array.Empty<AutocompleteSuggestion>();
+        Autocomplete.ClearFiltered();
         UpdateHighlighting();
     }
 
     /// <summary>Show suggestions filtered by current text (always opens).</summary>
-    public void ShowAllSuggestions()
-    {
-        if (_suggestions.Count == 0) return;
-
-        var filter = _newValue?.Trim() ?? "";
-        if (string.IsNullOrEmpty(filter))
-        {
-            FilteredSuggestions = _suggestions.ToList();
-            return;
-        }
-
-        var terms = filter.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
-        FilteredSuggestions = _suggestions
-            .Where(s => terms.All(term =>
-                s.DisplayName.IndexOf(term, StringComparison.OrdinalIgnoreCase) >= 0 ||
-                s.Value.IndexOf(term, StringComparison.OrdinalIgnoreCase) >= 0 ||
-                (s.Comment != null && s.Comment.IndexOf(term, StringComparison.OrdinalIgnoreCase) >= 0)))
-            .ToList();
-    }
+    public void ShowAllSuggestions() => Autocomplete.ShowAll(_newValue?.Trim() ?? "");
 
     /// <summary>Toggle: show filtered suggestions or hide them.</summary>
-    public void ToggleAllSuggestions()
-    {
-        if (_filteredSuggestions.Count > 0)
-        {
-            FilteredSuggestions = Array.Empty<AutocompleteSuggestion>();
-        }
-        else
-        {
-            // Apply current text as filter (empty = show all)
-            var filter = _newValue?.Trim() ?? "";
-            if (string.IsNullOrEmpty(filter))
-            {
-                FilteredSuggestions = _suggestions.ToList();
-                return;
-            }
-
-            var terms = filter.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
-            FilteredSuggestions = _suggestions
-                .Where(s => terms.All(term =>
-                    s.DisplayName.IndexOf(term, StringComparison.OrdinalIgnoreCase) >= 0 ||
-                    s.Value.IndexOf(term, StringComparison.OrdinalIgnoreCase) >= 0 ||
-                    (s.Comment != null && s.Comment.IndexOf(term, StringComparison.OrdinalIgnoreCase) >= 0)))
-                .ToList();
-        }
-    }
+    public void ToggleAllSuggestions() => Autocomplete.Toggle(_newValue?.Trim() ?? "");
 
     /// <summary>Whether to show constant suggestions. Forced on when a rule with tagTableReference matches.</summary>
     public bool ShowConstants
@@ -2565,9 +2493,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(CanEdit));
         ValidationError = "";
         ConstraintInfo = "";
-        SuggestionProvider = null;
-        Suggestions = Array.Empty<AutocompleteSuggestion>();
-        FilteredSuggestions = Array.Empty<AutocompleteSuggestion>();
+        Autocomplete.ClearCandidates();
 
         // In manual multi-select mode, scope analysis does not apply.
         if (IsManualMode)
@@ -3305,32 +3231,8 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             ScanExistingViolations(child, validator);
     }
 
-    private void UpdateFilteredSuggestions()
-    {
-        if (_suggestions.Count == 0 || _suppressSuggestions)
-        {
-            FilteredSuggestions = Array.Empty<AutocompleteSuggestion>();
-            return;
-        }
-
-        var filter = _newValue?.Trim() ?? "";
-        if (string.IsNullOrEmpty(filter))
-        {
-            // Don't show list when input is empty
-            FilteredSuggestions = Array.Empty<AutocompleteSuggestion>();
-            return;
-        }
-
-        // Split by whitespace → AND: all terms must match somewhere
-        var terms = filter.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
-
-        FilteredSuggestions = _suggestions
-            .Where(s => terms.All(term =>
-                s.DisplayName.IndexOf(term, StringComparison.OrdinalIgnoreCase) >= 0 ||
-                s.Value.IndexOf(term, StringComparison.OrdinalIgnoreCase) >= 0 ||
-                (s.Comment != null && s.Comment.IndexOf(term, StringComparison.OrdinalIgnoreCase) >= 0)))
-            .ToList();
-    }
+    private void UpdateFilteredSuggestions() =>
+        Autocomplete.ApplyFilter(_newValue?.Trim() ?? "");
 
     /// <summary>
     /// Ensures tag tables are exported and cached. Called lazily on first need.
@@ -3359,9 +3261,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     /// </summary>
     private void ReloadSuggestions()
     {
-        Suggestions = Array.Empty<AutocompleteSuggestion>();
-        FilteredSuggestions = Array.Empty<AutocompleteSuggestion>();
-        SuggestionProvider = null;
+        Autocomplete.ClearCandidates();
 
         if (_selectedFlatMember == null || !_selectedFlatMember.IsLeaf) return;
         if (!_showConstants) return;
@@ -3390,10 +3290,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         }
 
         if (suggestions.Count > 0)
-        {
-            SuggestionProvider = new GlobSuggestionProvider(suggestions);
-            Suggestions = suggestions;
-        }
+            Autocomplete.SetCandidates(suggestions, new GlobSuggestionProvider(suggestions));
     }
 
     /// <summary>
@@ -4514,11 +4411,11 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
                 // Value is reset after Apply: the just-committed value would
                 // misrepresent the current state (#8). Clear touched so the
                 // next selection can prefill cleanly.
-                _suppressSuggestions = true;
+                Autocomplete.SuppressSuggestions = true;
                 _newValueTouched = false;
                 _newValue = "";
                 OnPropertyChanged(nameof(NewValue));
-                _suppressSuggestions = false;
+                Autocomplete.SuppressSuggestions = false;
             }
         }
     }

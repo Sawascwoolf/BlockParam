@@ -645,12 +645,12 @@ public class BulkChangeViewModelRegressionTests : IDisposable
 
         // Confirm starting state: ShowConstants=false → Suggestions empty
         vm.ShowConstants.Should().BeFalse("no rule forces ShowConstants on");
-        vm.Suggestions.Should().BeEmpty("ShowConstants is off — no suggestions loaded yet");
+        vm.Autocomplete.Suggestions.Should().BeEmpty("ShowConstants is off — no suggestions loaded yet");
 
         // Toggle on → Suggestions must populate from the tag-table cache
         vm.ShowConstants = true;
 
-        vm.Suggestions.Should().NotBeEmpty(
+        vm.Autocomplete.Suggestions.Should().NotBeEmpty(
             "ShowConstants=true must load suggestions from the tag-table cache");
     }
 
@@ -700,22 +700,22 @@ public class BulkChangeViewModelRegressionTests : IDisposable
 
         // Force ShowConstants on to populate _suggestions
         vm.ShowConstants = true;
-        vm.Suggestions.Should().HaveCount(10, "all 10 entries loaded");
-        vm.FilteredSuggestions.Should().BeEmpty("not yet toggled open");
+        vm.Autocomplete.Suggestions.Should().HaveCount(10, "all 10 entries loaded");
+        vm.Autocomplete.FilteredSuggestions.Should().BeEmpty("not yet toggled open");
 
         // Set NewValue without flushing the debounce — FilteredSuggestions stays empty
         // (we want to test the toggle path, not the auto-filter path)
         vm.NewValue = "ON";
         // Don't flush: we want to test ToggleAllSuggestions when the list starts empty.
 
-        vm.FilteredSuggestions.Should().BeEmpty("debounce not yet flushed — list still empty");
+        vm.Autocomplete.FilteredSuggestions.Should().BeEmpty("debounce not yet flushed — list still empty");
 
         // First toggle: closed → open (FilteredSuggestions filtered by NewValue="ON")
         vm.ToggleAllSuggestions();
 
-        vm.FilteredSuggestions.Should().NotBeEmpty("toggle-open must populate FilteredSuggestions");
+        vm.Autocomplete.FilteredSuggestions.Should().NotBeEmpty("toggle-open must populate FilteredSuggestions");
         // Only VAL_ON_1 and VAL_ON_2 have "ON" in name — rest do not
-        vm.FilteredSuggestions.Should().AllSatisfy(s =>
+        vm.Autocomplete.FilteredSuggestions.Should().AllSatisfy(s =>
             (s.DisplayName.IndexOf("ON", StringComparison.OrdinalIgnoreCase) >= 0
              || s.Value.IndexOf("ON", StringComparison.OrdinalIgnoreCase) >= 0
              || (s.Comment?.IndexOf("ON", StringComparison.OrdinalIgnoreCase) ?? -1) >= 0)
@@ -724,7 +724,7 @@ public class BulkChangeViewModelRegressionTests : IDisposable
         // Second toggle: close → FilteredSuggestions clears
         vm.ToggleAllSuggestions();
 
-        vm.FilteredSuggestions.Should().BeEmpty("second toggle-call must close the list");
+        vm.Autocomplete.FilteredSuggestions.Should().BeEmpty("second toggle-call must close the list");
     }
 
     // ─────────────────────────────────────────────────────────────────────

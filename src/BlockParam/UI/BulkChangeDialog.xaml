@@ -847,8 +847,8 @@
                                                  below the TextBox inside the sidebar column. -->
                                             <Border Background="White" BorderBrush="#CCC" BorderThickness="1"
                                                     MaxHeight="250" Margin="0,-1,0,0"
-                                                    Visibility="{Binding HasFilteredSuggestions, Converter={StaticResource BoolToVis}}">
-                                                <ListBox ItemsSource="{Binding FilteredSuggestions}"
+                                                    Visibility="{Binding Autocomplete.HasFilteredSuggestions, Converter={StaticResource BoolToVis}}">
+                                                <ListBox ItemsSource="{Binding Autocomplete.FilteredSuggestions}"
                                                          MaxHeight="250" BorderThickness="0"
                                                          VirtualizingStackPanel.IsVirtualizing="True"
                                                          ItemContainerStyle="{StaticResource SuggestionItemStyle}"

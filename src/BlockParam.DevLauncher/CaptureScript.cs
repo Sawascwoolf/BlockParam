@@ -439,7 +439,7 @@ public static class SceneApplier
         BulkChangeViewModel vm, BulkChangeDialog dialog, string displayName)
     {
         bool matched = false;
-        foreach (var s in vm.FilteredSuggestions)
+        foreach (var s in vm.Autocomplete.FilteredSuggestions)
         {
             if (s.DisplayName == displayName) { s.IsHoverPreview = true; matched = true; }
         }
@@ -460,7 +460,7 @@ public static class SceneApplier
 
     private static void ClearHoverPreview(BulkChangeViewModel vm, BulkChangeDialog dialog)
     {
-        foreach (var s in vm.FilteredSuggestions) s.IsHoverPreview = false;
+        foreach (var s in vm.Autocomplete.FilteredSuggestions) s.IsHoverPreview = false;
         if (dialog.InlineOverlayList.ItemsSource is System.Collections.IEnumerable items)
             foreach (var o in items)
                 if (o is AutocompleteSuggestion s) s.IsHoverPreview = false;
