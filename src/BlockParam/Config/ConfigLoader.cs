@@ -2,6 +2,7 @@ using System.IO;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Serialization;
 using BlockParam.Diagnostics;
+using BlockParam.Services;
 using BlockParam.Updates;
 
 namespace BlockParam.Config;
@@ -179,10 +180,7 @@ public class ConfigLoader
     /// </summary>
     public void SaveUpdateCheckSettings(UpdateCheckSettings settings)
     {
-        var targetPath = _configPath
-            ?? Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-                "BlockParam", "config.json");
+        var targetPath = _configPath ?? AppDirectories.ConfigFile;
 
         BulkChangeConfig config;
         if (File.Exists(targetPath))
@@ -215,17 +213,7 @@ public class ConfigLoader
     {
         try
         {
-            string? managedPath;
-            if (ManagedConfigPathOverride != null)
-            {
-                managedPath = ManagedConfigPathOverride;
-            }
-            else
-            {
-                var programData = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
-                if (string.IsNullOrEmpty(programData)) return null;
-                managedPath = Path.Combine(programData, "BlockParam", "config.json");
-            }
+            var managedPath = ManagedConfigPathOverride ?? AppDirectories.ProgramDataConfigFile;
             if (!File.Exists(managedPath)) return null;
 
             var json = File.ReadAllText(managedPath);
@@ -285,11 +273,7 @@ public class ConfigLoader
     }
 
     /// <summary>Returns the TIA project rules directory path.</summary>
-    public string? GetTiaProjectRulesDirectory()
-    {
-        if (string.IsNullOrEmpty(_tiaProjectPath)) return null;
-        return Path.Combine(_tiaProjectPath, "UserFiles", "BlockParam");
-    }
+    public string? GetTiaProjectRulesDirectory() => AppDirectories.ProjectRulesDir(_tiaProjectPath);
 
     /// <summary>Returns the local rules directory path.</summary>
     public string GetLocalRulesDirectory()
@@ -300,9 +284,7 @@ public class ConfigLoader
             if (configDir != null)
                 return Path.Combine(configDir, "rules");
         }
-        return Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-            "BlockParam", "rules");
+        return AppDirectories.LocalRulesDir;
     }
 
     private string ResolveRulesDirectory(string rulesDir)
@@ -354,10 +336,7 @@ public class ConfigLoader
     /// </summary>
     public void SaveSharedRulesDirectory(string? rulesDirectory)
     {
-        var targetPath = _configPath
-            ?? Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-                "BlockParam", "config.json");
+        var targetPath = _configPath ?? AppDirectories.ConfigFile;
 
         var config = new BulkChangeConfig
         {

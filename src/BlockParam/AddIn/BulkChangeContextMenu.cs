@@ -70,13 +70,10 @@ public class BulkChangeContextMenu : ContextMenuAddIn
         if (Interlocked.Exchange(ref _tempCacheCleanupRan, 1) != 0) return;
         try
         {
-            var stateFile = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-                "BlockParam", "cache-cleanup.txt");
+            var stateFile = AppDirectories.CacheCleanupStateFile;
             if (!CacheCleanupSchedule.IsDue(stateFile)) return;
 
-            var root = Path.Combine(Path.GetTempPath(), "BlockParam");
-            var (files, dirs, nextRun) = TempCacheCleanup.Run(root);
+            var (files, dirs, nextRun) = TempCacheCleanup.Run(AppDirectories.Temp);
             CacheCleanupSchedule.SetNextRun(stateFile, nextRun);
 
             if (files > 0 || dirs > 0)
@@ -130,12 +127,10 @@ public class BulkChangeContextMenu : ContextMenuAddIn
             // Per-project scope so parallel TIA instances / switched projects cannot share cache dirs (#14).
             var project = _tiaPortal.Projects.FirstOrDefault();
             var scope = ProjectScope.ForPath(project?.Path?.FullName);
-            var tempDir = Path.Combine(Path.GetTempPath(), "BlockParam", scope);
-            var tagTableDir = Path.Combine(tempDir, "TagTables");
-            var udtDir = Path.Combine(tempDir, "UdtTypes");
-            var appDataDir = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-                "BlockParam");
+            var tempDir = AppDirectories.TempScope(scope);
+            var tagTableDir = AppDirectories.TagTablesCacheDir(scope);
+            var udtDir = AppDirectories.UdtTypesCacheDir(scope);
+            var appDataDir = AppDirectories.AppData;
 
             // Service composition. Each service is a single-responsibility seam (#81):
             // adapter (TIA Openness wrapping), discovery (tree walks), exporter (compile-prompt
@@ -380,9 +375,7 @@ public class BulkChangeContextMenu : ContextMenuAddIn
     {
         var candidates = new[]
         {
-            Path.Combine(Environment.GetFolderPath(
-                Environment.SpecialFolder.ApplicationData),
-                "BlockParam", "config.json"),
+            AppDirectories.ConfigFile,
             Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "config.json"),
         };
 
