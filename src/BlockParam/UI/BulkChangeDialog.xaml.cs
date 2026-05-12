@@ -897,6 +897,18 @@ public partial class BulkChangeDialog : Window
         Close();
     }
 
+    /// <summary>
+    /// Runs Apply and reports whether the close can proceed. Apply may bail
+    /// (e.g. user declined the compile prompt on an inconsistent block); in
+    /// that case pending edits are preserved and the caller must keep the
+    /// dialog open so the user can retry or explicitly Discard.
+    /// </summary>
+    private static bool TryApplyAndContinue(BulkChangeViewModel vm)
+    {
+        vm.ApplyCommand.Execute(null);
+        return vm.PendingInlineEditCount == 0;
+    }
+
     protected override void OnClosing(System.ComponentModel.CancelEventArgs e)
     {
         base.OnClosing(e);
@@ -920,12 +932,7 @@ public partial class BulkChangeDialog : Window
             // Both active-DB edits and stashed-DB edits exist.
             // Use a custom dialog with named buttons so the user is not misled
             // by generic Yes/No/Cancel labels (#audit-message-boxes).
-            var closeResult = vm.MessageBoxService.AskCloseWithStash(
-                Res.Format("Dialog_UnsavedChanges_Prompt_WithStash",
-                    active, stashedCount, stashedDbList),
-                Res.Get("Dialog_UnsavedChanges_Title"));
-
-            switch (closeResult)
+            switch (vm.PromptForCloseWithStash())
             {
                 case CloseWithStashResult.ApplyActive:
                     // Apply commits the active DB only. Stashed edits in other
@@ -933,15 +940,7 @@ public partial class BulkChangeDialog : Window
                     // that out so the user picks knowingly. Apply-everything-
                     // across-stashes would need a per-DB switch+commit loop,
                     // which is a much bigger feature.
-                    vm.ApplyCommand.Execute(null);
-                    // Apply may have bailed out (e.g. user declined the compile prompt on an
-                    // inconsistent block). Pending edits are preserved in that case — keep
-                    // the dialog open so the user can retry or explicitly Discard.
-                    if (vm.PendingInlineEditCount > 0)
-                    {
-                        e.Cancel = true;
-                        return;
-                    }
+                    if (!TryApplyAndContinue(vm)) { e.Cancel = true; return; }
                     break;
                 case CloseWithStashResult.DiscardAll:
                     // Discard pending edits. Use the silent variant — the user
@@ -966,12 +965,7 @@ public partial class BulkChangeDialog : Window
             switch (result)
             {
                 case MessageBoxResult.Yes:
-                    vm.ApplyCommand.Execute(null);
-                    if (vm.PendingInlineEditCount > 0)
-                    {
-                        e.Cancel = true;
-                        return;
-                    }
+                    if (!TryApplyAndContinue(vm)) { e.Cancel = true; return; }
                     break;
                 case MessageBoxResult.No:
                     vm.DiscardPendingSilent();

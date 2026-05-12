@@ -39,18 +39,18 @@ public partial class ThreeButtonDialog : Window
     private void OnPrimaryClick(object sender, RoutedEventArgs e)
     {
         Choice = ButtonChoice.Primary;
-        DialogResult = true;
+        Close();
     }
 
     private void OnSecondaryClick(object sender, RoutedEventArgs e)
     {
         Choice = ButtonChoice.Secondary;
-        DialogResult = false;
+        Close();
     }
 
     private void OnCancelClick(object sender, RoutedEventArgs e)
     {
         Choice = ButtonChoice.Cancel;
-        DialogResult = null;
+        Close();
     }
 }

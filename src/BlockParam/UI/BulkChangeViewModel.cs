@@ -71,9 +71,6 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     private readonly SimaticMLWriter _writer = new();
     private readonly MemberSearchService _searchService = new();
     private readonly IMessageBoxService _messageBox;
-    // Exposed internally so the dialog code-behind can forward the 3-way
-    // close-confirm without duplicating the WpfMessageBoxService instantiation.
-    internal IMessageBoxService MessageBoxService => _messageBox;
     private readonly Action? _onRefreshTagTables;
     private readonly string? _tagTableDir;
     private readonly Action? _onRefreshUdtTypes;
@@ -1779,6 +1776,22 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             ApplyStashCancelResult.StashAndSwitch => PendingDecision.Stash,
             _ => PendingDecision.Cancel,
         };
+    }
+
+    /// <summary>
+    /// Close-confirm prompt fired when both the active DB and stashed DBs
+    /// hold pending edits. Wrapped here so the dialog code-behind doesn't
+    /// need to reach into the VM's message-box service.
+    /// </summary>
+    internal CloseWithStashResult PromptForCloseWithStash()
+    {
+        var active = PendingInlineEditCount;
+        var stashedCount = StashedDbs.Sum(s => s.Count);
+        var stashedDbList = string.Join(", ", StashedDbs.Select(s => s.DbName));
+        return _messageBox.AskCloseWithStash(
+            Res.Format("Dialog_UnsavedChanges_Prompt_WithStash",
+                active, stashedCount, stashedDbList),
+            Res.Get("Dialog_UnsavedChanges_Title"));
     }
 
     /// <summary>

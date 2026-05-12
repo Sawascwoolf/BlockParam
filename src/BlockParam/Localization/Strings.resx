@@ -751,9 +751,6 @@ Applying will commit the current DB only — stashed changes in other DBs are st
   <data name="Dialog_UnsavedChanges_DiscardAllButton" xml:space="preserve">
     <value>Discard all</value>
   </data>
-  <data name="Dialog_Cancel" xml:space="preserve">
-    <value>Cancel</value>
-  </data>
   <!-- Stash-only close prompt (#59 follow-up). Active DB is clean but
        stashes from earlier switches still hold edits the user hasn't
        reviewed. Yes/No is enough — there's nothing to "Apply" here. -->
