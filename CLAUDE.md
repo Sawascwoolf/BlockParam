@@ -78,6 +78,43 @@ The script:
 
 After deployment, restart TIA Portal to load the new version.
 
+## CI (GitHub Actions)
+
+One workflow: `.github/workflows/ci.yml`. Two jobs, both on `windows-latest`:
+
+| Job | Runs |
+|---|---|
+| `v20` | Build + xUnit tests against the V20 stub set |
+| `v21` | Build only (V21 output dir `bin\…\v21\` isn't on the Tests/DevLauncher resolution path) |
+
+Both jobs build with `-p:UseSiemensStubs=true`. The stubs live in
+`ci/stubs/Siemens.Engineering.Stubs/` (clean-room API-surface only — no
+Siemens code, never shipped). Hosted runners have no TIA Portal install,
+so without the stubs the real Openness references can't resolve.
+
+### Triggers
+
+- **`pull_request: branches: [main]`** — auto-runs on PR open + every sync.
+- **`push:`** — runs **only** when the HEAD commit message contains the marker
+  `[run-ci]` (case-sensitive substring match via `contains()`). Lets you
+  validate a branch before opening the PR, without billing for every routine
+  push.
+- **`workflow_dispatch:`** — manual button in the Actions tab on any branch.
+
+**Marker hygiene:** because `contains()` matches anywhere in the message,
+do not paste `[run-ci]` into commit bodies as documentation — the body
+counts. If you need to reference the marker in prose, escape it (e.g.
+`run-ci` without brackets, or `\[run-ci\]`).
+
+### What the visual pipelines look like
+
+The screenshots / workflow-video pipelines were tried and then removed —
+the bash + ffmpeg + DevLauncher chain on Windows runners wasn't worth
+the debugging investment. Regenerate visual assets locally:
+
+- Screenshots: run the scripts in `assets/screenshots/scripts/` from the repo root.
+- Workflow video: use the `recreate-workflow-video` skill.
+
 ## DevLauncher (UI Testing without TIA Portal)
 
 The project includes a standalone WPF launcher for testing the UI without TIA Portal:
