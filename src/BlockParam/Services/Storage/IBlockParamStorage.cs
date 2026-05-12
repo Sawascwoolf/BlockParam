@@ -35,11 +35,31 @@ public interface IBlockParamStorage
     void WriteAllBytes(StoragePath path, byte[] contents);
     void AppendAllText(StoragePath path, string contents);
 
+    /// <summary>
+    /// Creates the directory and every missing parent. No-op if it already
+    /// exists. Implementations may cascade past the BlockParam product roots
+    /// (the in-memory fake materialises drive letters too); callers that
+    /// care about "did *I* create this" should track that themselves.
+    /// </summary>
     void EnsureDirectory(StoragePath path);
 
     void DeleteFile(StoragePath path);
+
+    /// <summary>
+    /// Removes <paramref name="path"/> if it exists and is empty. Throws
+    /// <see cref="IOException"/> if the directory still contains files or
+    /// subdirectories — both implementations honour that contract so
+    /// best-effort bottom-up sweepers (see <c>TempCacheCleanup</c>) can rely
+    /// on the failure to skip non-empty dirs.
+    /// </summary>
     void DeleteDirectory(StoragePath path);
 
+    /// <summary>
+    /// Returns the last write time, or the FILETIME epoch
+    /// (<c>1601-01-01</c>) if the file does not exist. Mirrors
+    /// <see cref="File.GetLastWriteTime"/> so callers don't need a separate
+    /// existence check before stat'ing.
+    /// </summary>
     DateTime GetLastWriteTime(StoragePath path);
 
     /// <summary>

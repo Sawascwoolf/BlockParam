@@ -54,8 +54,8 @@ public sealed class FileSystemBlockParamStorage : IBlockParamStorage
 
     public void DeleteFile(StoragePath path)
     {
-        if (File.Exists(path.FullPath))
-            File.Delete(path.FullPath);
+        // File.Delete already no-ops on missing files — no Exists check needed.
+        File.Delete(path.FullPath);
     }
 
     public void DeleteDirectory(StoragePath path)

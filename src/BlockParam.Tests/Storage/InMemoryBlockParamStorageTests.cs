@@ -137,6 +137,51 @@ public class InMemoryBlockParamStorageTests
     }
 
     [Fact]
+    public void HasAnyEntries_false_when_directory_missing()
+    {
+        // TempCacheCleanup relies on this: a never-created dir must be
+        // indistinguishable from an empty one so the bottom-up sweeper
+        // doesn't try to delete something that isn't there.
+        var fs = new InMemoryBlockParamStorage();
+        fs.HasAnyEntries(Root / "never-created").Should().BeFalse();
+    }
+
+    [Fact]
+    public void DeleteDirectory_throws_when_non_empty()
+    {
+        // Mirrors Directory.Delete(path) without recursive=true. The catch
+        // in TempCacheCleanup.DeleteEmptyDirectories swallows this — so the
+        // throw is the load-bearing signal that "this dir isn't safe to
+        // remove yet"; silently succeeding would cascade orphans.
+        var fs = new InMemoryBlockParamStorage();
+        fs.WriteAllText(Root / "child.txt", "");
+
+        Action act = () => fs.DeleteDirectory(Root);
+        act.Should().Throw<IOException>();
+        fs.DirectoryExists(Root).Should().BeTrue();
+    }
+
+    [Fact]
+    public void OpenRead_returns_non_writable_stream()
+    {
+        var fs = new InMemoryBlockParamStorage();
+        fs.WriteAllText(Root / "f.txt", "x");
+
+        using var s = fs.OpenRead(Root / "f.txt");
+        s.CanRead.Should().BeTrue();
+        s.CanWrite.Should().BeFalse();
+    }
+
+    [Fact]
+    public void GetLastWriteTime_on_missing_file_returns_FILETIME_epoch()
+    {
+        // Aligns with File.GetLastWriteTime — callers that race against
+        // external deletes don't need a separate existence check.
+        var fs = new InMemoryBlockParamStorage();
+        fs.GetLastWriteTime(Root / "missing").Should().Be(new DateTime(1601, 1, 1));
+    }
+
+    [Fact]
     public void GetLastWriteTime_uses_clock_at_write_unless_overridden()
     {
         var fs = new InMemoryBlockParamStorage();

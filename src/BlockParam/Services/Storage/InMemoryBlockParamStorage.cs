@@ -104,10 +104,13 @@ public sealed class InMemoryBlockParamStorage : IBlockParamStorage
 
     public DateTime GetLastWriteTime(StoragePath path)
     {
-        if (_lastWriteTimes.TryGetValue(path.FullPath, out var t)) return t;
-        if (!_files.ContainsKey(path.FullPath))
-            throw new FileNotFoundException($"In-memory file not found: {path.FullPath}", path.FullPath);
-        return default;
+        // Mirrors File.GetLastWriteTime which returns 1601-01-01 (the FILETIME
+        // epoch) for missing files rather than throwing — keeps the FS and
+        // in-memory contracts aligned for TempCacheCleanup-style sweepers
+        // that race against external deletes.
+        return _lastWriteTimes.TryGetValue(path.FullPath, out var t)
+            ? t
+            : new DateTime(1601, 1, 1);
     }
 
     public IEnumerable<StoragePath> EnumerateFiles(
