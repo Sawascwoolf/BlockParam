@@ -354,18 +354,18 @@ public static class SceneApplier
 
         if (scene.RevertPending != null)
         {
-            var entry = vm.PendingEdits.FirstOrDefault(p => p.Node?.Path == scene.RevertPending);
+            var entry = vm.Pending.PendingEdits.FirstOrDefault(p => p.Node?.Path == scene.RevertPending);
             if (entry == null)
                 Serilog.Log.Warning("Scene {Id}: revertPending path not found in queue: {Path}. Queue: {Paths}",
                     scene.Id, scene.RevertPending,
-                    string.Join(", ", vm.PendingEdits.Select(p => p.Node?.Path ?? "?")));
+                    string.Join(", ", vm.Pending.PendingEdits.Select(p => p.Node?.Path ?? "?")));
             else
                 vm.UndoPendingEdit(entry);
         }
 
         if (scene.DiscardAllPending == true)
         {
-            if (vm.HasPendingEdits)
+            if (vm.Pending.HasPendingEdits)
                 vm.DiscardPendingSilent();
             else
                 Serilog.Log.Warning("Scene {Id}: discardAllPending requested but queue is empty", scene.Id);
@@ -506,7 +506,7 @@ public static class SceneApplier
     {
         // Clear any pending edits staged by a prior scene so a clean run
         // doesn't inherit them. DiscardPendingSilent skips the confirm dialog.
-        if (vm.HasPendingEdits)
+        if (vm.Pending.HasPendingEdits)
             vm.DiscardPendingSilent();
         vm.Inspector.IsInspectorCollapsed = false;
         foreach (var root in vm.RootMembers)

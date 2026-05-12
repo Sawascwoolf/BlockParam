@@ -106,11 +106,11 @@ public class BulkChangeViewModelTests : IDisposable
             ""constraints"": { ""min"": 0, ""max"": 1000 } }] }";
         var vm = CreateViewModelWithRule("flat-db.xml", rule);
 
-        vm.HasExistingIssues.Should().BeTrue("Speed=1500 violates max=1000");
-        vm.ExistingIssuesCount.Should().Be(1);
-        vm.ExistingIssues.Single().Node.Name.Should().Be("Speed");
-        vm.ExistingIssues.Single().CurrentValue.Should().Be("1500");
-        vm.ExistingIssues.Single().Node.HasExistingViolation.Should().BeTrue();
+        vm.Pending.HasExistingIssues.Should().BeTrue("Speed=1500 violates max=1000");
+        vm.Pending.ExistingIssuesCount.Should().Be(1);
+        vm.Pending.ExistingIssues.Single().Node.Name.Should().Be("Speed");
+        vm.Pending.ExistingIssues.Single().CurrentValue.Should().Be("1500");
+        vm.Pending.ExistingIssues.Single().Node.HasExistingViolation.Should().BeTrue();
     }
 
     /// <summary>
@@ -121,8 +121,8 @@ public class BulkChangeViewModelTests : IDisposable
     public void ExistingIssues_Empty_WhenNoRules()
     {
         var vm = CreateViewModel(); // no rules configured
-        vm.HasExistingIssues.Should().BeFalse();
-        vm.ExistingIssuesCount.Should().Be(0);
+        vm.Pending.HasExistingIssues.Should().BeFalse();
+        vm.Pending.ExistingIssuesCount.Should().Be(0);
     }
 
     /// <summary>
@@ -137,7 +137,7 @@ public class BulkChangeViewModelTests : IDisposable
         var vm = CreateViewModelWithRule("flat-db.xml", rule);
 
         // Pre-existing violation present
-        vm.HasExistingIssues.Should().BeTrue();
+        vm.Pending.HasExistingIssues.Should().BeTrue();
         // No pending edits, no inline errors
         vm.HasInlineErrors.Should().BeFalse(
             "existing violations must not flip HasInlineError — that's the Apply blocker");
@@ -238,7 +238,7 @@ public class BulkChangeViewModelTests : IDisposable
         vm.RootMembers.Single(m => m.Name == "Enable").EditableStartValue = "false";
         vm.RootMembers.Single(m => m.Name == "Speed").EditableStartValue = "42";
 
-        vm.PendingInlineEditCount.Should().Be(2);
+        vm.Pending.PendingInlineEditCount.Should().Be(2);
         vm.ApplyCommand.CanExecute(null).Should().BeFalse(
             "Apply must be blocked when pending count > remaining quota — no partial-apply state");
     }
@@ -319,7 +319,7 @@ public class BulkChangeViewModelTests : IDisposable
     public void ApplyTooltip_NoPending_OmitsCostLine()
     {
         var vm = CreateViewModelWithUsage(new UsageStatus(0, 200));
-        vm.PendingInlineEditCount.Should().Be(0);
+        vm.Pending.PendingInlineEditCount.Should().Be(0);
         vm.ApplyTooltip.Should().NotContain("remaining today");
     }
 
@@ -333,7 +333,7 @@ public class BulkChangeViewModelTests : IDisposable
         var vm = CreateViewModelWithUsage(new UsageStatus(0, 200)); // 200 remaining
         vm.RootMembers.Single(m => m.Name == "Enable").EditableStartValue = "false";
 
-        vm.PendingInlineEditCount.Should().Be(1);
+        vm.Pending.PendingInlineEditCount.Should().Be(1);
         vm.ApplyTooltip.Should().NotContain("remaining today",
             "1 change with 200 left is the unsurprising case — keep the tooltip quiet");
     }
@@ -371,7 +371,7 @@ public class BulkChangeViewModelTests : IDisposable
             vm.RootMembers.Single(m => m.Name == "Enable").EditableStartValue = "false";
             vm.RootMembers.Single(m => m.Name == "Speed").EditableStartValue = "42";
 
-            vm.PendingInlineEditCount.Should().Be(2);
+            vm.Pending.PendingInlineEditCount.Should().Be(2);
             vm.ApplyTooltip.Should()
                 .Contain("free changes remaining today",
                     "the cost line — not just any '2 of 200' substring — must be present")
@@ -392,7 +392,7 @@ public class BulkChangeViewModelTests : IDisposable
             var vm = CreateViewModelWithUsage(new UsageStatus(170, 200)); // 30 remaining
             vm.RootMembers.Single(m => m.Name == "Enable").EditableStartValue = "false";
 
-            vm.PendingInlineEditCount.Should().Be(1);
+            vm.Pending.PendingInlineEditCount.Should().Be(1);
             vm.ApplyTooltip.Should()
                 .Contain("free changes remaining today",
                     "tight remaining quota deserves the cost line even for a single change")

@@ -151,7 +151,7 @@
                         VerticalAlignment="Center" FontWeight="SemiBold"/>
                 <Button Content="{loc:Loc Dialog_Discard}" Command="{Binding DiscardPendingCommand}"
                         MinWidth="60" Height="26" Margin="0,0,4,0" Padding="8,0"
-                        Visibility="{Binding PendingStatusText, Converter={StaticResource NullToVis}}"/>
+                        Visibility="{Binding Pending.PendingStatusText, Converter={StaticResource NullToVis}}"/>
                 <Button x:Name="ApplyButton"
                         Content="{loc:Loc Dialog_Apply}" Command="{Binding ApplyCommand}"
                         MinWidth="70" Height="26" Margin="0,0,4,0" Padding="8,0"
@@ -165,9 +165,9 @@
                 <Button Content="{loc:Loc Dialog_Close}" Click="OnClose"
                         MinWidth="60" Height="26" Padding="8,0"/>
             </StackPanel>
-            <TextBlock Text="{Binding PendingStatusText}" FontSize="10"
+            <TextBlock Text="{Binding Pending.PendingStatusText}" FontSize="10"
                        Foreground="#B8860B" VerticalAlignment="Center"
-                       Visibility="{Binding PendingStatusText, Converter={StaticResource NullToVis}}"
+                       Visibility="{Binding Pending.PendingStatusText, Converter={StaticResource NullToVis}}"
                        Margin="0,0,8,0"/>
             <TextBlock Text="{Binding StatusText}" VerticalAlignment="Center"
                        Foreground="#333"/>
@@ -668,8 +668,8 @@
                                     HorizontalAlignment="Right" VerticalAlignment="Top"
                                     Padding="3,0" Margin="0,-2,-2,0"
                                     IsHitTestVisible="False"
-                                    Visibility="{Binding HasPendingEdits, Converter={StaticResource BoolToVis}}">
-                                <TextBlock Text="{Binding PendingInlineEditCount}" FontSize="8"
+                                    Visibility="{Binding Pending.HasPendingEdits, Converter={StaticResource BoolToVis}}">
+                                <TextBlock Text="{Binding Pending.PendingInlineEditCount}" FontSize="8"
                                            FontWeight="Bold" Foreground="White"
                                            HorizontalAlignment="Center" VerticalAlignment="Center"/>
                             </Border>
@@ -688,8 +688,8 @@
                                     HorizontalAlignment="Right" VerticalAlignment="Top"
                                     Padding="3,0" Margin="0,-2,-2,0"
                                     IsHitTestVisible="False"
-                                    Visibility="{Binding HasExistingIssues, Converter={StaticResource BoolToVis}}">
-                                <TextBlock Text="{Binding ExistingIssuesCount}" FontSize="8"
+                                    Visibility="{Binding Pending.HasExistingIssues, Converter={StaticResource BoolToVis}}">
+                                <TextBlock Text="{Binding Pending.ExistingIssuesCount}" FontSize="8"
                                            FontWeight="Bold" Foreground="White"
                                            HorizontalAlignment="Center" VerticalAlignment="Center"/>
                             </Border>
@@ -1120,8 +1120,8 @@
                                     <Border DockPanel.Dock="Left" Margin="6,0,0,0" Padding="5,0"
                                             Background="#e0a93a" CornerRadius="8"
                                             VerticalAlignment="Center"
-                                            Visibility="{Binding HasPendingEdits, Converter={StaticResource BoolToVis}}">
-                                        <TextBlock Text="{Binding PendingInlineEditCount}"
+                                            Visibility="{Binding Pending.HasPendingEdits, Converter={StaticResource BoolToVis}}">
+                                        <TextBlock Text="{Binding Pending.PendingInlineEditCount}"
                                                    FontSize="10" FontWeight="Bold" Foreground="White"/>
                                     </Border>
                                     <!-- Invalid-count badge (#11): appears when any pending entry fails validation. -->
@@ -1129,8 +1129,8 @@
                                             Background="#D32F2F" CornerRadius="8"
                                             VerticalAlignment="Center"
                                             ToolTip="{loc:Loc Pending_InvalidBadgeTooltip}"
-                                            Visibility="{Binding HasInvalidPending, Converter={StaticResource BoolToVis}}">
-                                        <TextBlock Text="{Binding InvalidPendingBadge}"
+                                            Visibility="{Binding Pending.HasInvalidPending, Converter={StaticResource BoolToVis}}">
+                                        <TextBlock Text="{Binding Pending.InvalidPendingBadge}"
                                                    FontSize="10" FontWeight="Bold" Foreground="White"/>
                                     </Border>
                                     <Button DockPanel.Dock="Right" HorizontalAlignment="Right"
@@ -1140,7 +1140,7 @@
                                             Foreground="#0b4fbf" Cursor="Hand"
                                             FontSize="10" FontWeight="SemiBold"
                                             Padding="4,0" Margin="0,0,8,0"
-                                            Visibility="{Binding HasPendingEdits, Converter={StaticResource BoolToVis}}"/>
+                                            Visibility="{Binding Pending.HasPendingEdits, Converter={StaticResource BoolToVis}}"/>
                                 </DockPanel>
                             </Border>
                             <!-- Empty state -->
@@ -1152,7 +1152,7 @@
                                             <MultiDataTrigger>
                                                 <MultiDataTrigger.Conditions>
                                                     <Condition Binding="{Binding Inspector.IsPendingExpanded}" Value="True"/>
-                                                    <Condition Binding="{Binding HasPendingEdits}" Value="False"/>
+                                                    <Condition Binding="{Binding Pending.HasPendingEdits}" Value="False"/>
                                                 </MultiDataTrigger.Conditions>
                                                 <Setter Property="Visibility" Value="Visible"/>
                                             </MultiDataTrigger>
@@ -1165,7 +1165,7 @@
                             </Border>
                             <!-- List -->
                             <ItemsControl x:Name="PendingEditsList"
-                                          ItemsSource="{Binding PendingEdits}"
+                                          ItemsSource="{Binding Pending.PendingEdits}"
                                           Background="White">
                                 <ItemsControl.Style>
                                     <Style TargetType="ItemsControl">
@@ -1174,7 +1174,7 @@
                                             <MultiDataTrigger>
                                                 <MultiDataTrigger.Conditions>
                                                     <Condition Binding="{Binding Inspector.IsPendingExpanded}" Value="True"/>
-                                                    <Condition Binding="{Binding HasPendingEdits}" Value="True"/>
+                                                    <Condition Binding="{Binding Pending.HasPendingEdits}" Value="True"/>
                                                 </MultiDataTrigger.Conditions>
                                                 <Setter Property="Visibility" Value="Visible"/>
                                             </MultiDataTrigger>
@@ -1450,8 +1450,8 @@
                                     <Border DockPanel.Dock="Left" Margin="6,0,0,0" Padding="5,0"
                                             Background="#9C27B0" CornerRadius="8"
                                             VerticalAlignment="Center"
-                                            Visibility="{Binding HasExistingIssues, Converter={StaticResource BoolToVis}}">
-                                        <TextBlock Text="{Binding ExistingIssuesCount}"
+                                            Visibility="{Binding Pending.HasExistingIssues, Converter={StaticResource BoolToVis}}">
+                                        <TextBlock Text="{Binding Pending.ExistingIssuesCount}"
                                                    FontSize="10" FontWeight="Bold" Foreground="White"/>
                                     </Border>
                                     <!-- Filler to consume remaining space (avoids the icon's tooltip
@@ -1468,7 +1468,7 @@
                                             <MultiDataTrigger>
                                                 <MultiDataTrigger.Conditions>
                                                     <Condition Binding="{Binding Inspector.IsIssuesExpanded}" Value="True"/>
-                                                    <Condition Binding="{Binding HasExistingIssues}" Value="False"/>
+                                                    <Condition Binding="{Binding Pending.HasExistingIssues}" Value="False"/>
                                                 </MultiDataTrigger.Conditions>
                                                 <Setter Property="Visibility" Value="Visible"/>
                                             </MultiDataTrigger>
@@ -1481,7 +1481,7 @@
                             </Border>
                             <!-- List -->
                             <ItemsControl x:Name="ExistingIssuesList"
-                                          ItemsSource="{Binding ExistingIssues}"
+                                          ItemsSource="{Binding Pending.ExistingIssues}"
                                           Background="White">
                                 <ItemsControl.Style>
                                     <Style TargetType="ItemsControl">
@@ -1490,7 +1490,7 @@
                                             <MultiDataTrigger>
                                                 <MultiDataTrigger.Conditions>
                                                     <Condition Binding="{Binding Inspector.IsIssuesExpanded}" Value="True"/>
-                                                    <Condition Binding="{Binding HasExistingIssues}" Value="True"/>
+                                                    <Condition Binding="{Binding Pending.HasExistingIssues}" Value="True"/>
                                                 </MultiDataTrigger.Conditions>
                                                 <Setter Property="Visibility" Value="Visible"/>
                                             </MultiDataTrigger>

@@ -848,7 +848,7 @@ public class BulkChangeViewModelInvariantTests
         var reachableNodes = vm.RootMembers
             .SelectMany(r => new[] { r }.Concat(r.AllDescendants()))
             .ToHashSet();
-        var orphanedPaths = vm.PendingEdits
+        var orphanedPaths = vm.Pending.PendingEdits
             .Where(e => !reachableNodes.Contains(e.Node))
             .Select(e => e.Path)
             .ToList();

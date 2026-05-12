@@ -271,8 +271,11 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         InlineRuleExtractor.ApplyTo(configLoader.GetConfig(), dataBlockInfo);
 
         BulkPreview = new ObservableCollection<BulkPreviewEntry>();
-        PendingEdits = new ObservableCollection<PendingEditEntry>();
-        ExistingIssues = new ObservableCollection<ExistingIssueEntry>();
+        // Pending-edits + existing-issues collections slice (#80 slice 4).
+        // The underlying PendingEditStore stays on the host VM — too many
+        // call sites mutate it directly to make moving it worth the churn
+        // in this PR. The slice owns only the visible collections + badges.
+        Pending = new PendingEditsViewModel(() => _pendingEditStore.Count);
         StashedDbs = new ObservableCollection<StashedDbState>();
 
         // Build tree view models. Multi-DB workflow (#58): when more than
@@ -420,18 +423,11 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     public ObservableCollection<BulkPreviewEntry> BulkPreview { get; }
 
     /// <summary>
-    /// Aggregated view of every node that currently has a pending inline edit.
-    /// Rebuilt whenever <c>PendingInlineEditCount</c> changes.
+    /// Pending-edits + existing-issues slice (#80 slice 4). Owns the
+    /// PendingEdits / ExistingIssues collections + badge properties.
+    /// XAML binds via <c>{Binding Pending.PendingEdits}</c> etc.
     /// </summary>
-    public ObservableCollection<PendingEditEntry> PendingEdits { get; }
-
-    /// <summary>
-    /// Findings produced by running the validator over the *existing* StartValues
-    /// when the dialog opens (and after every tree refresh / inline edit). Read-only —
-    /// these are pre-existing rule violations the user can fix manually, not pending
-    /// edits. They never block Apply (#26).
-    /// </summary>
-    public ObservableCollection<ExistingIssueEntry> ExistingIssues { get; }
+    public PendingEditsViewModel Pending { get; }
 
     /// <summary>
     /// One entry per DB the user has switched away from with un-applied
@@ -445,9 +441,6 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
 
     public bool HasBulkPreview => BulkPreview.Count > 0;
     public int BulkPreviewCount => BulkPreview.Count;
-    public bool HasPendingEdits => PendingEdits.Count > 0;
-    public bool HasExistingIssues => ExistingIssues.Count > 0;
-    public int ExistingIssuesCount => ExistingIssues.Count;
 
     /// <summary>Preview rows whose node already has a pending edit — they'd overwrite it on Set.</summary>
     public int BulkPreviewConflictCount => BulkPreview.Count(e => e.HasPendingConflict);
@@ -1277,7 +1270,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     /// </summary>
     private string SnapshotState() =>
         $"active=[{string.Join(",", _activeDbs.Select(d => d.Info.Name))}] " +
-        $"pending={PendingEdits.Count} stashed={StashedDbs.Count} " +
+        $"pending={Pending.PendingEdits.Count} stashed={StashedDbs.Count} " +
         $"treeShape={(_activeDbs.Count == 1 ? "single" : "multi")}";
 
     /// <summary>
@@ -2214,7 +2207,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         {
             RefreshPendingAndPreview();
             OnPropertyChanged(nameof(HasInlineErrors));
-            RaiseInvalidPendingChanged();
+            Pending.RaiseInvalidPendingChanged();
         }
         Log.Information("Restored {Restored} stashed edit(s) for {Db} ({Dropped} dropped)",
             restored, state.Summary.Name, dropped);
@@ -2286,17 +2279,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>Number of individual inline edits waiting to be applied.</summary>
-    public int PendingInlineEditCount => _pendingEditStore.Count;
-
-    /// <summary>Status text showing pending inline edits count.</summary>
-    public string? PendingStatusText
-    {
-        get
-        {
-            var count = PendingInlineEditCount;
-            return count > 0 ? $"{count} pending inline edit{(count == 1 ? "" : "s")}" : null;
-        }
-    }
+    public int PendingInlineEditCount => Pending.PendingInlineEditCount;
 
     /// <summary>
     /// Autocomplete suggestion slice (#80 slice 3). Owns the candidate
@@ -2714,60 +2697,27 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     /// that could shift which nodes are pending OR which rows the preview
     /// would overwrite — the two sides are coupled (preview conflict flags
     /// depend on pending state, pending overwrite flags depend on preview).
-    /// Call order matters: preview first so <c>RebuildPendingEdits</c> can
-    /// read the just-built BulkPreview paths.
+    /// Call order matters: preview first so the rebuild can read the
+    /// just-built BulkPreview paths.
     /// </summary>
     private void RefreshPendingAndPreview()
     {
+        Pending.RaisePendingCountChanged();
         OnPropertyChanged(nameof(PendingInlineEditCount));
-        OnPropertyChanged(nameof(PendingStatusText));
         OnPropertyChanged(nameof(ApplyTooltip));
         ComputeBulkPreview();
         RebuildPendingEdits();
     }
 
     /// <summary>
-    /// Rebuilds <see cref="PendingEdits"/> from the current tree state.
-    /// Call whenever <c>PendingInlineEditCount</c> is expected to have changed.
+    /// Rebuilds the pending-edits side panel from the current tree state.
     /// </summary>
     private void RebuildPendingEdits()
     {
-        PendingEdits.Clear();
         var bulkPaths = BulkPreview.Count > 0
             ? new HashSet<string>(BulkPreview.Select(e => e.Path), StringComparer.Ordinal)
             : null;
-        CollectPendingEntries(RootMembers, bulkPaths);
-        OnPropertyChanged(nameof(HasPendingEdits));
-        RaiseInvalidPendingChanged();
-    }
-
-    /// <summary>
-    /// Nudges bindings attached to <see cref="InvalidPendingCount"/> and friends.
-    /// Call after any mutation that could flip a pending entry's error state.
-    /// </summary>
-    private void RaiseInvalidPendingChanged()
-    {
-        OnPropertyChanged(nameof(InvalidPendingCount));
-        OnPropertyChanged(nameof(HasInvalidPending));
-        OnPropertyChanged(nameof(InvalidPendingBadge));
-    }
-
-    private void CollectPendingEntries(IEnumerable<MemberNodeViewModel> nodes,
-        HashSet<string>? bulkPaths)
-    {
-        foreach (var node in nodes)
-        {
-            if (node.IsPendingInlineEdit)
-            {
-                bool overwritten = bulkPaths != null && bulkPaths.Contains(node.Path);
-                PendingEdits.Add(new PendingEditEntry(
-                    node,
-                    node.StartValue ?? "",
-                    node.PendingValue ?? "",
-                    willBeOverwrittenByBulk: overwritten));
-            }
-            CollectPendingEntries(node.Children, bulkPaths);
-        }
+        Pending.Rebuild(RootMembers, bulkPaths);
     }
 
     /// <summary>
@@ -3197,39 +3147,8 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     /// validator already short-circuits cleanly when the cache is missing
     /// (no false positives for tag-table rules with no cache yet).
     /// </remarks>
-    private void RebuildExistingIssues()
-    {
-        ExistingIssues.Clear();
-        var validator = BuildValidator();
-
-        foreach (var root in RootMembers)
-            ScanExistingViolations(root, validator);
-
-        OnPropertyChanged(nameof(HasExistingIssues));
-        OnPropertyChanged(nameof(ExistingIssuesCount));
-    }
-
-    private void ScanExistingViolations(MemberNodeViewModel node, MemberValidator validator)
-    {
-        if (node.IsLeaf && !string.IsNullOrEmpty(node.StartValue))
-        {
-            var error = validator.Validate(node.Model, node.StartValue);
-            if (error != null)
-            {
-                node.HasExistingViolation = true;
-                node.ExistingViolationMessage = error;
-                ExistingIssues.Add(new ExistingIssueEntry(
-                    node, node.StartValue ?? "", error, node.RuleHint));
-            }
-            else if (node.HasExistingViolation)
-            {
-                node.HasExistingViolation = false;
-                node.ExistingViolationMessage = null;
-            }
-        }
-        foreach (var child in node.Children)
-            ScanExistingViolations(child, validator);
-    }
+    private void RebuildExistingIssues() =>
+        Pending.RebuildExistingIssues(RootMembers, BuildValidator());
 
     private void UpdateFilteredSuggestions() =>
         Autocomplete.ApplyFilter(_newValue?.Trim() ?? "");
@@ -3635,24 +3554,6 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         return false;
     }
 
-    /// <summary>
-    /// Count of pending entries whose staged value fails validation (#11).
-    /// Derived from the tree so it stays in sync with inline-edit validation.
-    /// </summary>
-    public int InvalidPendingCount => PendingEdits.Count(e => e.Node.HasInlineError);
-
-    public bool HasInvalidPending => InvalidPendingCount > 0;
-
-    /// <summary>"N of M invalid" summary shown on the sidebar header badge.</summary>
-    public string InvalidPendingBadge
-    {
-        get
-        {
-            var total = PendingEdits.Count;
-            var invalid = InvalidPendingCount;
-            return invalid == 0 ? "" : Res.Format("Pending_InvalidBadge", invalid, total);
-        }
-    }
 
     /// <summary>
     /// Applies ALL pending changes (bulk-staged + inline edits) to XML.
@@ -4246,7 +4147,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
 
         RefreshPendingAndPreview();
         OnPropertyChanged(nameof(HasInlineErrors));
-        RaiseInvalidPendingChanged();
+        Pending.RaiseInvalidPendingChanged();
     }
 
     /// <summary>
