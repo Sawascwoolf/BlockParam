@@ -22,6 +22,16 @@
             <local:StringNotEmptyToVisibilityConverter x:Key="StringToVis"/>
             <local:InvertBoolConverter x:Key="InvertBool"/>
 
+        <!-- Trigger-summary overflow rules for the pill row. Mirrors the
+             defaults baked into PillOverflowOptions.DataBlockDefault(): keep
+             showing full DB names until the joined text passes ~30 chars or
+             4 entries, then degrade to "DB{Number}" abbreviations and
+             finally "+N more" past 5 visible items. -->
+        <controls:PillOverflowOptions x:Key="DbPillOverflowOptions"
+                                      AbbreviateAfterEntries="4"
+                                      AbbreviateAfterChars="30"
+                                      CollapseAfterEntries="5"/>
+
         <!-- Suggestion row style: hover-preview paints the entry as if the
              mouse were over it. Set by capture scripts so a still frame
              reads as "this row is about to be clicked" before the next
@@ -196,22 +206,25 @@
                                 <DataTemplate>
                                     <controls:PillMultiSelect
                                         ItemsSource="{Binding AvailableDbs}"
-                                        SelectedItems="{Binding SelectedDbs, Mode=TwoWay}"
+                                        SelectedItems="{Binding SelectedDbs, Mode=OneWay}"
                                         IsOpen="{Binding IsOpen, Mode=TwoWay}"
                                         Label="{Binding Label}"
                                         DisplayMemberPath="Display"
                                         AbbreviationMemberPath="Abbreviation"
                                         Icon="{StaticResource DatabaseIconGeometry}"
                                         TooltipMode="FullNames"
+                                        OverflowOptions="{StaticResource DbPillOverflowOptions}"
                                         Margin="0,0,8,0"/>
                                 </DataTemplate>
                             </ItemsControl.ItemTemplate>
                         </ItemsControl>
-                        <!-- "+ Add DB": opens a project-wide pill so the user can add a DB
-                             from a PLC that has no active DB yet. The pill groups by PlcName. -->
+                        <!-- "+ PLC": opens a flat list of project PLCs that don't have a
+                             pill in the row yet. Clicking a PLC adds an empty pill for it;
+                             the user then opens that pill to pick its DB(s). -->
                         <Button x:Name="AddDbButton"
                                 Content="{loc:Loc PillRow_AddDb}"
                                 Click="OnAddDbButtonClick"
+                                Visibility="{Binding CanAddPlc, Converter={StaticResource BoolToVis}}"
                                 Background="White" BorderBrush="#CCC" BorderThickness="1"
                                 Padding="6,2" VerticalAlignment="Center" Cursor="Hand"/>
                         <Popup IsOpen="{Binding IsAddDbPopupOpen, Mode=TwoWay}"
@@ -220,14 +233,36 @@
                                StaysOpen="False"
                                AllowsTransparency="True"
                                PopupAnimation="Fade">
-                            <controls:PillMultiSelect
-                                ItemsSource="{Binding AllProjectDbs}"
-                                SelectedItems="{Binding AddDbPopupSelection, Mode=TwoWay}"
-                                GroupKeyMemberPath="PlcName"
-                                DisplayMemberPath="Display"
-                                AbbreviationMemberPath="Abbreviation"
-                                Icon="{StaticResource DatabaseIconGeometry}"
-                                IsOpen="True"/>
+                            <Border Background="White"
+                                    BorderBrush="#E5E7EB" BorderThickness="1"
+                                    CornerRadius="6"
+                                    Padding="4"
+                                    MinWidth="180">
+                                <Border.Effect>
+                                    <DropShadowEffect Color="#000000" Opacity="0.18"
+                                                      BlurRadius="12" ShadowDepth="2"/>
+                                </Border.Effect>
+                                <ListBox x:Name="AddPlcListBox"
+                                         ItemsSource="{Binding InactiveProjectPlcs}"
+                                         SelectionChanged="OnAddPlcListSelectionChanged"
+                                         BorderThickness="0"
+                                         Background="Transparent"
+                                         MaxHeight="320">
+                                    <ListBox.ItemTemplate>
+                                        <DataTemplate>
+                                            <StackPanel Orientation="Horizontal" Margin="2">
+                                                <Path Data="{StaticResource DatabaseIconGeometry}"
+                                                      Fill="#1F2937"
+                                                      Stretch="Uniform" Width="14" Height="14"
+                                                      VerticalAlignment="Center"
+                                                      Margin="0,0,8,0"/>
+                                                <TextBlock Text="{Binding}"
+                                                           VerticalAlignment="Center"/>
+                                            </StackPanel>
+                                        </DataTemplate>
+                                    </ListBox.ItemTemplate>
+                                </ListBox>
+                            </Border>
                         </Popup>
                     </StackPanel>
                 </DockPanel>

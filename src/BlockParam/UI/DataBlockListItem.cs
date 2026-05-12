@@ -48,8 +48,10 @@ public class DataBlockListItem : ViewModelBase
     public string Display => Summary.Name;
 
     /// <summary>
-    /// Short abbreviation shown next to each row and in the trigger pill summary.
-    /// Formatted as "DB{Number}" when a number is available; empty otherwise.
+    /// Short abbreviation shown next to each popup row and used by the
+    /// pill trigger when its <see cref="PillMultiSelect.OverflowOptions"/>
+    /// switch from full-name to abbreviated display. Formatted as
+    /// "DB{Number}" when a number is available; empty otherwise.
     /// </summary>
     public string Abbreviation => Summary.Number is int n ? $"DB{n}" : "";
 

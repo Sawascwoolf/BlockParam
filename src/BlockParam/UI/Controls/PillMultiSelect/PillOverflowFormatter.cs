@@ -40,8 +40,18 @@ public static class PillOverflowFormatter
         if (selected.Count == 0) return string.Empty;
 
         var useAbbrev = ShouldAbbreviate(selected, display, options);
+        // When overflow tips us to abbreviations but a row has no
+        // abbreviation (e.g. a TIA DB without a number), keep the full
+        // display rather than rendering empty tokens like ", , " in the
+        // trigger. The CollapseAfterEntries pass that runs next still
+        // limits the total length via "+N more".
         var tokens = selected
-            .Select(i => useAbbrev ? abbreviation(i) : display(i))
+            .Select(i =>
+            {
+                if (!useAbbrev) return display(i);
+                var a = abbreviation(i);
+                return string.IsNullOrEmpty(a) ? display(i) : a;
+            })
             .ToList();
 
         if (options.CollapseAfterEntries is int max && tokens.Count > max)

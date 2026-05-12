@@ -39,9 +39,10 @@ public static class PlcPillGroupsService
     public static IReadOnlyList<PlcPillViewModel> Build(
         IReadOnlyList<ActiveDb> activeDbs,
         string anchorPlcName,
-        Func<string, Task<IReadOnlyList<DataBlockListItem>>> loadDbsForPlc)
+        Func<string, Task<IReadOnlyList<DataBlockListItem>>> loadDbsForPlc,
+        IReadOnlyCollection<string>? extraPlcs = null)
     {
-        if (activeDbs.Count == 0)
+        if (activeDbs.Count == 0 && (extraPlcs == null || extraPlcs.Count == 0))
             return Array.Empty<PlcPillViewModel>();
 
         // Group active DBs by PLC, preserving insertion order (anchor first).
@@ -73,11 +74,25 @@ public static class PlcPillGroupsService
             list.Add(item);
         }
 
-        // Show the PLC label on each pill only when the project is multi-PLC
-        // (anchorPlcName non-empty). Single-PLC sessions show an empty label
-        // so the pill chrome stays clean.
-        bool multiPlc = !string.IsNullOrEmpty(anchorPlcName);
+        // PLCs the user manually added via "+ PLC" but that have no active
+        // DB yet. Append them after the active-derived PLCs so the row
+        // order stays stable as the user toggles DBs on/off.
+        if (extraPlcs != null)
+        {
+            foreach (var plc in extraPlcs)
+            {
+                if (!perPlc.ContainsKey(plc))
+                {
+                    perPlc[plc] = new List<DataBlockListItem>();
+                    orderedPlcs.Add(plc);
+                }
+            }
+        }
 
+        // Always show the PLC label on each pill, even in single-PLC
+        // sessions, so the user can identify which PLC each pill targets
+        // at a glance — and so the row stays visually consistent when
+        // additional PLCs get added via "+ PLC".
         var pills = new List<PlcPillViewModel>(orderedPlcs.Count);
         for (int idx = 0; idx < orderedPlcs.Count; idx++)
         {
@@ -89,7 +104,7 @@ public static class PlcPillGroupsService
                 initialActiveItems: activeItems,
                 loadDbs: loadDbsForPlc);
 
-            pill.Label = multiPlc ? plc : "";
+            pill.Label = plc;
             pills.Add(pill);
         }
 

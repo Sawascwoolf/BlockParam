@@ -49,12 +49,13 @@ public class PlcPillViewModel : ViewModelBase
         _initialActiveItems = initialActiveItems;
         _loadDbs = loadDbs;
 
-        // AvailableDbs starts empty; LoadCommand fills it on first open.
-        AvailableDbs = new ObservableCollection<DataBlockListItem>();
+        // AvailableDbs starts with the initial active items so the closed
+        // trigger pill can render their abbreviations before the user opens
+        // the popup. LoadCommand replaces this with the full PLC list on
+        // first open (and re-syncs selection against it).
+        AvailableDbs = new ObservableCollection<DataBlockListItem>(initialActiveItems);
 
         // SelectedDbs starts with the currently active DBs for this PLC.
-        // The host passed them in so the pill shows the right initial state
-        // without waiting for LoadCommand to run.
         SelectedDbs = new ObservableCollection<object>(initialActiveItems);
         SelectedDbs.CollectionChanged += OnSelectedDbsChanged;
 

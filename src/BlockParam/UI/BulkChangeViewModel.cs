@@ -1072,6 +1072,66 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     public ObservableCollection<PlcPillViewModel> PlcPills { get; }
         = new ObservableCollection<PlcPillViewModel>();
 
+    /// <summary>
+    /// PLCs the user added via "+ PLC" before they had any active DB.
+    /// These produce empty pills until the user opens them and toggles a
+    /// DB. Once a DB is active for a PLC the entry is redundant (the
+    /// active-DB path also makes the PLC appear), but we keep it so the
+    /// pill survives the user removing all DBs again.
+    /// </summary>
+    private readonly HashSet<string> _extraPillPlcs = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// Adds <paramref name="plcName"/> to the row as an empty pill. The
+    /// new pill loads its DB list lazily on first popup open, same as the
+    /// active-set-derived pills. No-op if the PLC is already represented.
+    /// </summary>
+    public void AddPlcToRow(string plcName)
+    {
+        if (string.IsNullOrEmpty(plcName)) return;
+        if (PlcPills.Any(p => string.Equals(p.PlcName, plcName, StringComparison.Ordinal)))
+            return;
+        _extraPillPlcs.Add(plcName);
+        RebuildPlcPills();
+        OnPropertyChanged(nameof(InactiveProjectPlcs));
+    }
+
+    /// <summary>
+    /// PLC names present in the project but not yet represented in the
+    /// pill row. Drives the "+ PLC" popup's item list and the
+    /// <see cref="CanAddPlc"/> visibility gate.
+    /// </summary>
+    public IReadOnlyList<string> InactiveProjectPlcs
+    {
+        get
+        {
+            if (!HasDataBlockSwitcher) return Array.Empty<string>();
+            LoadAvailableDataBlocks(force: false);
+            var projectDbs = _availableDataBlocks;
+            if (projectDbs == null || projectDbs.Count == 0)
+                return Array.Empty<string>();
+
+            var rowPlcs = new HashSet<string>(
+                PlcPills.Select(p => p.PlcName ?? ""), StringComparer.Ordinal);
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            var result = new List<string>();
+            foreach (var db in projectDbs)
+            {
+                var plc = db.PlcName ?? "";
+                if (rowPlcs.Contains(plc)) continue;
+                if (!seen.Add(plc)) continue;
+                result.Add(plc);
+            }
+            return result;
+        }
+    }
+
+    /// <summary>
+    /// True when at least one project PLC is not yet in the row. Bound
+    /// to the "+ PLC" button's Visibility.
+    /// </summary>
+    public bool CanAddPlc => InactiveProjectPlcs.Count > 0;
+
     // Re-entrancy guard: when the cascade rewrites SelectedDbs on each pill,
     // the pill fires SelectionChanged → OnPillSelectionChanged. Without the
     // guard we'd enter AddActiveDbToSet / RemoveActiveDb for every item in
@@ -1185,13 +1245,19 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         var newPills = PlcPillGroupsService.Build(
             _activeDbs,
             _currentPlcName,
-            loadDbsForPlc: LoadDbsForPlcAsync);
+            loadDbsForPlc: LoadDbsForPlcAsync,
+            extraPlcs: _extraPillPlcs);
 
         foreach (var pill in newPills)
         {
             pill.SelectionChanged += OnPillSelectionChanged;
             PlcPills.Add(pill);
         }
+
+        // Pill row just changed — re-evaluate the inactive-PLCs list so
+        // the "+ PLC" popup and its button visibility stay in sync.
+        OnPropertyChanged(nameof(InactiveProjectPlcs));
+        OnPropertyChanged(nameof(CanAddPlc));
     }
 
     private void OnPillSelectionChanged(object? sender, PillSelectionChangedEventArgs e)

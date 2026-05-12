@@ -35,8 +35,8 @@ class Program
 
         Log.Logger = new LoggerConfiguration()
             .MinimumLevel.Debug()
-            .WriteTo.Console(outputTemplate: "{Timestamp:HH:mm:ss} [{Level:u3}] {Message:lj}{NewLine}")
-            .WriteTo.File(logPath, outputTemplate: "{Timestamp:HH:mm:ss.fff} [{Level:u3}] {Message:lj}{NewLine}")
+            .WriteTo.Console(outputTemplate: "{Timestamp:HH:mm:ss} [{Level:u3}] {Message:lj}{NewLine}{Exception}")
+            .WriteTo.File(logPath, outputTemplate: "{Timestamp:HH:mm:ss.fff} [{Level:u3}] {Message:lj}{NewLine}{Exception}")
             .CreateLogger();
         Log.Information("DevLauncher log: {Path}", logPath);
 
@@ -82,6 +82,13 @@ class Program
         if (args.Length >= 2 && args[0] == "--capture-pill-grouped-bundled")
         {
             PillMultiSelectCapture.RunGroupedBundled(Path.GetFullPath(args[1]));
+            return;
+        }
+
+        // --capture-pill-row <out.png>             Pill row (PlcPills + "+ PLC"): all scenes stitched into one PNG
+        if (args.Length >= 2 && args[0] == "--capture-pill-row")
+        {
+            PillRowCapture.Run(Path.GetFullPath(args[1]));
             return;
         }
 
@@ -446,7 +453,7 @@ class Program
     /// <paramref name="anchorPlc"/> (empty when <c>--plc</c> isn't passed),
     /// so they group with the anchor in the chip toolbar.
     /// </summary>
-    private static IReadOnlyList<DataBlockSummary> EnumerateDevLauncherDbs(string dir, string? anchorPlc)
+    internal static IReadOnlyList<DataBlockSummary> EnumerateDevLauncherDbs(string dir, string? anchorPlc)
     {
         if (!Directory.Exists(dir)) return Array.Empty<DataBlockSummary>();
         var list = new List<DataBlockSummary>();

@@ -894,15 +894,32 @@ public partial class BulkChangeDialog : Window
     // ---- "+ Add DB" trailing button (#pill-refactor) -----------------------
 
     /// <summary>
-    /// Toggles the "+ Add DB" popup. Flips <c>IsAddDbPopupOpen</c> on the VM;
-    /// the VM's lazy-load logic populates <c>AllProjectDbs</c> on first open.
+    /// Toggles the "+ PLC" popup. The VM's <see cref="BulkChangeViewModel.InactiveProjectPlcs"/>
+    /// reads the cached project DB list lazily; no separate eager load
+    /// is needed for the flat-list popup.
     /// </summary>
     private void OnAddDbButtonClick(object sender, RoutedEventArgs e)
     {
         if (DataContext is not BulkChangeViewModel vm) return;
         vm.IsAddDbPopupOpen = !vm.IsAddDbPopupOpen;
-        if (vm.IsAddDbPopupOpen)
-            vm.EnsureAllProjectDbsLoaded();
+    }
+
+    /// <summary>
+    /// Click handler for the flat PLC list inside the "+ PLC" popup.
+    /// Adds the selected PLC as an empty pill to the row (the user then
+    /// opens that pill to pick which DB(s) become active) and closes the
+    /// popup. Clearing the selection right after prevents the next open
+    /// from re-firing for a stale item.
+    /// </summary>
+    private void OnAddPlcListSelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
+    {
+        if (DataContext is not BulkChangeViewModel vm) return;
+        if (sender is not System.Windows.Controls.ListBox lb) return;
+        if (lb.SelectedItem is not string plc || string.IsNullOrEmpty(plc)) return;
+
+        vm.AddPlcToRow(plc);
+        vm.IsAddDbPopupOpen = false;
+        lb.SelectedItem = null;
     }
 
     private void OnClose(object sender, RoutedEventArgs e)

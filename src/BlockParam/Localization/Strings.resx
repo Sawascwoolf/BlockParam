@@ -980,10 +980,12 @@ Cancel — Stay on the current DBs.</value>
     <value>+{0} more</value>
     <comment>{0} = number of hidden selected items past the visible threshold</comment>
   </data>
-  <!-- Pill-row DB picker (#pill-refactor): trailing affordance to add a DB from a PLC
-       whose pill is not yet in the active row (because no DB from that PLC is active). -->
+  <!-- Pill-row DB picker (#pill-refactor): trailing affordance to add a PLC's
+       pill to the row. The pill row shows one pill per PLC, so adding a row
+       conceptually means adding a PLC; the popup lets the user pick the DB
+       inside that PLC that becomes active. -->
   <data name="PillRow_AddDb" xml:space="preserve">
-    <value>+ Add DB</value>
-    <comment>Button that opens the project-wide DB picker to add a DB from an inactive PLC</comment>
+    <value>+ PLC</value>
+    <comment>Button that opens the project-wide DB picker to add a PLC's pill to the row</comment>
   </data>
 </root>
