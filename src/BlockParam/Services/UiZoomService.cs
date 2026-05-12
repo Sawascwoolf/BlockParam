@@ -3,6 +3,7 @@ using System.IO;
 using System.Threading;
 using Newtonsoft.Json;
 using BlockParam.Diagnostics;
+using BlockParam.Services.Storage;
 
 namespace BlockParam.Services;
 
@@ -22,7 +23,8 @@ public class UiZoomService
     // without it the service touches ui-settings.json on every wheel tick.
     private const int SaveDebounceMs = 300;
 
-    private readonly string _settingsPath;
+    private readonly IBlockParamStorage _storage;
+    private readonly StoragePath _settingsPath;
     private readonly object _saveLock = new();
     private double _zoomFactor = DefaultZoom;
     private bool _loaded;
@@ -52,11 +54,20 @@ public class UiZoomService
     public UiZoomService() : this(DefaultSettingsPath()) { }
 
     public UiZoomService(string settingsPath)
+        : this(FileSystemBlockParamStorage.Instance,
+               string.IsNullOrEmpty(settingsPath)
+                   ? default
+                   : StoragePath.FromAbsolute(settingsPath))
     {
+    }
+
+    public UiZoomService(IBlockParamStorage storage, StoragePath settingsPath)
+    {
+        _storage = storage ?? throw new ArgumentNullException(nameof(storage));
         _settingsPath = settingsPath;
     }
 
-    private bool PersistenceEnabled => !string.IsNullOrEmpty(_settingsPath);
+    private bool PersistenceEnabled => !_settingsPath.IsEmpty;
 
     public static string DefaultSettingsPath() => AppDirectories.UiSettingsFile;
 
@@ -106,18 +117,18 @@ public class UiZoomService
         if (_loaded) return;
         _loaded = true;
 
-        if (!PersistenceEnabled || !File.Exists(_settingsPath)) return;
+        if (!PersistenceEnabled || !_storage.FileExists(_settingsPath)) return;
 
         try
         {
-            var json = File.ReadAllText(_settingsPath);
+            var json = _storage.ReadAllText(_settingsPath);
             var parsed = JsonConvert.DeserializeObject<UiSettingsDto>(json);
             if (parsed != null && parsed.Zoom > 0)
                 _zoomFactor = Clamp(parsed.Zoom);
         }
         catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException)
         {
-            Log.Warning(ex, "UiZoomService: cannot read {Path} — using default zoom", _settingsPath);
+            Log.Warning(ex, "UiZoomService: cannot read {Path} — using default zoom", _settingsPath.FullPath);
         }
     }
 
@@ -145,16 +156,12 @@ public class UiZoomService
         if (!PersistenceEnabled) return;
         try
         {
-            var dir = Path.GetDirectoryName(_settingsPath);
-            if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
-                Directory.CreateDirectory(dir);
-
             var json = JsonConvert.SerializeObject(new UiSettingsDto { Zoom = _zoomFactor }, Formatting.Indented);
-            File.WriteAllText(_settingsPath, json);
+            _storage.WriteAllText(_settingsPath, json);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            Log.Warning(ex, "UiZoomService: cannot save {Path}", _settingsPath);
+            Log.Warning(ex, "UiZoomService: cannot save {Path}", _settingsPath.FullPath);
         }
     }
 
