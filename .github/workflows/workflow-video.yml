@@ -50,6 +50,11 @@ jobs:
       - name: Build DevLauncher (Debug)
         run: dotnet build src/BlockParam.DevLauncher -c Debug
 
+      - name: Install ffmpeg
+        # windows-latest does not preinstall ffmpeg; build_workflow_video.sh
+        # invokes it directly to stitch the rendered frames into the MP4.
+        uses: FedericoCarboni/setup-ffmpeg@v3
+
       - name: Verify ffmpeg
         run: ffmpeg -version
 

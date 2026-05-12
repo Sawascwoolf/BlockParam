@@ -57,6 +57,11 @@ jobs:
         # to Release here without also updating every script.
         run: dotnet build src/BlockParam.DevLauncher -c Debug
 
+      - name: Install ffmpeg
+        # windows-latest does not preinstall ffmpeg; the build_*.sh scripts
+        # invoke it directly to stitch frames into MP4s.
+        uses: FedericoCarboni/setup-ffmpeg@v3
+
       - name: Verify ffmpeg
         run: ffmpeg -version
 
