@@ -23,7 +23,7 @@ namespace BlockParam.Tests;
 ///
 /// Invariants asserted after every transition:
 ///   1. <c>AllActiveDbs.Count &gt;= 1</c>;
-///   2. <c>ActiveDbChips.Count == AllActiveDbs.Count</c>; PLC grouping matches;
+///   2. <c>PlcPills</c> selection covers every active DB; one pill per PLC;
 ///   3. <c>RootMembers</c> shape matches active-set count
 ///      (single-DB → flat top-level; multi-DB → exactly N synthetic
 ///      <c>Datatype="DB"</c> roots, one per active DB);
@@ -64,10 +64,8 @@ public class BulkChangeViewModelInvariantTests
         peerRow.IsActive = true;
 
         env.Vm.AllActiveDbs.Should().HaveCount(2);
-        env.Vm.ActiveDbChipGroups.Select(g => g.PlcName).Should().BeEquivalentTo(
+        env.Vm.PlcPills.Select(p => p.PlcName).Should().BeEquivalentTo(
             new[] { "PLC_A", "PLC_B" });
-        env.Vm.ActiveDbChipGroups.Should().AllSatisfy(g =>
-            g.HasPlcHeader.Should().BeTrue("two distinct PLCs disambiguate via header"));
         env.Vm.RootMembers.Should().HaveCount(2);
         env.Vm.RootMembers.Should().AllSatisfy(r => r.Datatype.Should().Be("DB"));
         env.Mbx.AskYesNoCancelCallCount.Should().Be(0, "pure-add does not prompt");
@@ -110,11 +108,12 @@ public class BulkChangeViewModelInvariantTests
             .WithAnchor("flat-db.xml")
             .Build();
 
-        env.Vm.ActiveDbChips.Should().HaveCount(1);
-        env.Vm.ActiveDbChips[0].CanClose.Should().BeFalse(
+        // Verify the last-DB removal is refused at the VM level.
+        var anchorDb = env.Vm.AllActiveDbs[0];
+        var countBefore = env.Vm.AllActiveDbs.Count;
+        env.Vm.RequestRemoveActiveDb(anchorDb); // should be a no-op
+        env.Vm.AllActiveDbs.Should().HaveCount(countBefore,
             "the dialog must always have at least one DB");
-        env.Vm.ActiveDbChips[0].CloseCommand.CanExecute(null).Should().BeFalse();
-        env.Vm.AllActiveDbs.Should().HaveCount(1);
         env.Mbx.AskYesNoCancelCallCount.Should().Be(0);
         AssertInvariants(env.Vm);
     }
@@ -135,8 +134,8 @@ public class BulkChangeViewModelInvariantTests
         var peerLeaf = FindFirstPendingLeaf(env.Vm, "NestedStructDB");
         var pendingValue = peerLeaf.PendingValue;
 
-        var peerChip = env.Vm.ActiveDbChips.First(c => c.DisplayName == "NestedStructDB");
-        peerChip.CloseCommand.Execute(null);
+        var peerDb = env.Vm.AllActiveDbs.First(d => d.Info.Name == "NestedStructDB");
+        env.Vm.RequestRemoveActiveDb(peerDb);
 
         env.Vm.AllActiveDbs.Should().HaveCount(2, "Cancel keeps the peer in place");
         env.Vm.HasStashedDbs.Should().BeFalse("Cancel does not stash");
@@ -162,8 +161,8 @@ public class BulkChangeViewModelInvariantTests
             .WithPromptResults(YesNoCancelResult.Yes, YesNoCancelResult.Yes)
             .Build();
 
-        var targetChip = env.Vm.ActiveDbChips.First(c => c.DisplayName == "ArrayDB");
-        targetChip.SoloCommand.Execute(null);
+        var targetDb = env.Vm.AllActiveDbs.First(d => d.Info.Name == "ArrayDB");
+        env.Vm.SoloActiveDbByReference(targetDb);
 
         env.Vm.AllActiveDbs.Should().HaveCount(1);
         env.Vm.AllActiveDbs[0].Info.Name.Should().Be("ArrayDB");
@@ -191,8 +190,8 @@ public class BulkChangeViewModelInvariantTests
             .WithPromptResults(YesNoCancelResult.Cancel)
             .Build();
 
-        var targetChip = env.Vm.ActiveDbChips.First(c => c.DisplayName == "ArrayDB");
-        targetChip.SoloCommand.Execute(null);
+        var targetDb = env.Vm.AllActiveDbs.First(d => d.Info.Name == "ArrayDB");
+        env.Vm.SoloActiveDbByReference(targetDb);
 
         env.Vm.AllActiveDbs.Select(d => d.Info.Name).Should().BeEquivalentTo(
             new[] { "NestedStructDB", "ArrayDB" },
@@ -235,8 +234,8 @@ public class BulkChangeViewModelInvariantTests
         var pendingValue = pendingLeaf.PendingValue!;
 
         // Bootstrap: close NestedStructDB to create the stash entry.
-        env.Vm.ActiveDbChips.First(c => c.DisplayName == "NestedStructDB")
-            .CloseCommand.Execute(null);
+        var nestedDb = env.Vm.AllActiveDbs.First(d => d.Info.Name == "NestedStructDB");
+        env.Vm.RequestRemoveActiveDb(nestedDb);
         env.Vm.HasStashedDbs.Should().BeTrue("setup: stash created via chip-close");
         env.Vm.AllActiveDbs.Should().HaveCount(2,
             "setup: FlatDB + ArrayDB active before reactivate, ≥2 → prompt fires");
@@ -291,8 +290,8 @@ public class BulkChangeViewModelInvariantTests
         var pendingLeaf = FindFirstPendingLeaf(env.Vm, "NestedStructDB");
         var pendingValue = pendingLeaf.PendingValue!;
 
-        env.Vm.ActiveDbChips.First(c => c.DisplayName == "NestedStructDB")
-            .CloseCommand.Execute(null);
+        var nestedDb2 = env.Vm.AllActiveDbs.First(d => d.Info.Name == "NestedStructDB");
+        env.Vm.RequestRemoveActiveDb(nestedDb2);
         env.Vm.HasStashedDbs.Should().BeTrue("setup: stash created");
 
         var promptsBefore = env.Mbx.AskYesNoCancelCallCount;
@@ -339,8 +338,8 @@ public class BulkChangeViewModelInvariantTests
             .Build();
 
         // Setup: stash NestedStructDB.
-        env.Vm.ActiveDbChips.First(c => c.DisplayName == "NestedStructDB")
-            .CloseCommand.Execute(null);
+        var nestedDb3 = env.Vm.AllActiveDbs.First(d => d.Info.Name == "NestedStructDB");
+        env.Vm.RequestRemoveActiveDb(nestedDb3);
         env.Vm.HasStashedDbs.Should().BeTrue();
         env.Vm.StashedDbs.Should().ContainSingle(s => s.DbName == "NestedStructDB");
 
@@ -491,8 +490,8 @@ public class BulkChangeViewModelInvariantTests
         var anchorLeaf = FindFirstPendingLeaf(env.Vm, "FlatDB");
         var pendingValue = anchorLeaf.PendingValue;
 
-        var anchorChip = env.Vm.ActiveDbChips.First(c => c.DisplayName == "FlatDB");
-        anchorChip.CloseCommand.Execute(null);
+        var anchorDbToRemove = env.Vm.AllActiveDbs.First(d => d.Info.Name == "FlatDB");
+        env.Vm.RequestRemoveActiveDb(anchorDbToRemove);
 
         env.Vm.AllActiveDbs.Should().ContainSingle()
             .Which.Info.Name.Should().Be("NestedStructDB",
@@ -526,9 +525,8 @@ public class BulkChangeViewModelInvariantTests
         env.Vm.AllActiveDbs[0].Info.Name.Should().Be("FlatDB", "setup: anchor is FlatDB");
         env.Vm.CurrentPlcName.Should().Be("PLC_A", "setup: anchor PLC display is PLC_A");
 
-        var anchorChip = env.Vm.ActiveDbChips.First(c => c.DisplayName == "FlatDB");
-        anchorChip.CanClose.Should().BeTrue("2-DB session — anchor is removable");
-        anchorChip.CloseCommand.Execute(null);
+        var anchorDb2 = env.Vm.AllActiveDbs.First(d => d.Info.Name == "FlatDB");
+        env.Vm.RequestRemoveActiveDb(anchorDb2); // 2-DB session — anchor is removable
 
         env.Vm.AllActiveDbs.Should().HaveCount(1);
         env.Vm.AllActiveDbs[0].Info.Name.Should().Be("NestedStructDB",
@@ -576,8 +574,8 @@ public class BulkChangeViewModelInvariantTests
         env.Vm.IsManualMode.Should().BeTrue("setup: 2 leaves selected → manual mode");
         env.Vm.ManualSelectionCount.Should().Be(2);
 
-        var anchorChip = env.Vm.ActiveDbChips.First(c => c.DisplayName == "FlatDB");
-        anchorChip.CloseCommand.Execute(null);
+        var anchorDbManual = env.Vm.AllActiveDbs.First(d => d.Info.Name == "FlatDB");
+        env.Vm.RequestRemoveActiveDb(anchorDbManual);
 
         env.Vm.AllActiveDbs.Should().HaveCount(1);
         env.Vm.AllActiveDbs[0].Info.Name.Should().Be("NestedStructDB");
@@ -630,8 +628,8 @@ public class BulkChangeViewModelInvariantTests
         expectedPendingValue.Should().NotBeNull("setup: anchor has exactly one pending edit");
 
         // Remove the peer (no pending edits on peer → no prompt).
-        var peerChip = env.Vm.ActiveDbChips.First(c => c.DisplayName == "NestedStructDB");
-        peerChip.CloseCommand.Execute(null);
+        var peerDb4 = env.Vm.AllActiveDbs.First(d => d.Info.Name == "NestedStructDB");
+        env.Vm.RequestRemoveActiveDb(peerDb4);
 
         // Tree rebuilt: multi-DB → single-DB (flat) shape, all VMs replaced.
         env.Vm.AllActiveDbs.Should().HaveCount(1, "peer was silently removed");
@@ -666,8 +664,8 @@ public class BulkChangeViewModelInvariantTests
         var expectedPendingValue = peerLeaf.PendingValue;
 
         // Attempt to remove the peer — prompt fires, user cancels.
-        var peerChip = env.Vm.ActiveDbChips.First(c => c.DisplayName == "NestedStructDB");
-        peerChip.CloseCommand.Execute(null);
+        var peerDb5 = env.Vm.AllActiveDbs.First(d => d.Info.Name == "NestedStructDB");
+        env.Vm.RequestRemoveActiveDb(peerDb5);
 
         // After cancel: same VMs, same tree shape, store still has the edit.
         env.Vm.AllActiveDbs.Should().HaveCount(2, "Cancel leaves the peer active");
@@ -779,10 +777,9 @@ public class BulkChangeViewModelInvariantTests
         titleBefore.Should().NotContain("NestedStructDB",
             "setup: 3-DB title doesn't already include the soloed name");
 
-        // Solo to NestedStructDB via chip-body click (SoloCommand routes
-        // through SoloActiveDbByReference).
-        var targetChip = env.Vm.ActiveDbChips.First(c => c.DisplayName == "NestedStructDB");
-        targetChip.SoloCommand.Execute(null);
+        // Solo to NestedStructDB via SoloActiveDbByReference.
+        var targetDbSolo = env.Vm.AllActiveDbs.First(d => d.Info.Name == "NestedStructDB");
+        env.Vm.SoloActiveDbByReference(targetDbSolo);
 
         env.Vm.AllActiveDbs.Should().HaveCount(1, "solo collapses to one DB");
         env.Vm.AllActiveDbs[0].Info.Name.Should().Be("NestedStructDB");
@@ -807,16 +804,14 @@ public class BulkChangeViewModelInvariantTests
         // (1) at least one DB always active
         vm.AllActiveDbs.Should().NotBeEmpty("invariant 1: AllActiveDbs.Count >= 1");
 
-        // (2) chips count and PLC grouping match active set
-        vm.ActiveDbChips.Should().HaveCount(vm.AllActiveDbs.Count,
-            "invariant 2a: ActiveDbChips.Count == AllActiveDbs.Count");
-        var chipsByName = vm.ActiveDbChips.Select(c => c.DisplayName).ToList();
+        // (2) pill-row covers the same DB names as the active set
+        var pillDbNames = vm.PlcPills
+            .SelectMany(p => p.SelectedDbs.OfType<DataBlockListItem>())
+            .Select(i => i.Name)
+            .ToList();
         var dbsByName = vm.AllActiveDbs.Select(d => d.Info.Name).ToList();
-        chipsByName.Should().BeEquivalentTo(dbsByName,
-            "invariant 2b: every active DB has a corresponding chip");
-        var groupedChipNames = vm.ActiveDbChipGroups.SelectMany(g => g.Chips).Select(c => c.DisplayName).ToList();
-        groupedChipNames.Should().BeEquivalentTo(chipsByName,
-            "invariant 2c: PLC grouping covers every chip exactly once");
+        pillDbNames.Should().BeEquivalentTo(dbsByName,
+            "invariant 2: every active DB has a corresponding pill selection entry");
 
         // (3) tree shape matches active-set count
         if (vm.AllActiveDbs.Count == 1)
@@ -836,14 +831,15 @@ public class BulkChangeViewModelInvariantTests
         vm.HasStashedDbs.Should().Be(vm.StashedDbs.Count > 0,
             "invariant 4: HasStashedDbs == (StashedDbs.Count > 0)");
 
-        // (5) anchor PLC display matches the anchor's chip group
-        if (vm.ActiveDbChipGroups.Count > 0)
+        // (5) anchor PLC display matches the anchor pill's PlcName
+        if (vm.PlcPills.Count > 0)
         {
             var anchorName = vm.AllActiveDbs[0].Info.Name;
-            var anchorGroup = vm.ActiveDbChipGroups
-                .First(g => g.Chips.Any(c => c.DisplayName == anchorName));
-            anchorGroup.PlcName.Should().Be(vm.CurrentPlcName,
-                "invariant 5: anchor's chip-group PLC name == CurrentPlcName");
+            var anchorPill = vm.PlcPills
+                .FirstOrDefault(p => p.SelectedDbs.OfType<DataBlockListItem>()
+                    .Any(i => i.Name == anchorName));
+            anchorPill?.PlcName.Should().Be(vm.CurrentPlcName,
+                "invariant 5: anchor pill's PlcName == CurrentPlcName");
         }
 
         // (6) PendingEdits only references nodes still reachable in the live

@@ -844,15 +844,6 @@ Closing the dialog will discard them. Close anyway?</value>
   <data name="Dialog_SwitchDb_SoloTooltip" xml:space="preserve">
     <value>Show only this DB (uncheck the others)</value>
   </data>
-  <!-- Tooltip on each active-DB chip's × close button. The button is
-       disabled when the chip is the last remaining DB (the dialog must
-       always have at least one). -->
-  <data name="Dialog_ActiveDbChip_Close_Tooltip" xml:space="preserve">
-    <value>Remove this Data Block from the dialog</value>
-  </data>
-  <data name="Dialog_ActiveDbChip_Solo_Tooltip" xml:space="preserve">
-    <value>Switch to only this Data Block (close the others)</value>
-  </data>
   <data name="Dialog_SwitchDb_DiscardConfirm_Title" xml:space="preserve">
     <value>Discard staged changes?</value>
   </data>
@@ -993,5 +984,13 @@ Continue?</value>
   <data name="PillMultiSelect_PlusMore" xml:space="preserve">
     <value>+{0} more</value>
     <comment>{0} = number of hidden selected items past the visible threshold</comment>
+  </data>
+  <!-- Pill-row DB picker (#pill-refactor): trailing affordance to add a PLC's
+       pill to the row. The pill row shows one pill per PLC, so adding a row
+       conceptually means adding a PLC; the popup lets the user pick the DB
+       inside that PLC that becomes active. -->
+  <data name="PillRow_AddDb" xml:space="preserve">
+    <value>+ PLC</value>
+    <comment>Button that opens the project-wide DB picker to add a PLC's pill to the row</comment>
   </data>
 </root>

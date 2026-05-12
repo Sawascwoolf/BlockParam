@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Collections.Specialized;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
@@ -254,8 +255,8 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         // assignment (not via the setter) — RootMembers / StashedDbs
         // collections aren't constructed yet, so the cascade isn't
         // safe to fire here. The constructor's explicit
-        // BuildRootMembersFromActiveDbs / RebuildActiveDbChips calls
-        // below take the place of the cascade for the initial build.
+        // BuildRootMembersFromActiveDbs / RebuildPlcPills calls below
+        // take the place of the cascade for the initial build.
         _state = new ActiveSetState(
             _activeDbs.ToList(),
             new Dictionary<string, StashedDbState>(),
@@ -294,7 +295,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         RootMembers = new ObservableCollection<MemberNodeViewModel>();
         BuildRootMembersFromActiveDbs();
         RefreshRuleHints();
-        RebuildActiveDbChips();
+        RebuildPlcPills();
 
         AvailableScopes = new ObservableCollection<ScopeLevel>();
 
@@ -1061,115 +1062,236 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     /// <summary>True when more than one DB is active in this session (#58).</summary>
     public bool HasMultipleActiveDbs => _activeDbs.Count > 1;
 
-    /// <summary>
-    /// Flat list of chips, one per active DB. Useful for tests and any code
-    /// that needs to enumerate every chip without descending into groups.
-    /// Use <see cref="ActiveDbChipGroups"/> for the toolbar UI — it bundles
-    /// chips by PLC so long PLC names render once as a group header instead
-    /// of repeating on every chip.
-    /// </summary>
-    public ObservableCollection<ActiveDbChipViewModel> ActiveDbChips { get; }
-        = new ObservableCollection<ActiveDbChipViewModel>();
+    // ── Pill-row (#pill-refactor) ─────────────────────────────────────────────
 
     /// <summary>
-    /// Chips bundled per owning PLC. The toolbar binds here so the long PLC
-    /// name appears once as a group header rather than on every chip. In
-    /// single-PLC sessions <see cref="ActiveDbChipGroupViewModel.HasPlcHeader"/>
-    /// is false on the only group, so the row reduces to bare DB chips.
+    /// One pill per PLC that has at least one active DB. Replaces the old
+    /// chip row + DbSwitcherButton / DbSwitcherPopup in the dialog toolbar.
+    /// Rebuilt by <see cref="RebuildPlcPills"/> whenever the active set changes.
     /// </summary>
-    public ObservableCollection<ActiveDbChipGroupViewModel> ActiveDbChipGroups { get; }
-        = new ObservableCollection<ActiveDbChipGroupViewModel>();
+    public ObservableCollection<PlcPillViewModel> PlcPills { get; }
+        = new ObservableCollection<PlcPillViewModel>();
 
     /// <summary>
-    /// Per-PLC collapsed-group memory for the dropdown picker. The popup is
-    /// reinstantiated on every open so Expander.IsExpanded would otherwise
-    /// reset every time. The dialog wires Expander.Loaded /
-    /// Expander.Collapsed back to <see cref="IsPlcGroupExpanded"/> /
-    /// <see cref="SetPlcGroupExpanded"/> so a user's collapse choice
-    /// survives popup close + reopen and chip-set changes.
+    /// PLCs the user added via "+ PLC" before they had any active DB.
+    /// These produce empty pills until the user opens them and toggles a
+    /// DB. Once a DB is active for a PLC the entry is redundant (the
+    /// active-DB path also makes the PLC appear), but we keep it so the
+    /// pill survives the user removing all DBs again.
     /// </summary>
-    private readonly HashSet<string> _collapsedPlcGroups =
-        new HashSet<string>(StringComparer.Ordinal);
+    private readonly HashSet<string> _extraPillPlcs = new(StringComparer.Ordinal);
 
-    public bool IsPlcGroupExpanded(string plcName) => !_collapsedPlcGroups.Contains(plcName);
-
-    public void SetPlcGroupExpanded(string plcName, bool expanded)
+    /// <summary>
+    /// Adds <paramref name="plcName"/> to the row as an empty pill. The
+    /// new pill loads its DB list lazily on first popup open, same as the
+    /// active-set-derived pills. No-op if the PLC isn't a current candidate
+    /// (already in row, or not present in the project's DB list at all) —
+    /// this keeps <see cref="_extraPillPlcs"/> from accumulating stale
+    /// names if the click stream races a project mutation.
+    /// </summary>
+    public void AddPlcToRow(string plcName)
     {
-        if (expanded) _collapsedPlcGroups.Remove(plcName);
-        else _collapsedPlcGroups.Add(plcName);
+        if (string.IsNullOrEmpty(plcName)) return;
+        if (!InactiveProjectPlcs.Contains(plcName, StringComparer.Ordinal)) return;
+        _extraPillPlcs.Add(plcName);
+        RebuildPlcPills();
+        OnPropertyChanged(nameof(InactiveProjectPlcs));
     }
 
-    private void RebuildActiveDbChips()
+    /// <summary>
+    /// PLC names present in the project but not yet represented in the
+    /// pill row. Drives the "+ PLC" popup's item list and the
+    /// <see cref="CanAddPlc"/> visibility gate.
+    /// </summary>
+    public IReadOnlyList<string> InactiveProjectPlcs
     {
-        ActiveDbChips.Clear();
-        ActiveDbChipGroups.Clear();
-        bool canClose = _activeDbs.Count > 1;
+        get
+        {
+            if (!HasDataBlockSwitcher) return Array.Empty<string>();
+            LoadAvailableDataBlocks(force: false);
+            var projectDbs = _availableDataBlocks;
+            if (projectDbs == null || projectDbs.Count == 0)
+                return Array.Empty<string>();
 
-        // Build chips first; group second. Preserve _activeDbs order both
-        // within a group (chips appear in active-set order) and across groups
-        // (the first PLC seen anchors the leftmost group, matching the
-        // anchor's owner). Stable order keeps the layout from jumping when
-        // peer DBs on the same PLC are added/removed.
-        var orderedPlcs = new List<string>();
-        var perPlc = new Dictionary<string, List<ActiveDbChipViewModel>>(
-            StringComparer.Ordinal);
+            var rowPlcs = new HashSet<string>(
+                PlcPills.Select(p => p.PlcName ?? ""), StringComparer.Ordinal);
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            var result = new List<string>();
+            foreach (var db in projectDbs)
+            {
+                var plc = db.PlcName ?? "";
+                if (rowPlcs.Contains(plc)) continue;
+                if (!seen.Add(plc)) continue;
+                result.Add(plc);
+            }
+            return result;
+        }
+    }
 
+    /// <summary>
+    /// True when at least one project PLC is not yet in the row. Bound
+    /// to the "+ PLC" button's Visibility.
+    /// </summary>
+    public bool CanAddPlc => InactiveProjectPlcs.Count > 0;
+
+    // Re-entrancy guard: when the cascade rewrites SelectedDbs on each pill,
+    // the pill fires SelectionChanged → OnPillSelectionChanged. Without the
+    // guard we'd enter AddActiveDbToSet / RemoveActiveDb for every item in
+    // the selection sync, spiraling into multiple cascades.
+    private bool _syncingPillSelection;
+
+    // "Add DB" trailing affordance: project-wide pill to pick a DB from a PLC
+    // that has no active DB yet.
+    private bool _isAddDbPopupOpen;
+
+    public bool IsAddDbPopupOpen
+    {
+        get => _isAddDbPopupOpen;
+        set => SetProperty(ref _isAddDbPopupOpen, value);
+    }
+
+    private void RebuildPlcPills()
+    {
+        // Unsubscribe old pills before clearing.
+        foreach (var pill in PlcPills)
+            pill.SelectionChanged -= OnPillSelectionChanged;
+        PlcPills.Clear();
+
+        // Prune _extraPillPlcs of names that no longer correspond to any
+        // project PLC. Without this, a manually-added pill survives even
+        // after its PLC disappears from the project (e.g., after a
+        // refresh), and the orphan stays in the row indefinitely.
+        if (_extraPillPlcs.Count > 0 && _availableDataBlocks != null)
+        {
+            var projectPlcs = new HashSet<string>(
+                _availableDataBlocks.Select(d => d.PlcName ?? ""),
+                StringComparer.Ordinal);
+            _extraPillPlcs.RemoveWhere(p => !projectPlcs.Contains(p));
+        }
+
+        var newPills = PlcPillGroupsService.Build(
+            _activeDbs,
+            _currentPlcName,
+            loadDbsForPlc: LoadDbsForPlcAsync,
+            extraPlcs: _extraPillPlcs);
+
+        foreach (var pill in newPills)
+        {
+            pill.SelectionChanged += OnPillSelectionChanged;
+            PlcPills.Add(pill);
+        }
+
+        // Pill row just changed — re-evaluate the inactive-PLCs list so
+        // the "+ PLC" popup and its button visibility stay in sync.
+        OnPropertyChanged(nameof(InactiveProjectPlcs));
+        OnPropertyChanged(nameof(CanAddPlc));
+    }
+
+    private void OnPillSelectionChanged(object? sender, PillSelectionChangedEventArgs e)
+    {
+        if (_syncingPillSelection) return;
+        _syncingPillSelection = true;
+        try
+        {
+            foreach (var summary in e.Added)
+            {
+                if (!GetActiveStatusFor(summary).isActive)
+                    AddActiveDbFromSummary(summary);
+            }
+            foreach (var summary in e.Removed)
+            {
+                if (State.Dbs.Count <= 1)
+                {
+                    Log.Information(
+                        "Refusing pill remove on {Name} — at least one DB must stay active",
+                        summary.Name);
+                    // Snap pill selection back so the UI doesn't show a deselected last DB.
+                    if (sender is PlcPillViewModel pill)
+                    {
+                        var activeItems = GetActiveItemsForPlc(pill);
+                        pill.SyncSelectedDbs(activeItems);
+                    }
+                    return;
+                }
+                var match = FindActiveDb(summary);
+                if (match != null) RemoveActiveDb(match);
+            }
+        }
+        finally
+        {
+            _syncingPillSelection = false;
+        }
+    }
+
+    private IReadOnlyList<DataBlockListItem> GetActiveItemsForPlc(PlcPillViewModel pill)
+    {
+        var result = new List<DataBlockListItem>();
         for (int i = 0; i < _activeDbs.Count; i++)
         {
             var db = _activeDbs[i];
-            // Anchor (index 0) reads PLC name from _currentPlcName, peers
-            // carry their own — mirrors the rule used elsewhere (FindActiveDb,
-            // IsSameSummary). Cross-PLC adds via dropdown carry the right
-            // summary.PlcName, so multi-PLC projects produce one group per
-            // distinct owner.
             var plc = (i == 0 ? _currentPlcName : db.PlcName) ?? "";
-            var chip = new ActiveDbChipViewModel(
-                displayName: db.Info.Name,
-                plcPrefix: "", // group header carries the PLC name now
-                canClose: canClose,
-                onClose: () => RequestRemoveActiveDb(db),
-                onSolo: () => SoloActiveDbByReference(db),
-                number: db.Info.Number);
-            ActiveDbChips.Add(chip);
-
-            if (!perPlc.TryGetValue(plc, out var list))
-            {
-                list = new List<ActiveDbChipViewModel>();
-                perPlc[plc] = list;
-                orderedPlcs.Add(plc);
-            }
-            list.Add(chip);
+            if (!string.Equals(plc, pill.PlcName, StringComparison.Ordinal)) continue;
+            result.Add(new DataBlockListItem(
+                new DataBlockSummary(db.Info.Name, "", plcName: plc, number: db.Info.Number),
+                isActive: true,
+                isAnchor: i == 0));
         }
-
-        // Show the group header whenever the project itself is multi-PLC,
-        // not just when the active set spans multiple PLCs. The host signals
-        // multi-PLC by setting _currentPlcName non-empty (single-PLC projects
-        // get an empty PLC display name to suppress redundant chrome).
-        // Showing the header even when only one PLC's DBs are currently
-        // active gives the user immediate visibility into which machine they
-        // are on, instead of having to guess until they add a peer.
-        bool showHeader = !string.IsNullOrEmpty(_currentPlcName);
-        foreach (var plc in orderedPlcs)
-        {
-            ActiveDbChipGroups.Add(new ActiveDbChipGroupViewModel(
-                plc, perPlc[plc], showHeader));
-        }
+        return result;
     }
 
     /// <summary>
-    /// Chip × handler. Refuses the last-DB removal (matches the dropdown
-    /// last-uncheck rule) and routes everything else through the existing
-    /// <see cref="RemoveActiveDb"/> path so the stash / Apply prompt fires
-    /// for DBs with pending edits.
+    /// Lazy-loads the available DB list for a specific PLC. Called by each
+    /// <see cref="PlcPillViewModel"/> on first popup open.
+    ///
+    /// Reuses the same <see cref="_availableDataBlocks"/> cache that
+    /// <see cref="RefreshDataBlocksCommand"/> populates, then filters to the
+    /// requested PLC so each pill only shows its own DBs.
+    ///
+    /// Returns on the calling (UI) thread since <see cref="LoadAvailableDataBlocks"/>
+    /// already runs synchronously on the UI thread.
     /// </summary>
-    private void RequestRemoveActiveDb(ActiveDb db)
+    internal Task<IReadOnlyList<DataBlockListItem>> LoadDbsForPlcAsync(string plcName)
+    {
+        if (_enumerateDataBlocks == null)
+            return Task.FromResult<IReadOnlyList<DataBlockListItem>>(Array.Empty<DataBlockListItem>());
+
+        LoadAvailableDataBlocks(force: false);
+
+        var source = _availableDataBlocks ?? Array.Empty<DataBlockSummary>();
+        var filtered = string.IsNullOrEmpty(plcName)
+            ? source
+            : source.Where(s => string.Equals(s.PlcName, plcName, StringComparison.Ordinal)).ToList();
+
+        var items = filtered
+            .Select(s =>
+            {
+                var (isActive, isAnchor) = GetActiveStatusFor(s);
+                var item = new DataBlockListItem(s, isActive, isAnchor);
+                item.ToggleRequested += OnDataBlockListItemToggled;
+                return item;
+            })
+            .ToList();
+
+        return Task.FromResult<IReadOnlyList<DataBlockListItem>>(items);
+    }
+
+    // ── End pill-row ──────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Refuses the last-DB removal (matches the pill last-uncheck rule)
+    /// and routes everything else through the existing
+    /// <see cref="RemoveActiveDb"/> path so the stash / Apply prompt fires
+    /// for DBs with pending edits. Internal so tests can drive gestures
+    /// without going through chip / pill UI objects.
+    /// </summary>
+    internal void RequestRemoveActiveDb(ActiveDb db)
     {
         Log.Information(
-            "[gesture] Chip × on {Name} | {State}", db.Info.Name, SnapshotState());
+            "[gesture] PillRemove on {Name} | {State}", db.Info.Name, SnapshotState());
         if (State.Dbs.Count <= 1)
         {
             Log.Information(
-                "Refusing chip-close on {Name} — at least one DB must stay active",
+                "Refusing pill removal on {Name} — at least one DB must stay active",
                 db.Info.Name);
             return;
         }
@@ -1418,27 +1540,21 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
-    /// Reference-based variant of <see cref="SoloActiveDb"/> used by the
-    /// chip-body click. Avoids the summary round-trip (chip already holds
-    /// the live <see cref="ActiveDb"/>). Same prompts on every dropped DB
-    /// with pending edits; if the user cancels mid-solo, the remaining
-    /// drops are skipped and the active set is whatever survived.
+    /// Reference-based variant of <see cref="SoloActiveDb"/>. Originally
+    /// called from the chip body click; surviving as a public seam used by
+    /// tests and (in future) any "solo this DB" pill affordance. Same
+    /// prompts on every dropped DB with pending edits; if the user cancels
+    /// mid-solo, the remaining drops are skipped and the active set is
+    /// whatever survived.
     /// </summary>
     public void SoloActiveDbByReference(ActiveDb target)
     {
         Log.Information(
-            "[gesture] Chip body click → solo {Name} | {State}",
+            "[gesture] SoloByReference → {Name} | {State}",
             target.Info.Name, SnapshotState());
         if (State.Dbs.Count <= 1)
         {
-            // Already the only active DB — there's nothing to solo away. Use
-            // the click as a one-step "open the picker so I can switch" so
-            // single-DB users don't have to reach for the + button.
-            if (_enumerateDataBlocks != null
-                && OpenDataBlocksDropdownCommand.CanExecute(null))
-            {
-                OpenDataBlocksDropdownCommand.Execute(null);
-            }
+            // Already the only active DB — there's nothing to solo away.
             return;
         }
 
@@ -1605,9 +1721,6 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         Log.Information(
             "[cascade] RebuildAfterActiveSetChanged → rebuilding tree | {State}",
             SnapshotState());
-        // Always re-sync the row checkbox states from the authoritative
-        // active set so a refused toggle snaps back visually.
-        RefreshFilteredDataBlockItemsActiveState();
         // BuildRootMembersFromActiveDbs creates fresh MemberNodeViewModel
         // instances on every rebuild, so any selection / scope / manual-
         // selection state held by reference points at orphaned VMs from
@@ -1621,7 +1734,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         BuildRootMembersFromActiveDbs();
         ApplyAllFilters();
         RefreshFlatList();
-        RebuildActiveDbChips();
+        RebuildPlcPills();
         // PendingEdits / BulkPreview hold MemberNodeViewModel references —
         // BuildRootMembersFromActiveDbs just minted fresh ones, so any
         // surviving entries point at orphans from the prior tree. Without

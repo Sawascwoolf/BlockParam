@@ -35,8 +35,8 @@ class Program
 
         Log.Logger = new LoggerConfiguration()
             .MinimumLevel.Debug()
-            .WriteTo.Console(outputTemplate: "{Timestamp:HH:mm:ss} [{Level:u3}] {Message:lj}{NewLine}")
-            .WriteTo.File(logPath, outputTemplate: "{Timestamp:HH:mm:ss.fff} [{Level:u3}] {Message:lj}{NewLine}")
+            .WriteTo.Console(outputTemplate: "{Timestamp:HH:mm:ss} [{Level:u3}] {Message:lj}{NewLine}{Exception}")
+            .WriteTo.File(logPath, outputTemplate: "{Timestamp:HH:mm:ss.fff} [{Level:u3}] {Message:lj}{NewLine}{Exception}")
             .CreateLogger();
         Log.Information("DevLauncher log: {Path}", logPath);
 
@@ -82,6 +82,13 @@ class Program
         if (args.Length >= 2 && args[0] == "--capture-pill-grouped-bundled")
         {
             PillMultiSelectCapture.RunGroupedBundled(Path.GetFullPath(args[1]));
+            return;
+        }
+
+        // --capture-pill-row <out.png>             Pill row (PlcPills + "+ PLC"): all scenes stitched into one PNG
+        if (args.Length >= 2 && args[0] == "--capture-pill-row")
+        {
+            PillRowCapture.Run(Path.GetFullPath(args[1]));
             return;
         }
 
@@ -446,7 +453,7 @@ class Program
     /// <paramref name="anchorPlc"/> (empty when <c>--plc</c> isn't passed),
     /// so they group with the anchor in the chip toolbar.
     /// </summary>
-    private static IReadOnlyList<DataBlockSummary> EnumerateDevLauncherDbs(string dir, string? anchorPlc)
+    internal static IReadOnlyList<DataBlockSummary> EnumerateDevLauncherDbs(string dir, string? anchorPlc)
     {
         if (!Directory.Exists(dir)) return Array.Empty<DataBlockSummary>();
         var list = new List<DataBlockSummary>();
@@ -483,12 +490,30 @@ class Program
                 if (dbElement == null) continue;
 
                 var blockType = dbElement.Name.LocalName.Replace("SW.Blocks.", "");
+
+                // TIA exports the block number inside the DB element's
+                // AttributeList as <Number>4</Number>. ProjectDiscovery
+                // populates this for real Openness sessions; the DevLauncher
+                // enumerator must do the same or the pill trigger flips from
+                // "DB42" to a full name when the popup-open reload swaps in
+                // a number-less summary.
+                int? dbNumber = null;
+                var numberElement = dbElement.Descendants()
+                    .FirstOrDefault(e => e.Name.LocalName == "Number"
+                        && e.Parent?.Name.LocalName == "AttributeList");
+                if (numberElement != null
+                    && int.TryParse(numberElement.Value, out var parsed))
+                {
+                    dbNumber = parsed;
+                }
+
                 list.Add(new DataBlockSummary(
                     dbName,
                     folderPath: "",
                     blockType: blockType,
                     isInstanceDb: blockType == "InstanceDB",
-                    plcName: plcName));
+                    plcName: plcName,
+                    number: dbNumber));
             }
             catch (Exception ex)
             {

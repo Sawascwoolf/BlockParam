@@ -1,7 +1,6 @@
 using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Data;
 using System.Windows.Input;
 using System.Windows.Media;
 using BlockParam.Diagnostics;
@@ -892,6 +891,37 @@ public partial class BulkChangeDialog : Window
         menu.Items.Add(collapseItem);
     }
 
+    // ---- "+ Add DB" trailing button (#pill-refactor) -----------------------
+
+    /// <summary>
+    /// Toggles the "+ PLC" popup. The VM's <see cref="BulkChangeViewModel.InactiveProjectPlcs"/>
+    /// reads the cached project DB list lazily; no separate eager load
+    /// is needed for the flat-list popup.
+    /// </summary>
+    private void OnAddDbButtonClick(object sender, RoutedEventArgs e)
+    {
+        if (DataContext is not BulkChangeViewModel vm) return;
+        vm.IsAddDbPopupOpen = !vm.IsAddDbPopupOpen;
+    }
+
+    /// <summary>
+    /// Click handler for the flat PLC list inside the "+ PLC" popup.
+    /// Adds the selected PLC as an empty pill to the row (the user then
+    /// opens that pill to pick which DB(s) become active) and closes the
+    /// popup. Clearing the selection right after prevents the next open
+    /// from re-firing for a stale item.
+    /// </summary>
+    private void OnAddPlcListSelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
+    {
+        if (DataContext is not BulkChangeViewModel vm) return;
+        if (sender is not System.Windows.Controls.ListBox lb) return;
+        if (lb.SelectedItem is not string plc || string.IsNullOrEmpty(plc)) return;
+
+        vm.AddPlcToRow(plc);
+        vm.IsAddDbPopupOpen = false;
+        lb.SelectedItem = null;
+    }
+
     private void OnClose(object sender, RoutedEventArgs e)
     {
         Close();
@@ -1090,153 +1120,4 @@ public partial class BulkChangeDialog : Window
         }
     }
 
-    // --- DB-switcher dropdown (#59) ---
-
-    /// <summary>
-    /// ToggleButton click on the combo. Opens the popup via the VM command
-    /// (which lazy-loads + caches the DB list on first open).
-    /// </summary>
-    private void OnDbSwitcherButtonClick(object sender, RoutedEventArgs e)
-    {
-        if (DataContext is not BulkChangeViewModel vm) return;
-        Log.Information(
-            "[gesture] DbSwitcher + clicked (currently {OpenState}) | active=[{Active}] pending={Pending} stashed={Stashed}",
-            vm.IsDataBlocksDropdownOpen ? "open" : "closed",
-            string.Join(",", vm.AllActiveDbs.Select(d => d.Info.Name)),
-            vm.PendingEdits.Count, vm.StashedDbs.Count);
-        if (vm.IsDataBlocksDropdownOpen)
-        {
-            vm.IsDataBlocksDropdownOpen = false;
-            return;
-        }
-        // Two "+" triggers exist (far-left + trailing). Anchor the popup to
-        // whichever was clicked so it opens under the user's mouse instead of
-        // jumping across the toolbar.
-        if (sender is UIElement target)
-            DbSwitcherPopup.PlacementTarget = target;
-        if (vm.OpenDataBlocksDropdownCommand.CanExecute(null))
-            vm.OpenDataBlocksDropdownCommand.Execute(null);
-    }
-
-    /// <summary>
-    /// Restores a PLC-group Expander's IsExpanded from the VM's collapsed-set
-    /// memory. The popup tears down and rebuilds its visual tree on every
-    /// open, so without this handler the user's collapse choice would reset
-    /// every time. Paired with <see cref="OnPlcGroupExpanderToggled"/> which
-    /// pushes new state back into the VM.
-    /// </summary>
-    private void OnPlcGroupExpanderLoaded(object sender, RoutedEventArgs e)
-    {
-        if (sender is Expander ex
-            && DataContext is BulkChangeViewModel vm
-            && ex.DataContext is CollectionViewGroup group
-            && group.Name is string plc)
-        {
-            ex.IsExpanded = vm.IsPlcGroupExpanded(plc);
-        }
-    }
-
-    /// <summary>
-    /// Single handler bound to both Expanded and Collapsed: pushes the new
-    /// state into the VM's collapsed-set so it survives popup close +
-    /// reopen and active-set mutations.
-    /// </summary>
-    private void OnPlcGroupExpanderToggled(object sender, RoutedEventArgs e)
-    {
-        if (sender is Expander ex
-            && DataContext is BulkChangeViewModel vm
-            && ex.DataContext is CollectionViewGroup group
-            && group.Name is string plc)
-        {
-            vm.SetPlcGroupExpanded(plc, ex.IsExpanded);
-        }
-    }
-
-    /// <summary>Focus the search box and clear it whenever the popup opens.</summary>
-    private void OnDbSwitcherPopupOpened(object? sender, EventArgs e)
-    {
-        if (DataContext is BulkChangeViewModel vm)
-            vm.DataBlockSearchText = "";
-        DbSwitcherSearchBox.Focus();
-        Keyboard.Focus(DbSwitcherSearchBox);
-    }
-
-    /// <summary>
-    /// Search-box keys: ↓ jumps to the list, Enter accepts the first match,
-    /// Esc closes the popup.
-    /// </summary>
-    private void OnDbSwitcherSearchKeyDown(object sender, KeyEventArgs e)
-    {
-        if (DataContext is not BulkChangeViewModel vm) return;
-
-        switch (e.Key)
-        {
-            case Key.Escape:
-                vm.IsDataBlocksDropdownOpen = false;
-                e.Handled = true;
-                break;
-            case Key.Down:
-                if (DbSwitcherList.Items.Count > 0)
-                {
-                    DbSwitcherList.SelectedIndex = 0;
-                    var firstContainer = (ListBoxItem?)DbSwitcherList.ItemContainerGenerator.ContainerFromIndex(0);
-                    firstContainer?.Focus();
-                    e.Handled = true;
-                }
-                break;
-            case Key.Enter:
-                // Multi-select dropdown (#58): Enter on a highlighted row
-                // toggles its checkbox so a keyboard-only user can add /
-                // remove DBs from the active set without grabbing the mouse.
-                if (DbSwitcherList.Items.Count > 0
-                    && DbSwitcherList.Items[0] is DataBlockListItem firstItem)
-                {
-                    firstItem.IsActive = !firstItem.IsActive;
-                    e.Handled = true;
-                }
-                break;
-        }
-    }
-
-    /// <summary>List keys: Esc closes; Enter toggles the highlighted DB's checkbox.</summary>
-    private void OnDbSwitcherListKeyDown(object sender, KeyEventArgs e)
-    {
-        if (DataContext is not BulkChangeViewModel vm) return;
-
-        if (e.Key == Key.Escape)
-        {
-            vm.IsDataBlocksDropdownOpen = false;
-            e.Handled = true;
-        }
-        else if (e.Key == Key.Enter && DbSwitcherList.SelectedItem is DataBlockListItem picked)
-        {
-            picked.IsActive = !picked.IsActive;
-            e.Handled = true;
-        }
-    }
-
-    /// <summary>
-    /// "Solo" click on a dropdown row's name button (#58 peer-mode follow-up).
-    /// Replaces the active set with just this DB so the user can drop back
-    /// to a single-DB view in one click. The CheckBox to the left of this
-    /// button still owns add / remove behavior.
-    /// </summary>
-    private void OnDbSwitcherSoloClick(object sender, RoutedEventArgs e)
-    {
-        if (DataContext is not BulkChangeViewModel vm) return;
-        if (sender is not Button b) return;
-        if (b.DataContext is not DataBlockListItem item) return;
-
-        // Defer so the popup absorbs the StaysOpen=False close cleanly
-        // before we mutate the active set + rebuild the tree.
-        Log.Information(
-            "[gesture] Dropdown row solo-click → {Name} (active=[{Active}] pending={Pending} stashed={Stashed})",
-            item.Name,
-            string.Join(",", vm.AllActiveDbs.Select(d => d.Info.Name)),
-            vm.PendingEdits.Count, vm.StashedDbs.Count);
-        Dispatcher.BeginInvoke(new Action(() =>
-        {
-            vm.SoloActiveDb(item.Summary);
-        }), System.Windows.Threading.DispatcherPriority.Background);
-    }
 }
