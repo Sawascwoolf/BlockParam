@@ -44,12 +44,20 @@
             <Reference HintPath> into the local TIA install (Portal V21\PublicAPI\V21\net48\).
             <Private>False</Private> keeps the DLLs out of our output — TIA loads them
             from its own install at runtime.
-       Configurable per dev machine via $(TiaPortalV21Root) (default: standard install path). -->
-  <ItemGroup Condition="'$(TiaVersion)' == '20'">
+       Configurable per dev machine via $(TiaPortalV21Root) (default: standard install path).
+       CI:  Hosted GitHub runners have neither TIA install nor real Siemens DLLs.
+            Passing -p:UseSiemensStubs=true swaps both paths for a clean-room stub
+            assembly (ci/stubs/) so the addin compiles + tests run. The stub-built
+            output must never ship — guarded by addin-publisher.xml. -->
+  <ItemGroup Condition="'$(UseSiemensStubs)' == 'true'">
+    <ProjectReference Include="..\..\ci\stubs\Siemens.Engineering.Stubs\Siemens.Engineering.Stubs.csproj" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(UseSiemensStubs)' != 'true' And '$(TiaVersion)' == '20'">
     <PackageReference Include="Siemens.Collaboration.Net.TiaPortal.Packages.OpennessAddIn" Version="20.0.*" />
   </ItemGroup>
 
-  <PropertyGroup Condition="'$(TiaVersion)' == '21'">
+  <PropertyGroup Condition="'$(UseSiemensStubs)' != 'true' And '$(TiaVersion)' == '21'">
     <TiaPortalV21Root Condition="'$(TiaPortalV21Root)' == ''">C:\Program Files\Siemens\Automation\Portal V21\PublicAPI\V21\net48</TiaPortalV21Root>
   </PropertyGroup>
 
@@ -58,12 +66,12 @@
        assembly; if it's there, all sibling DLLs are too. -->
   <Target Name="EnsureTiaPortalV21SdkPresent"
           BeforeTargets="ResolveAssemblyReferences"
-          Condition="'$(TiaVersion)' == '21'">
+          Condition="'$(UseSiemensStubs)' != 'true' And '$(TiaVersion)' == '21'">
     <Error Condition="!Exists('$(TiaPortalV21Root)\Siemens.Engineering.AddIn.Base.dll')"
            Text="TIA Portal V21 SDK not found at '$(TiaPortalV21Root)'. Install TIA Portal V21, or pass -p:TiaPortalV21Root=&lt;path&gt; pointing at PublicAPI\V21\net48." />
   </Target>
 
-  <ItemGroup Condition="'$(TiaVersion)' == '21'">
+  <ItemGroup Condition="'$(UseSiemensStubs)' != 'true' And '$(TiaVersion)' == '21'">
     <Reference Include="Siemens.Engineering.AddIn.Base">
       <HintPath>$(TiaPortalV21Root)\Siemens.Engineering.AddIn.Base.dll</HintPath>
       <Private>False</Private>
