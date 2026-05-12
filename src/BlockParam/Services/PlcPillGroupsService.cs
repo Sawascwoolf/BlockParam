@@ -10,9 +10,7 @@ namespace BlockParam.Services;
 /// <summary>
 /// Pure mapper: converts the current active-DB set into a list of
 /// <see cref="PlcPillViewModel"/>s, one per distinct PLC that has at least
-/// one active DB. Mirrors the per-PLC grouping logic from
-/// <c>BulkChangeViewModel.RebuildActiveDbChips</c> but produces pills
-/// instead of chip groups.
+/// one active DB.
 ///
 /// <para>
 /// Anchor rule: the PLC that owns the first active DB (index 0, whose PLC
@@ -53,8 +51,8 @@ public static class PlcPillGroupsService
         for (int i = 0; i < activeDbs.Count; i++)
         {
             var db = activeDbs[i];
-            // Index 0 reads PLC name from anchorPlcName — mirrors
-            // BulkChangeViewModel.RebuildActiveDbChips lines 1102–1157.
+            // Index 0 reads PLC name from anchorPlcName (the host signals
+            // the anchor's PLC explicitly; for non-anchor DBs use db.PlcName).
             var plc = (i == 0 ? anchorPlcName : db.PlcName) ?? "";
             // DataBlockInfo.Number is int (never null for a parsed block).
             var item = new DataBlockListItem(
