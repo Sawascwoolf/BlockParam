@@ -1,24 +1,30 @@
 name: CI
 
+# Triggers:
+#  - pull_request:    auto-run on open + every push to the PR head (one run)
+#  - push:            opt-in via "[run-ci]" anywhere in the HEAD commit message
+#  - workflow_dispatch: manual button in the Actions tab on any branch
+#
+# Concurrency keys on head_ref || ref_name so when both `push` and
+# `pull_request` fire on the same branch (a marked push to an open PR), the
+# newer one cancels the older instead of doubling spend.
 on:
-  # Pushes give pre-PR feedback on any branch. PRs re-run against the
-  # merge-with-base so an out-of-date branch can't sneak in a broken merge.
-  # Concurrency group cancels superseded runs on the same ref so the
-  # push + PR-sync double trigger doesn't double-bill.
-  push:
-    branches-ignore:
-      - 'gh-pages'
   pull_request:
     branches: [main]
+  push:
+  workflow_dispatch:
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
   cancel-in-progress: true
 
 jobs:
-  build-test:
+  v20:
     name: Build & Test (V20, net48)
     runs-on: windows-latest
+    if: |
+      github.event_name != 'push' ||
+      contains(github.event.head_commit.message, '[run-ci]')
 
     steps:
       - uses: actions/checkout@v4
@@ -53,3 +59,34 @@ jobs:
         with:
           name: test-results
           path: '**/TestResults/*.trx'
+
+  v21:
+    name: Build (V21, net48)
+    runs-on: windows-latest
+    # V21 output goes to bin\…\v21\ which Tests/DevLauncher don't resolve
+    # against (per the csproj note), so this job only verifies the addin
+    # itself compiles for V21 — no test run.
+    if: |
+      github.event_name != 'push' ||
+      contains(github.event.head_commit.message, '[run-ci]')
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-v21-${{ hashFiles('**/*.csproj') }}
+          restore-keys: ${{ runner.os }}-nuget-v21-
+
+      - name: Restore
+        run: dotnet restore src/BlockParam/BlockParam.csproj -p:UseSiemensStubs=true -p:TiaVersion=21
+
+      - name: Build (Release)
+        run: dotnet build src/BlockParam/BlockParam.csproj -c Release --no-restore -p:UseSiemensStubs=true -p:TiaVersion=21
