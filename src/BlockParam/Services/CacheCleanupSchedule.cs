@@ -1,7 +1,7 @@
 using System;
 using System.Globalization;
-using System.IO;
 using BlockParam.Diagnostics;
+using BlockParam.Services.Storage;
 
 namespace BlockParam.Services;
 
@@ -12,35 +12,39 @@ namespace BlockParam.Services;
 /// </summary>
 public static class CacheCleanupSchedule
 {
-    public static bool IsDue(string stateFile, DateTime? now = null)
+    public static bool IsDue(string stateFile, DateTime? now = null) =>
+        IsDue(FileSystemBlockParamStorage.Instance, StoragePath.FromAbsolute(stateFile), now);
+
+    public static bool IsDue(IBlockParamStorage storage, StoragePath stateFile, DateTime? now = null)
     {
         var reference = now ?? DateTime.Now;
-        var next = ReadNextRun(stateFile);
+        var next = ReadNextRun(storage, stateFile);
         return !next.HasValue || reference >= next.Value;
     }
 
-    public static void SetNextRun(string stateFile, DateTime nextRun)
+    public static void SetNextRun(string stateFile, DateTime nextRun) =>
+        SetNextRun(FileSystemBlockParamStorage.Instance, StoragePath.FromAbsolute(stateFile), nextRun);
+
+    public static void SetNextRun(IBlockParamStorage storage, StoragePath stateFile, DateTime nextRun)
     {
         try
         {
-            var dir = Path.GetDirectoryName(stateFile);
-            if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
-            File.WriteAllText(stateFile, nextRun.ToString("o", CultureInfo.InvariantCulture));
+            storage.WriteAllText(stateFile, nextRun.ToString("o", CultureInfo.InvariantCulture));
         }
         catch (Exception ex)
         {
             // Non-fatal: cleanup just retries next time the add-in loads.
             // Logged at Warning so a corrupted state file is diagnosable.
-            Log.Warning(ex, "CacheCleanupSchedule: could not write {File}", stateFile);
+            Log.Warning(ex, "CacheCleanupSchedule: could not write {File}", stateFile.FullPath);
         }
     }
 
-    private static DateTime? ReadNextRun(string stateFile)
+    private static DateTime? ReadNextRun(IBlockParamStorage storage, StoragePath stateFile)
     {
         try
         {
-            if (!File.Exists(stateFile)) return null;
-            var text = File.ReadAllText(stateFile).Trim();
+            if (!storage.FileExists(stateFile)) return null;
+            var text = storage.ReadAllText(stateFile).Trim();
             if (DateTime.TryParse(text, CultureInfo.InvariantCulture,
                     DateTimeStyles.RoundtripKind, out var dt))
                 return dt;
@@ -48,7 +52,7 @@ public static class CacheCleanupSchedule
         }
         catch (Exception ex)
         {
-            Log.Warning(ex, "CacheCleanupSchedule: could not read {File}", stateFile);
+            Log.Warning(ex, "CacheCleanupSchedule: could not read {File}", stateFile.FullPath);
             return null;
         }
     }

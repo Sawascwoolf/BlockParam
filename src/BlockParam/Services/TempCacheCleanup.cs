@@ -1,8 +1,8 @@
 using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
 using BlockParam.Diagnostics;
+using BlockParam.Services.Storage;
 
 namespace BlockParam.Services;
 
@@ -28,18 +28,25 @@ public static class TempCacheCleanup
     public static (int FilesDeleted, int DirsDeleted, DateTime SuggestedNextRun) Run(
         string rootDir,
         TimeSpan? maxAge = null,
+        DateTime? now = null) =>
+        Run(FileSystemBlockParamStorage.Instance, StoragePath.FromAbsolute(rootDir), maxAge, now);
+
+    public static (int FilesDeleted, int DirsDeleted, DateTime SuggestedNextRun) Run(
+        IBlockParamStorage storage,
+        StoragePath rootDir,
+        TimeSpan? maxAge = null,
         DateTime? now = null)
     {
         var reference = now ?? DateTime.Now;
         var maxAgeValue = maxAge ?? DefaultMaxAge;
 
-        if (!Directory.Exists(rootDir))
+        if (!storage.DirectoryExists(rootDir))
             return (0, 0, reference + maxAgeValue);
 
         var threshold = reference - maxAgeValue;
 
-        var (files, oldestRemaining) = DeleteStaleFilesAndFindOldest(rootDir, threshold);
-        int dirs = DeleteEmptyDirectories(rootDir);
+        var (files, oldestRemaining) = DeleteStaleFilesAndFindOldest(storage, rootDir, threshold);
+        int dirs = DeleteEmptyDirectories(storage, rootDir);
 
         var nextRun = SuggestNextRun(reference, maxAgeValue, oldestRemaining);
         return (files, dirs, nextRun);
@@ -62,18 +69,18 @@ public static class TempCacheCleanup
     /// we wanted to delete but couldn't — they'll still be there next sweep).
     /// </summary>
     private static (int Deleted, DateTime? OldestRemaining) DeleteStaleFilesAndFindOldest(
-        string root, DateTime threshold)
+        IBlockParamStorage storage, StoragePath root, DateTime threshold)
     {
         int count = 0;
         DateTime? oldest = null;
 
-        foreach (var file in SafeList(() => Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories)))
+        foreach (var file in SafeList(() => storage.EnumerateFiles(root, "*", recursive: true)))
         {
             DateTime mt;
-            try { mt = File.GetLastWriteTime(file); }
+            try { mt = storage.GetLastWriteTime(file); }
             catch (Exception ex)
             {
-                Log.Warning(ex, "TempCacheCleanup: could not stat {File}", file);
+                Log.Warning(ex, "TempCacheCleanup: could not stat {File}", file.FullPath);
                 continue;
             }
 
@@ -82,14 +89,14 @@ public static class TempCacheCleanup
             {
                 try
                 {
-                    File.Delete(file);
+                    storage.DeleteFile(file);
                     count++;
                     deleted = true;
                 }
                 catch (Exception ex)
                 {
                     // Best-effort cleanup; locked or read-only files stay.
-                    Log.Warning(ex, "TempCacheCleanup: could not delete {File}", file);
+                    Log.Warning(ex, "TempCacheCleanup: could not delete {File}", file.FullPath);
                 }
             }
 
@@ -100,11 +107,11 @@ public static class TempCacheCleanup
         return (count, oldest);
     }
 
-    private static int DeleteEmptyDirectories(string root)
+    private static int DeleteEmptyDirectories(IBlockParamStorage storage, StoragePath root)
     {
         // Bottom-up so parents are visited after their children are gone.
-        var dirs = SafeList(() => Directory.EnumerateDirectories(root, "*", SearchOption.AllDirectories))
-            .OrderByDescending(d => d.Length)
+        var dirs = SafeList(() => storage.EnumerateDirectories(root, "*", recursive: true))
+            .OrderByDescending(d => d.FullPath.Length)
             .ToList();
 
         int count = 0;
@@ -112,28 +119,28 @@ public static class TempCacheCleanup
         {
             try
             {
-                if (Directory.GetFileSystemEntries(dir).Length == 0)
+                if (!storage.HasAnyEntries(dir))
                 {
-                    Directory.Delete(dir);
+                    storage.DeleteDirectory(dir);
                     count++;
                 }
             }
             catch (Exception ex)
             {
                 // Best-effort: leave non-empty or otherwise undeletable directories alone.
-                Log.Warning(ex, "TempCacheCleanup: could not remove dir {Dir}", dir);
+                Log.Warning(ex, "TempCacheCleanup: could not remove dir {Dir}", dir.FullPath);
             }
         }
         return count;
     }
 
-    private static List<string> SafeList(Func<IEnumerable<string>> source)
+    private static List<StoragePath> SafeList(Func<IEnumerable<StoragePath>> source)
     {
         try { return source().ToList(); }
         catch (Exception ex)
         {
             Log.Warning(ex, "TempCacheCleanup: enumeration failed, skipping");
-            return new List<string>();
+            return new List<StoragePath>();
         }
     }
 }
