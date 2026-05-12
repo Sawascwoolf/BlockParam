@@ -781,19 +781,51 @@ public class BulkChangeViewModelMultiDbTests
         restoredLeaf.PendingValue.Should().Be(pending);
     }
 
+    /// <summary>
+    /// Convenience enum shared across multi-DB tests. Yes/No/Cancel maps
+    /// onto the three named outcomes for each typed prompt method.
+    /// </summary>
+    private enum YesNoCancelResult { Yes, No, Cancel }
+
     private sealed class FakeMessageBox : IMessageBoxService
     {
         private readonly YesNoCancelResult _result;
         public FakeMessageBox(YesNoCancelResult r) { _result = r; }
 
+        /// <summary>Counts any 3-way prompt call (ApplyStashCancel, AddOrReplace, CloseWithStash).</summary>
         public int AskYesNoCancelCallCount { get; private set; }
         public bool AskYesNo(string message, string title) => true;
         public void ShowError(string message, string title) { }
         public void ShowInfo(string message, string title) { }
-        public YesNoCancelResult AskYesNoCancel(string message, string title)
+        public ApplyStashCancelResult AskApplyStashCancel(string message, string title)
         {
             AskYesNoCancelCallCount++;
-            return _result;
+            return _result switch
+            {
+                YesNoCancelResult.Yes => ApplyStashCancelResult.ApplyAndSwitch,
+                YesNoCancelResult.No  => ApplyStashCancelResult.StashAndSwitch,
+                _                     => ApplyStashCancelResult.Cancel,
+            };
+        }
+        public AddOrReplaceResult AskAddOrReplace(string message, string title)
+        {
+            AskYesNoCancelCallCount++;
+            return _result switch
+            {
+                YesNoCancelResult.Yes => AddOrReplaceResult.Add,
+                YesNoCancelResult.No  => AddOrReplaceResult.Replace,
+                _                     => AddOrReplaceResult.Cancel,
+            };
+        }
+        public CloseWithStashResult AskCloseWithStash(string message, string title)
+        {
+            AskYesNoCancelCallCount++;
+            return _result switch
+            {
+                YesNoCancelResult.Yes => CloseWithStashResult.ApplyActive,
+                YesNoCancelResult.No  => CloseWithStashResult.DiscardAll,
+                _                     => CloseWithStashResult.Cancel,
+            };
         }
     }
 }
