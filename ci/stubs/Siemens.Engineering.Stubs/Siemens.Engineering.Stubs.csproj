@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Hand-written, clean-room API-surface stubs for the Siemens TIA Portal
+    Openness assemblies used by BlockParam. Built ONLY for CI (and only when
+    `-p:UseSiemensStubs=true` is passed) so the addin can compile on hosted
+    GitHub runners that don't have TIA Portal installed.
+
+    Contains no Siemens code — types and member signatures are derived from
+    Siemens' publicly documented Openness API surface. All methods throw
+    NotImplementedException; the produced DLL must never end up in a release
+    artifact (asserted by the workflow + a guard in addin-publisher.xml).
+  -->
+
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
+    <AssemblyName>Siemens.Engineering</AssemblyName>
+    <RootNamespace>Siemens.Engineering</RootNamespace>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+    <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+
+</Project>

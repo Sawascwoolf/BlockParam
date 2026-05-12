@@ -1,0 +1,92 @@
+name: CI
+
+# Triggers:
+#  - pull_request:    auto-run on open + every push to the PR head (one run)
+#  - push:            opt-in via "[run-ci]" anywhere in the HEAD commit message
+#  - workflow_dispatch: manual button in the Actions tab on any branch
+#
+# Concurrency keys on head_ref || ref_name so when both `push` and
+# `pull_request` fire on the same branch (a marked push to an open PR), the
+# newer one cancels the older instead of doubling spend.
+on:
+  pull_request:
+    branches: [main]
+  push:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  v20:
+    name: Build & Test (V20, net48)
+    runs-on: windows-latest
+    if: |
+      github.event_name != 'push' ||
+      contains(github.event.head_commit.message, '[run-ci]')
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-v20-${{ hashFiles('**/*.csproj') }}
+          restore-keys: ${{ runner.os }}-nuget-v20-
+
+      # Hosted runners have no TIA Portal install, so the real Siemens.Engineering
+      # references can't resolve. UseSiemensStubs=true swaps in clean-room API
+      # stubs under ci/stubs/ — compile + test only; the stub DLL must never ship.
+      - name: Restore
+        run: dotnet restore BlockParam.sln -p:UseSiemensStubs=true
+
+      - name: Build (Release)
+        run: dotnet build BlockParam.sln -c Release --no-restore -p:UseSiemensStubs=true
+
+      - name: Test
+        run: dotnet test src/BlockParam.Tests/BlockParam.Tests.csproj -c Release --no-build -p:UseSiemensStubs=true --logger "trx;LogFileName=test-results.trx"
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: '**/TestResults/*.trx'
+
+  v21:
+    name: Build (V21, net48)
+    runs-on: windows-latest
+    # V21 output goes to bin\…\v21\ which Tests/DevLauncher don't resolve
+    # against (per the csproj note), so this job only verifies the addin
+    # itself compiles for V21 — no test run.
+    if: |
+      github.event_name != 'push' ||
+      contains(github.event.head_commit.message, '[run-ci]')
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-v21-${{ hashFiles('**/*.csproj') }}
+          restore-keys: ${{ runner.os }}-nuget-v21-
+
+      - name: Restore
+        run: dotnet restore src/BlockParam/BlockParam.csproj -p:UseSiemensStubs=true -p:TiaVersion=21
+
+      - name: Build (Release)
+        run: dotnet build src/BlockParam/BlockParam.csproj -c Release --no-restore -p:UseSiemensStubs=true -p:TiaVersion=21
