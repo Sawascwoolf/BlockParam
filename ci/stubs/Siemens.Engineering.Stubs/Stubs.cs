@@ -20,6 +20,7 @@ namespace Siemens.Engineering
     {
         public FileInfo Path => throw new NotImplementedException();
         public LanguageSettings LanguageSettings => throw new NotImplementedException();
+        public HW.DeviceComposition Devices => throw new NotImplementedException();
         public IEngineeringObject Parent => throw new NotImplementedException();
         public void SetAttribute(string name, object value) => throw new NotImplementedException();
         public object GetAttribute(string name) => throw new NotImplementedException();
@@ -46,6 +47,51 @@ namespace Siemens.Engineering
         void SetAttribute(string name, object value);
         object GetAttribute(string name);
         T GetService<T>() where T : class;
+    }
+
+    // Software base class — PlcSoftware derives from it. SoftwareContainer.Software
+    // returns this type; calling code casts to PlcSoftware.
+    public abstract class Software : IEngineeringObject
+    {
+        public string Name => throw new NotImplementedException();
+        public IEngineeringObject Parent => throw new NotImplementedException();
+        public void SetAttribute(string name, object value) => throw new NotImplementedException();
+        public object GetAttribute(string name) => throw new NotImplementedException();
+        public T GetService<T>() where T : class => throw new NotImplementedException();
+    }
+}
+
+namespace Siemens.Engineering.HW
+{
+    public class Device : IEngineeringObject
+    {
+        public string Name => throw new NotImplementedException();
+        public DeviceItemComposition DeviceItems => throw new NotImplementedException();
+        public IEngineeringObject Parent => throw new NotImplementedException();
+        public void SetAttribute(string name, object value) => throw new NotImplementedException();
+        public object GetAttribute(string name) => throw new NotImplementedException();
+        public T GetService<T>() where T : class => throw new NotImplementedException();
+    }
+
+    public class DeviceItem : IEngineeringObject
+    {
+        public string Name => throw new NotImplementedException();
+        public DeviceItemComposition DeviceItems => throw new NotImplementedException();
+        public IEngineeringObject Parent => throw new NotImplementedException();
+        public void SetAttribute(string name, object value) => throw new NotImplementedException();
+        public object GetAttribute(string name) => throw new NotImplementedException();
+        public T GetService<T>() where T : class => throw new NotImplementedException();
+    }
+
+    public class DeviceComposition : List<Device> { }
+    public class DeviceItemComposition : List<DeviceItem> { }
+}
+
+namespace Siemens.Engineering.HW.Features
+{
+    public class SoftwareContainer
+    {
+        public Software Software => throw new NotImplementedException();
     }
 }
 
@@ -116,14 +162,11 @@ namespace Siemens.Engineering.Compiler
 
 namespace Siemens.Engineering.SW
 {
-    public class PlcSoftware : IEngineeringObject
+    public class PlcSoftware : Software
     {
+        public Blocks.PlcBlockGroup BlockGroup => throw new NotImplementedException();
         public Tags.PlcTagTableGroup TagTableGroup => throw new NotImplementedException();
         public Types.PlcTypeGroup TypeGroup => throw new NotImplementedException();
-        public IEngineeringObject Parent => throw new NotImplementedException();
-        public void SetAttribute(string name, object value) => throw new NotImplementedException();
-        public object GetAttribute(string name) => throw new NotImplementedException();
-        public T GetService<T>() where T : class => throw new NotImplementedException();
     }
 }
 
@@ -132,6 +175,7 @@ namespace Siemens.Engineering.SW.Blocks
     public abstract class PlcBlock : IEngineeringObject
     {
         public string Name => throw new NotImplementedException();
+        public int Number => throw new NotImplementedException();
         public IEngineeringObject Parent => throw new NotImplementedException();
         public void SetAttribute(string name, object value) => throw new NotImplementedException();
         public object GetAttribute(string name) => throw new NotImplementedException();
@@ -147,6 +191,7 @@ namespace Siemens.Engineering.SW.Blocks
     {
         public string Name => throw new NotImplementedException();
         public PlcBlockComposition Blocks => throw new NotImplementedException();
+        public PlcBlockGroupComposition Groups => throw new NotImplementedException();
         public IEngineeringObject Parent => throw new NotImplementedException();
         public void SetAttribute(string name, object value) => throw new NotImplementedException();
         public object GetAttribute(string name) => throw new NotImplementedException();
@@ -158,6 +203,8 @@ namespace Siemens.Engineering.SW.Blocks
         public void Import(FileInfo path, ImportOptions options) => throw new NotImplementedException();
         public PlcBlock Find(string name) => throw new NotImplementedException();
     }
+
+    public class PlcBlockGroupComposition : List<PlcBlockGroup> { }
 
     public enum ExportOptions
     {
