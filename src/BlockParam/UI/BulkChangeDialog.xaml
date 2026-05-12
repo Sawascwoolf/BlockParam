@@ -128,24 +128,24 @@
                 <!-- Update-available badge (#61). Hidden until the async
                      check resolves with a newer release; clicking opens the
                      details popup with changelog + "Open download page". -->
-                <Button Content="{Binding UpdateBadgeText}" FontSize="10"
-                        Command="{Binding ShowUpdateDetailsCommand}"
-                        Visibility="{Binding HasUpdateAvailable, Converter={StaticResource BoolToVis}}"
+                <Button Content="{Binding Subscription.UpdateBadgeText}" FontSize="10"
+                        Command="{Binding Subscription.ShowUpdateDetailsCommand}"
+                        Visibility="{Binding Subscription.HasUpdateAvailable, Converter={StaticResource BoolToVis}}"
                         Background="#FFF4DA" BorderBrush="#E0A030" BorderThickness="1"
                         Foreground="#7A5200" Cursor="Hand" Padding="6,2"
                         VerticalAlignment="Center" Margin="0,0,12,0" FontWeight="SemiBold"
-                        ToolTip="{Binding UpdateBadgeTooltip}"/>
+                        ToolTip="{Binding Subscription.UpdateBadgeTooltip}"/>
                 <!-- License / usage summary — clickable to open the license dialog.
                      Single control replaces the old tier badge + separate Manage link. -->
-                <Button Content="{Binding UsageStatusText}" FontSize="10"
-                        Command="{Binding EnterLicenseKeyCommand}"
-                        Visibility="{Binding ShowLicenseKeyButton, Converter={StaticResource BoolToVis}}"
+                <Button Content="{Binding Subscription.UsageStatusText}" FontSize="10"
+                        Command="{Binding Subscription.EnterLicenseKeyCommand}"
+                        Visibility="{Binding Subscription.ShowLicenseKeyButton, Converter={StaticResource BoolToVis}}"
                         Background="Transparent" BorderThickness="0" Foreground="#666"
                         Cursor="Hand" Padding="0" VerticalAlignment="Center" Margin="0,0,12,0"
-                        ToolTip="{Binding LicenseKeyButtonText}"/>
+                        ToolTip="{Binding Subscription.LicenseKeyButtonText}"/>
                 <Button Content="{loc:Loc License_UpgradeToPro}" FontSize="10"
-                        Command="{Binding UpgradeToProCommand}"
-                        Visibility="{Binding IsLimitReached, Converter={StaticResource BoolToVis}}"
+                        Command="{Binding Subscription.UpgradeToProCommand}"
+                        Visibility="{Binding Subscription.IsLimitReached, Converter={StaticResource BoolToVis}}"
                         Background="#0078D7" Foreground="White" BorderThickness="0"
                         Cursor="Hand" Padding="8,3" Margin="0,0,12,0"
                         VerticalAlignment="Center" FontWeight="SemiBold"/>
@@ -918,7 +918,7 @@
 
                                 <!-- Limit-reached overlay over Section 1 only -->
                                 <Border Background="#E6FFFFFF"
-                                        Visibility="{Binding IsLimitReached, Converter={StaticResource BoolToVis}}">
+                                        Visibility="{Binding Subscription.IsLimitReached, Converter={StaticResource BoolToVis}}">
                                     <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center"
                                                 Margin="14,10">
                                         <TextBlock Text="{loc:Loc Dialog_LimitReachedOverlay_Title}"
@@ -929,13 +929,13 @@
                                                    HorizontalAlignment="Center" TextWrapping="Wrap"
                                                    TextAlignment="Center"/>
                                         <Button Content="{loc:Loc License_UpgradeToPro}" FontSize="11"
-                                                Command="{Binding UpgradeToProCommand}"
+                                                Command="{Binding Subscription.UpgradeToProCommand}"
                                                 Background="#0078D7" Foreground="White" BorderThickness="0"
                                                 Cursor="Hand" Padding="14,6" FontWeight="SemiBold"
                                                 Margin="0,0,0,6"/>
-                                        <Button Content="{Binding LicenseKeyButtonText}" FontSize="11"
-                                                Command="{Binding EnterLicenseKeyCommand}"
-                                                Visibility="{Binding ShowLicenseKeyButton, Converter={StaticResource BoolToVis}}"
+                                        <Button Content="{Binding Subscription.LicenseKeyButtonText}" FontSize="11"
+                                                Command="{Binding Subscription.EnterLicenseKeyCommand}"
+                                                Visibility="{Binding Subscription.ShowLicenseKeyButton, Converter={StaticResource BoolToVis}}"
                                                 Background="Transparent" BorderThickness="1"
                                                 BorderBrush="#0078D7" Foreground="#0078D7"
                                                 Cursor="Hand" Padding="14,5"/>

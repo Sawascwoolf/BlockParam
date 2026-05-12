@@ -1,6 +1,5 @@
 using System.Collections.ObjectModel;
 using System.Collections.Specialized;
-using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Threading;
@@ -59,12 +58,10 @@ namespace BlockParam.UI;
 /// </summary>
 public class BulkChangeViewModel : ViewModelBase, IDisposable
 {
-    private EventHandler? _licenseStateChangedHandler;
     private bool _disposed;
 
     private readonly HierarchyAnalyzer _analyzer;
     private readonly BulkChangeService _bulkChangeService;
-    private readonly IUsageTracker _usageTracker;
     private readonly ConfigLoader _configLoader;
     private readonly Func<string>? _onBackup;   // callback to create backup, returns backup path
     private readonly Action<string>? _onRestore; // callback to restore from backup path
@@ -183,13 +180,9 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     private bool _suppressSuggestions;
     private bool _lastApplySucceeded;
     private bool _hasPendingChanges;
-    private bool _limitWarningShown;
     private readonly IReadOnlyList<string> _projectLanguages;
     private readonly CommentLanguagePolicy _commentLanguagePolicy;
     private readonly Dispatcher _dispatcher;
-    private readonly ILicenseService? _licenseService;
-    private readonly IUpdateCheckService? _updateCheckService;
-    private UpdateInfo? _availableUpdate;
 
     public BulkChangeViewModel(
         DataBlockInfo dataBlockInfo,
@@ -228,7 +221,6 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             _activeDbs.AddRange(additionalActiveDbs);
         _analyzer = analyzer;
         _bulkChangeService = bulkChangeService;
-        _usageTracker = usageTracker;
         _configLoader = configLoader;
         _onBackup = onBackup;
         _onRestore = onRestore;
@@ -240,8 +232,12 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         _udtDir = udtDir;
         _udtResolver = udtResolver;
         _commentResolver = commentResolver;
-        _licenseService = licenseService;
-        _updateCheckService = updateCheckService;
+        Subscription = new SubscriptionViewModel(
+            usageTracker, licenseService, updateCheckService,
+            configLoader, _messageBox, _dispatcher);
+        // ApplyTooltip composes license + remaining-quota state, so re-raise
+        // it whenever Subscription publishes a tier / quota change.
+        Subscription.StateChanged += () => OnPropertyChanged(nameof(ApplyTooltip));
         _enumerateDataBlocks = enumerateDataBlocks;
         _switchToDataBlock = switchToDataBlock;
         _buildActiveDbForSummary = buildActiveDbForSummary;
@@ -302,9 +298,6 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
 
         EditConfigCommand = new RelayCommand(ExecuteEditConfig);
         RefreshConstantsCommand = new RelayCommand(ExecuteRefreshConstants);
-        EnterLicenseKeyCommand = new RelayCommand(ExecuteEnterLicenseKey);
-        ShowUpdateDetailsCommand = new RelayCommand(ExecuteShowUpdateDetails, () => HasUpdateAvailable);
-        UpgradeToProCommand = new RelayCommand(ExecuteUpgradeToPro);
         ExpandAllCommand = new RelayCommand(ExecuteExpandAll);
         CollapseAllCommand = new RelayCommand(ExecuteCollapseAll);
         // Inspector-panel expand/collapse state lives on its own slice VM
@@ -334,18 +327,11 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             if (parameter is StashedDbState stash) ReactivateStashedDb(stash);
         });
 
-        if (_licenseService != null)
-        {
-            _licenseStateChangedHandler = (_, __) =>
-                _dispatcher.BeginInvoke(new Action(() => UpdateUsageStatus()));
-            _licenseService.LicenseStateChanged += _licenseStateChangedHandler;
-        }
-
         // Apply initial filter and build flat list
         ApplyAllFilters();
         RefreshFlatList();
-        UpdateUsageStatus();
-        InitializeUpdateCheck();
+        Subscription.UpdateUsageStatus();
+        Subscription.InitializeUpdateCheck();
 
         // #26: Surface pre-existing rule violations on dialog load. Runs after
         // RefreshRuleHints so RuleHint is available for the issue tooltip.
@@ -751,8 +737,6 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         set => SetProperty(ref _constraintInfo, value);
     }
 
-    public string UsageStatusText { get; private set; } = "";
-
     public bool HasSelection => _selectedFlatMember is { IsLeaf: true };
     public bool HasScope => _selectedScope != null && !IsManualMode;
     public bool HasValidationError => !string.IsNullOrEmpty(_validationError);
@@ -863,9 +847,6 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     public ICommand DiscardPendingCommand { get; }
 
     public ICommand EditConfigCommand { get; }
-    public ICommand EnterLicenseKeyCommand { get; }
-    public ICommand UpgradeToProCommand { get; }
-    public ICommand ShowUpdateDetailsCommand { get; }
     public ICommand ExpandAllCommand { get; }
     public ICommand CollapseAllCommand { get; }
     public ICommand ClearManualSelectionCommand { get; }
@@ -2061,7 +2042,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         var pendingEdits = _pendingEditStore.GetForDb(db, _modelToDb).ToList();
         if (pendingEdits.Count == 0) return true;
 
-        var status = _usageTracker.GetStatus();
+        var status = Subscription.GetUsageStatus();
         if (pendingEdits.Count > status.RemainingToday)
         {
             StatusText = Res.Format("Status_WouldExceedLimit",
@@ -2082,7 +2063,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
                 }
             }
             db.OnApply.Invoke(db.Xml);
-            if (totalChanged > 0) _usageTracker.RecordUsage(totalChanged);
+            if (totalChanged > 0) Subscription.RecordUsage(totalChanged);
             // The edits are now committed to TIA — evict the DB's store entries
             // so a subsequent tree rebuild doesn't re-populate committed values.
             _pendingEditStore.ClearForDb(db, _modelToDb);
@@ -2267,20 +2248,13 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     /// </summary>
     public event Action? FlatListRefreshed;
 
-    public string LicenseTierText { get; private set; } = "";
-
     /// <summary>
-    /// Show the license dialog opener whenever a license service is available — users need
-    /// access even when Pro (to view status, remove / re-activate on a new machine, etc.).
+    /// Subscription / usage / update slice (#80 slice 2). Owns license-tier
+    /// display, usage status, license-key dialog opener, upgrade prompt,
+    /// update-available badge. The host VM keeps <see cref="ApplyTooltip"/>
+    /// because it composes Apply-pipeline state with subscription state.
     /// </summary>
-    public bool ShowLicenseKeyButton => _licenseService != null;
-
-    /// <summary>Label on the license dialog opener — adapts to tier.</summary>
-    public string LicenseKeyButtonText =>
-        _licenseService?.IsProActive == true
-            ? Res.Get("License_ManageKey")
-            : Res.Get("License_EnterKey");
-    public bool IsLimitReached => _usageTracker.GetStatus().IsLimitReached;
+    public SubscriptionViewModel Subscription { get; }
 
     /// <summary>
     /// Picked so a few back-to-back bulk applies on a normal day stay quiet, but
@@ -2300,12 +2274,12 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         get
         {
             var baseText = Res.Get("Dialog_ApplyTooltip");
-            if (_licenseService?.IsProActive == true) return baseText;
+            if (Subscription.IsProActive) return baseText;
 
             var cost = PendingInlineEditCount;
             if (cost == 0) return baseText;
 
-            var remaining = _usageTracker.GetStatus().RemainingToday;
+            var remaining = Subscription.GetUsageStatus().RemainingToday;
             if (cost <= 1 && remaining >= TightHeadroomThreshold) return baseText;
 
             return baseText + Environment.NewLine + Environment.NewLine +
@@ -3604,7 +3578,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
 
         if (_selectedScope == null) return;
 
-        MaybeWarnLimitReachedOnce();
+        Subscription.MaybeWarnLimitReachedOnce();
 
         // Multi-DB safe (#58 review must-fix #2): resolve scope members to
         // their owning DB's tree VMs by reference. Path-string staging used
@@ -3638,7 +3612,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     /// </summary>
     private void ExecuteSetPendingManual()
     {
-        MaybeWarnLimitReachedOnce();
+        Subscription.MaybeWarnLimitReachedOnce();
 
         int count = 0;
         foreach (var node in _manualSelectedPaths)
@@ -3746,7 +3720,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
 
         // Free-tier cap: block Apply when the pending batch would push past
         // the daily quota. The user has to drop some edits or upgrade.
-        var status = _usageTracker.GetStatus();
+        var status = Subscription.GetUsageStatus();
         if (PendingInlineEditCount > status.RemainingToday) return false;
 
         return true;
@@ -3813,12 +3787,12 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         // would push past the limit — partial Apply leaves the user in a
         // confusing half-applied state. Pro tier always passes (DailyLimit
         // is int.MaxValue via LicensedUsageTracker).
-        var status = _usageTracker.GetStatus();
+        var status = Subscription.GetUsageStatus();
         if (pendingEdits.Count > status.RemainingToday)
         {
             StatusText = Res.Format("Status_WouldExceedLimit",
                 pendingEdits.Count, status.RemainingToday);
-            UpdateUsageStatus();
+            Subscription.UpdateUsageStatus();
             return;
         }
 
@@ -3876,7 +3850,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
                 // Preserve pending edits in the tree so they can retry — skip RefreshTree
                 // because TIA still holds the pre-Apply state.
                 _lastApplySucceeded = false;
-                UpdateUsageStatus();
+                Subscription.UpdateUsageStatus();
                 return;
             }
 
@@ -3887,10 +3861,10 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             // already committed at this point, so we can't roll back — but we
             // CAN consume whatever quota remains so the next Apply is blocked
             // by CanExecuteApply, and warn the user that they're over-cap.
-            if (totalChanged > 0 && !_usageTracker.RecordUsage(totalChanged))
+            if (totalChanged > 0 && !Subscription.RecordUsage(totalChanged))
             {
-                var remaining = _usageTracker.GetStatus().RemainingToday;
-                if (remaining > 0 && !_usageTracker.RecordUsage(remaining))
+                var remaining = Subscription.GetUsageStatus().RemainingToday;
+                if (remaining > 0 && !Subscription.RecordUsage(remaining))
                 {
                     Log.Warning(
                         "ExecuteApply: second RecordUsage({Remaining}) also failed — " +
@@ -3917,7 +3891,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             HandleErrorWithRollback(ex, backupPath);
         }
 
-        UpdateUsageStatus();
+        Subscription.UpdateUsageStatus();
     }
 
     private void ExecuteApplyAndClose()
@@ -3962,12 +3936,12 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
 
         // Pre-check the daily cap against the SUM across all DBs (#58:
         // unified counter, no per-DB quota).
-        var status = _usageTracker.GetStatus();
+        var status = Subscription.GetUsageStatus();
         if (totalChanges > status.RemainingToday)
         {
             StatusText = Res.Format("Status_WouldExceedLimit",
                 totalChanges, status.RemainingToday);
-            UpdateUsageStatus();
+            Subscription.UpdateUsageStatus();
             return;
         }
 
@@ -4050,10 +4024,10 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
                 // Charge the partial committed sum so the user can't
                 // accidentally double-spend on the next click. Counter
                 // race handling mirrors the all-success path.
-                if (committedChanges > 0 && !_usageTracker.RecordUsage(committedChanges))
+                if (committedChanges > 0 && !Subscription.RecordUsage(committedChanges))
                 {
-                    var remaining = _usageTracker.GetStatus().RemainingToday;
-                    if (remaining > 0 && !_usageTracker.RecordUsage(remaining))
+                    var remaining = Subscription.GetUsageStatus().RemainingToday;
+                    if (remaining > 0 && !Subscription.RecordUsage(remaining))
                     {
                         Log.Warning(
                             "ExecuteApplyMultiDb partial-commit: second RecordUsage({Remaining}) " +
@@ -4081,7 +4055,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
                 }
                 _lastApplySucceeded = false;
                 HasPendingChanges = false;
-                UpdateUsageStatus();
+                Subscription.UpdateUsageStatus();
                 return;
             }
 
@@ -4090,10 +4064,10 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             // Phase 3: charge the unified daily counter once for the sum
             // (#58 decision: no separate multi-DB counter). Race handling
             // mirrors the single-DB path.
-            if (totalChanged > 0 && !_usageTracker.RecordUsage(totalChanged))
+            if (totalChanged > 0 && !Subscription.RecordUsage(totalChanged))
             {
-                var remaining = _usageTracker.GetStatus().RemainingToday;
-                if (remaining > 0 && !_usageTracker.RecordUsage(remaining))
+                var remaining = Subscription.GetUsageStatus().RemainingToday;
+                if (remaining > 0 && !Subscription.RecordUsage(remaining))
                 {
                     Log.Warning(
                         "ExecuteApplyMultiDb full-commit: second RecordUsage({Remaining}) " +
@@ -4134,7 +4108,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             HandleErrorWithRollback(ex, backupPath);
         }
 
-        UpdateUsageStatus();
+        Subscription.UpdateUsageStatus();
     }
 
 
@@ -4207,7 +4181,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             StatusText = Res.Format("Status_ErrorComments", ex.Message);
         }
 
-        UpdateUsageStatus();
+        Subscription.UpdateUsageStatus();
     }
 
     private bool CanExecuteUpdateComments()
@@ -4353,7 +4327,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         // per dialog open if the user starts editing while already at 0 left,
         // so they aren't blindsided when Apply is disabled.
         if (!memberVm.IsPendingInlineEdit)
-            MaybeWarnLimitReachedOnce();
+            Subscription.MaybeWarnLimitReachedOnce();
 
         // Shared validator → same rule language as the bulk inspector (#7).
         var error = BuildValidator().Validate(memberVm.Model, newValue);
@@ -4568,138 +4542,6 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             RestoreExpandStates(child, states);
     }
 
-    private void UpdateUsageStatus()
-    {
-        if (_licenseService != null && _licenseService.IsProActive)
-        {
-            UsageStatusText = Res.Get("Status_Pro");
-            LicenseTierText = Res.Get("License_Tier_Pro");
-        }
-        else
-        {
-            var status = _usageTracker.GetStatus();
-            UsageStatusText = Res.Format("Status_Remaining",
-                status.RemainingToday, status.DailyLimit);
-            LicenseTierText = Res.Get("License_Tier_Free");
-        }
-
-        OnPropertyChanged(nameof(UsageStatusText));
-        OnPropertyChanged(nameof(LicenseTierText));
-        OnPropertyChanged(nameof(ShowLicenseKeyButton));
-        OnPropertyChanged(nameof(LicenseKeyButtonText));
-        OnPropertyChanged(nameof(IsLimitReached));
-        OnPropertyChanged(nameof(ApplyTooltip));
-    }
-
-    /// <summary>
-    /// Shows the daily-cap-reached modal once per dialog open, when the user
-    /// first attempts to stage or edit a change while at 0 remaining quota.
-    /// Staging itself isn't blocked — Apply is the choke point — but a single
-    /// proactive heads-up beats discovering it via a disabled Apply button.
-    /// </summary>
-    private void MaybeWarnLimitReachedOnce()
-    {
-        if (_limitWarningShown) return;
-        if (!_usageTracker.GetStatus().IsLimitReached) return;
-
-        _limitWarningShown = true;
-        _messageBox.ShowInfo(
-            Res.Get("LimitReached_Modal_Message"),
-            Res.Get("LimitReached_Modal_Title"));
-    }
-
-    private void ExecuteEnterLicenseKey()
-    {
-        if (_licenseService == null) return;
-
-        var dialog = new LicenseKeyDialog(_licenseService, _updateCheckService, _configLoader);
-        dialog.Owner = Application.Current?.Windows.OfType<Window>().FirstOrDefault(w => w.IsActive);
-        dialog.ShowDialog();
-        UpdateUsageStatus();
-        // The user may have toggled "Check for updates" — re-evaluate the badge.
-        InitializeUpdateCheck(forceRefresh: false);
-    }
-
-    /// <summary>
-    /// Update available (#61). Null when no newer version is on offer
-    /// (offline / opted out / already on latest / skipped).
-    /// </summary>
-    public UpdateInfo? AvailableUpdate
-    {
-        get => _availableUpdate;
-        private set
-        {
-            if (ReferenceEquals(_availableUpdate, value)) return;
-            _availableUpdate = value;
-            OnPropertyChanged(nameof(AvailableUpdate));
-            OnPropertyChanged(nameof(HasUpdateAvailable));
-            OnPropertyChanged(nameof(UpdateBadgeText));
-            OnPropertyChanged(nameof(UpdateBadgeTooltip));
-            (ShowUpdateDetailsCommand as RelayCommand)?.RaiseCanExecuteChanged();
-        }
-    }
-
-    public bool HasUpdateAvailable => _availableUpdate != null;
-
-    public string UpdateBadgeText
-    {
-        get
-        {
-            if (_availableUpdate == null) return "";
-            var current = typeof(BulkChangeViewModel).Assembly.GetName().Version;
-            var currentText = current != null
-                ? $"v{current.Major}.{Math.Max(0, current.Minor)}.{Math.Max(0, current.Build)}"
-                : "v?";
-            var latest = _availableUpdate.TagName;
-            if (latest.Length > 0 && latest[0] != 'v' && latest[0] != 'V') latest = "v" + latest;
-            return Res.Format("Update_BadgeText", currentText, latest);
-        }
-    }
-
-    public string UpdateBadgeTooltip => _availableUpdate == null
-        ? ""
-        : Res.Format("Update_BadgeTooltip",
-            string.IsNullOrEmpty(_availableUpdate.Name)
-                ? _availableUpdate.TagName
-                : _availableUpdate.Name);
-
-    private void InitializeUpdateCheck(bool forceRefresh = true)
-    {
-        if (_updateCheckService == null) return;
-
-        // Synchronous cached read so the badge shows up the moment the
-        // dialog opens — no flash where it appears half a second later.
-        try { AvailableUpdate = _updateCheckService.GetCached(); }
-        catch (Exception ex) { Log.Warning(ex, "UpdateCheck: GetCached threw"); }
-
-        if (!forceRefresh) return;
-
-        // Fire-and-forget refresh — never blocks the UI thread, never
-        // surfaces an error. Cache TTL gates the actual network hit.
-        _ = Task.Run(async () =>
-        {
-            try
-            {
-                var info = await _updateCheckService.CheckAsync().ConfigureAwait(false);
-                _ = _dispatcher.BeginInvoke(new Action(() => AvailableUpdate = info));
-            }
-            catch (Exception ex)
-            {
-                Log.Warning(ex, "UpdateCheck: background CheckAsync threw");
-            }
-        });
-    }
-
-    private void ExecuteShowUpdateDetails()
-    {
-        var info = _availableUpdate;
-        if (info == null || _updateCheckService == null) return;
-
-        var dialog = new UpdateAvailableDialog(info);
-        dialog.Owner = Application.Current?.Windows.OfType<Window>().FirstOrDefault(w => w.IsActive);
-        dialog.ShowDialog();
-    }
-
     /// <summary>
     /// Called by the view when the user's Ctrl+Click selection changes.
     /// Only leaf members are tracked. <paramref name="isFilterRehydration"/> is true
@@ -4855,18 +4697,6 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         return types;
     }
 
-    private void ExecuteUpgradeToPro()
-    {
-        try
-        {
-            Process.Start(new ProcessStartInfo(ShopUrls.CheckoutUrl) { UseShellExecute = true });
-        }
-        catch
-        {
-            // Fallback: silently ignore if browser cannot be opened
-        }
-    }
-
     public void Dispose()
     {
         if (_disposed) return;
@@ -4877,12 +4707,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         _searchDebounceTimer?.Dispose();
         _searchDebounceTimer = null;
 
-        // Unsubscribe so the lambda's `this` capture stops keeping the VM alive.
-        // We do NOT dispose _licenseService — the caller that constructed it owns it.
-        if (_licenseService != null && _licenseStateChangedHandler != null)
-        {
-            _licenseService.LicenseStateChanged -= _licenseStateChangedHandler;
-            _licenseStateChangedHandler = null;
-        }
+        // Subscription owns the LicenseStateChanged subscription (#80 slice 2).
+        Subscription.Dispose();
     }
 }

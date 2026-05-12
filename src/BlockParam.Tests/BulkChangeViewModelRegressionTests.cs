@@ -909,7 +909,7 @@ public class BulkChangeViewModelRegressionTests : IDisposable
         vm.SearchQuery = "Speed";    // schedules _searchDebounceTimer
         vm.NewValue = "42";          // schedules _valueDebounceTimer
 
-        var usageTextBefore = vm.UsageStatusText;
+        var usageTextBefore = vm.Subscription.UsageStatusText;
 
         // First Dispose
         var ex1 = Record.Exception(() => vm.Dispose());
