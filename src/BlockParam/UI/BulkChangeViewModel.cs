@@ -1594,6 +1594,13 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         // inspector header badge/summary stays stale until the next
         // ComputeBulkPreview cycle.
         BulkPreview.RaiseDerivedChanged();
+        // CanShowSetpointsOnly / ShowSetpointsOnlyTooltip derive from the
+        // anchor's UnresolvedUdts via the Filter slice's getAnchorInfo
+        // closure. When the active-set change swaps the anchor to a DB with
+        // a different UDT-resolution outcome, the checkbox's enabled state
+        // and tooltip have to refresh — the slice has no way to observe the
+        // anchor change on its own.
+        Filter.RaiseSetpointsCapabilityChanged();
         OnPropertyChanged(nameof(HasMultipleActiveDbs));
         OnPropertyChanged(nameof(SelectedFlatMember));
         OnPropertyChanged(nameof(SelectedScope));

@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.ComponentModel;
+using System.Threading;
 using System.Windows.Threading;
 using BlockParam.Models;
 using BlockParam.UI;
@@ -190,6 +191,40 @@ public class SearchFilterViewModelTests
         raised.Should().Contain(nameof(SearchFilterViewModel.ShowSetpointsOnlyTooltip));
     }
 
+    /// <summary>
+    /// Headline reason the slice uses a <see cref="System.Threading.Timer"/>
+    /// + dispatcher trampoline rather than WPF's built-in <c>Binding.Delay</c>
+    /// is to coalesce consecutive keystrokes: a burst of edits inside the
+    /// 200&#160;ms window must result in exactly one filter pass on the
+    /// final value, not one per keystroke. Regression guard so a future
+    /// refactor of the setter (e.g. dropping the <c>_searchDebounceTimer?.Dispose()</c>
+    /// before re-arming) doesn't silently restore per-keystroke filtering.
+    /// </summary>
+    [Fact]
+    public void SearchQuery_RapidKeystrokes_CoalesceIntoSingleCallback()
+    {
+        int callbackCount = 0;
+        var vm = Build(onFiltersChanged: () => Interlocked.Increment(ref callbackCount));
+
+        vm.SearchQuery = "S";
+        vm.SearchQuery = "Sp";
+        vm.SearchQuery = "Spe";
+
+        // Wait past the 200ms debounce window so the third (latest) timer
+        // can fire; the first two should have been disposed and never run.
+        Thread.Sleep(400);
+
+        // Timer callbacks land on the threadpool and post their work via
+        // _dispatcher.BeginInvoke(...). The test thread's dispatcher queue
+        // doesn't pump on its own — drain it explicitly so the coalesced
+        // callback runs before we assert.
+        PumpDispatcher();
+
+        callbackCount.Should().Be(1,
+            "three consecutive keystrokes inside the 200ms window must coalesce " +
+            "into one filter pass; otherwise WPF would over-filter on every keystroke");
+    }
+
     [Fact]
     public void Dispose_IsIdempotent()
     {
@@ -242,5 +277,21 @@ public class SearchFilterViewModelTests
         var raised = new List<string?>();
         vm.PropertyChanged += (_, e) => raised.Add(e.PropertyName);
         return raised;
+    }
+
+    /// <summary>
+    /// Drain the current thread's dispatcher queue by pushing a frame that
+    /// exits as soon as a background-priority continuation runs. Needed in
+    /// tests where the slice's debounce timer posts work via
+    /// <c>BeginInvoke</c> — without pumping, the posted action sits in the
+    /// queue and our assertions race the dispatcher.
+    /// </summary>
+    private static void PumpDispatcher()
+    {
+        var frame = new DispatcherFrame();
+        Dispatcher.CurrentDispatcher.BeginInvoke(
+            DispatcherPriority.Background,
+            new Action(() => frame.Continue = false));
+        Dispatcher.PushFrame(frame);
     }
 }
