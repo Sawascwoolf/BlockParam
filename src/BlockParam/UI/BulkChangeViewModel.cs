@@ -532,7 +532,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         get => _selectedFlatMember;
         set
         {
-            if (_isRefreshing) return; // Don't re-trigger during flat list rebuild
+            if (Tree.IsRefreshing) return; // Don't re-trigger during flat list rebuild
             if (SetProperty(ref _selectedFlatMember, value))
             {
                 OnMemberSelected(value);
