@@ -1676,6 +1676,12 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         // owns the cleanup of every collection that holds VM references.
         RebuildPendingEdits();
         BulkPreview.Clear();
+        // Clear() raises the underlying CollectionChanged event, but the
+        // slice's derived properties (Count, HasEntries, Summary, Conflict*)
+        // are separate INotifyPropertyChanged signals — without this, the
+        // inspector header badge/summary stays stale until the next
+        // ComputeBulkPreview cycle.
+        BulkPreview.RaiseDerivedChanged();
         OnPropertyChanged(nameof(HasMultipleActiveDbs));
         OnPropertyChanged(nameof(SelectedFlatMember));
         OnPropertyChanged(nameof(SelectedScope));
@@ -3810,6 +3816,10 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
                 }
                 _lastApplySucceeded = false;
                 HasPendingChanges = false;
+                // Pending list + count + ApplyTooltip would otherwise stay
+                // showing the pre-clear total — both happy paths below call
+                // RefreshPendingAndPreview, this early-return branch must too.
+                RefreshPendingAndPreview();
                 Subscription.UpdateUsageStatus();
                 return;
             }

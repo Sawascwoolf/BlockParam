@@ -222,12 +222,19 @@ public class SubscriptionViewModel : ViewModelBase, IDisposable
 
         // Fire-and-forget refresh — never blocks the UI thread, never
         // surfaces an error. Cache TTL gates the actual network hit.
+        // If the dialog closes while the background fetch is in flight,
+        // the dispatcher callback no-ops so we don't raise PropertyChanged
+        // on a disposed VM.
         _ = Task.Run(async () =>
         {
             try
             {
                 var info = await _updateCheckService.CheckAsync().ConfigureAwait(false);
-                _ = _dispatcher.BeginInvoke(new Action(() => AvailableUpdate = info));
+                _ = _dispatcher.BeginInvoke(new Action(() =>
+                {
+                    if (_disposed) return;
+                    AvailableUpdate = info;
+                }));
             }
             catch (Exception ex)
             {

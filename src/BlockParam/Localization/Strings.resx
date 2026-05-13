@@ -697,6 +697,21 @@ Examples: en-US, de-DE. Leave empty for the default language.</value>
   <data name="Pending_InvalidBadgeTooltip" xml:space="preserve">
     <value>Fix or undo invalid entries before applying.</value>
   </data>
+  <data name="Pending_StatusText_Singular" xml:space="preserve">
+    <value>{0} pending inline edit</value>
+    <comment>{0} = count (always 1)</comment>
+  </data>
+  <data name="Pending_StatusText_Plural" xml:space="preserve">
+    <value>{0} pending inline edits</value>
+    <comment>{0} = count (&gt; 1)</comment>
+  </data>
+  <data name="BulkPreview_ConflictWarning_Singular" xml:space="preserve">
+    <value>⚠ 1 overlap with pending edits — will be overwritten.</value>
+  </data>
+  <data name="BulkPreview_ConflictWarning_Plural" xml:space="preserve">
+    <value>⚠ {0} overlap with pending edits — will be overwritten.</value>
+    <comment>{0} = overlap count (&gt; 1). Wording preserved verbatim from inline string (#80 slice 5).</comment>
+  </data>
   <!-- Existing-value validator findings (#26) -->
   <data name="Issues_Header" xml:space="preserve">
     <value>ISSUES</value>

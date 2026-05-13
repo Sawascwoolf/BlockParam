@@ -63,7 +63,10 @@ public class PendingEditsViewModel : ViewModelBase
         get
         {
             var count = PendingInlineEditCount;
-            return count > 0 ? $"{count} pending inline edit{(count == 1 ? "" : "s")}" : null;
+            if (count == 0) return null;
+            return count == 1
+                ? Res.Format("Pending_StatusText_Singular", count)
+                : Res.Format("Pending_StatusText_Plural", count);
         }
     }
 

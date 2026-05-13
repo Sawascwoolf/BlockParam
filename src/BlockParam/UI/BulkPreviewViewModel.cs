@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.Linq;
+using BlockParam.Localization;
 
 namespace BlockParam.UI;
 
@@ -52,8 +53,8 @@ public class BulkPreviewViewModel : ViewModelBase
             int n = ConflictCount;
             if (n == 0) return "";
             return n == 1
-                ? "⚠ 1 overlap with pending edits — will be overwritten."
-                : $"⚠ {n} overlap with pending edits — will be overwritten.";
+                ? Res.Get("BulkPreview_ConflictWarning_Singular")
+                : Res.Format("BulkPreview_ConflictWarning_Plural", n);
         }
     }
 
