@@ -65,7 +65,6 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     private readonly ConfigLoader _configLoader;
     private readonly Func<string>? _onBackup;   // callback to create backup, returns backup path
     private readonly Action<string>? _onRestore; // callback to restore from backup path
-    private readonly FlatTreeManager _flatTreeManager = new();
     private readonly SimaticMLWriter _writer = new();
     private readonly MemberSearchService _searchService = new();
     private readonly IMessageBoxService _messageBox;
@@ -114,18 +113,9 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     private readonly Dictionary<string, StashedDbState> _stashedDbs =
         new(StringComparer.Ordinal);
 
-    // Model-to-VM and model-to-DB lookups for multi-DB routing (#58). Same
-    // path string can occur in multiple DBs, so reference equality on
-    // MemberNode is the unambiguous way to map a scope match back to its
-    // tree VM (where pending values live) and to its owning ActiveDb (where
-    // the xml lives). Rebuilt on every BuildRootMembersFromActiveDbs.
-    private readonly Dictionary<MemberNode, MemberNodeViewModel> _modelToVm = new();
-    private readonly Dictionary<MemberNode, ActiveDb> _modelToDb = new();
-    // Multi-DB only (#58): the synthetic group VM that wraps each ActiveDb's
-    // members. Used to route per-DB scans (ClearPendingValuesForDb,
-    // CountPendingEditsForDb, ...) by reference instead of by Info.Name +
-    // PlcName comparisons that would still collide across PLC boundaries.
-    private readonly Dictionary<ActiveDb, MemberNodeViewModel> _dbToSynthetic = new();
+    // Tree-shape state (RootMembers, flat list, model lookups, synthetic-
+    // group routing) lives on the MemberTreeViewModel slice (#80 slice 7a).
+    // The host accesses it via the Tree property — see the constructor.
 
     // Session-scoped store for pending inline-edit values, keyed by MemberNode
     // reference. Survives BuildRootMembersFromActiveDbs rebuilds — fresh VMs
@@ -168,7 +158,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     private bool _showConstants;
     private bool _constantsForced;
     private string _tagTableAge = "";
-    private bool _isRefreshing;
+    // _isRefreshing moved to MemberTreeViewModel as Tree.IsRefreshing (slice 7a).
     private bool _lastApplySucceeded;
     private bool _hasPendingChanges;
     private readonly IReadOnlyList<string> _projectLanguages;
@@ -290,14 +280,19 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         Pending = new PendingEditsViewModel(() => _pendingEditStore.Count);
         StashedDbs = new ObservableCollection<StashedDbState>();
 
-        // Build tree view models. Multi-DB workflow (#58): when more than
-        // one DB is active, every active DB becomes a synthetic top-level
-        // "DB" group whose children are that DB's actual members.
-        // The user picked this shape over a flat union so each match in the
-        // tree carries a visible DB-of-origin label, and scope walks
-        // naturally extend one level deeper.
-        RootMembers = new ObservableCollection<MemberNodeViewModel>();
-        BuildRootMembersFromActiveDbs();
+        // Tree-shape + flat-list + expand/collapse slice (#80 slice 7a).
+        // Multi-DB workflow (#58): when more than one DB is active, every
+        // active DB becomes a synthetic top-level "DB" group whose children
+        // are that DB's actual members. The user picked this shape over a
+        // flat union so each match carries a visible DB-of-origin label,
+        // and scope walks naturally extend one level deeper.
+        Tree = new MemberTreeViewModel(
+            getActiveDbs: () => _activeDbs.AsReadOnly(),
+            getCurrentPlcName: () => _currentPlcName,
+            commentLanguagePolicy: _commentLanguagePolicy,
+            subscribeToVm: SubscribeStartValueEdited);
+        Tree.RootsRebuilt += OnTreeRootsRebuilt;
+        Tree.BuildRootMembersFromActiveDbs();
         RefreshRuleHints();
         RebuildPlcPills();
 
@@ -311,8 +306,6 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
 
         EditConfigCommand = new RelayCommand(ExecuteEditConfig);
         RefreshConstantsCommand = new RelayCommand(ExecuteRefreshConstants);
-        ExpandAllCommand = new RelayCommand(ExecuteExpandAll);
-        CollapseAllCommand = new RelayCommand(ExecuteCollapseAll);
         // Inspector-panel expand/collapse state lives on its own slice VM
         // (#80 slice 1). The dialog code-behind subscribes to
         // `Inspector.PropertyChanged` directly for the splitter-column
@@ -423,8 +416,22 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         get => _title;
         private set => SetProperty(ref _title, value);
     }
-    public ObservableCollection<MemberNodeViewModel> RootMembers { get; }
     public ObservableCollection<ScopeLevel> AvailableScopes { get; }
+
+    /// <summary>
+    /// Tree-shape + flat-list + expand/collapse slice (#80 slice 7a). Owns
+    /// the <c>RootMembers</c> tree, the <c>FlatMembers</c> projection, the
+    /// three <c>MemberNode</c>/<c>ActiveDb</c> lookup dictionaries, and the
+    /// expand-all / collapse-all commands. XAML binds via
+    /// <c>{Binding Tree.RootMembers}</c>, <c>{Binding Tree.FlatMembers}</c>,
+    /// <c>{Binding Tree.ExpandAllCommand}</c> etc.
+    /// </summary>
+    public MemberTreeViewModel Tree { get; }
+
+    /// <summary>Convenience alias for <c>Tree.RootMembers</c>. Selection /
+    /// scope / Apply code on the host walks this many times; the alias
+    /// keeps those call sites short.</summary>
+    private ObservableCollection<MemberNodeViewModel> RootMembers => Tree.RootMembers;
 
     /// <summary>
     /// Bulk-preview collection slice (#80 slice 5). Owns the live preview
@@ -456,9 +463,6 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     public ObservableCollection<StashedDbState> StashedDbs { get; }
 
     public bool HasStashedDbs => StashedDbs.Count > 0;
-
-    /// <summary>Flat list for the ListView (proper column alignment).</summary>
-    public ObservableCollection<MemberNodeViewModel> FlatMembers => _flatTreeManager.FlatList;
 
     public event Action? RequestClose;
 
@@ -714,8 +718,6 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     public ICommand DiscardPendingCommand { get; }
 
     public ICommand EditConfigCommand { get; }
-    public ICommand ExpandAllCommand { get; }
-    public ICommand CollapseAllCommand { get; }
     public ICommand ClearManualSelectionCommand { get; }
 
     // --- DB-switcher dropdown (#59) ---
@@ -745,72 +747,29 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     /// <c>Datatype="DB"</c> so the tree template can render them with a
     /// distinct chrome.
     /// </summary>
-    private void BuildRootMembersFromActiveDbs()
-    {
-        // Always rebuild the routing dictionaries so every model node is
-        // mapped to its current VM + owning DB. Stale entries from a prior
-        // tree would route writes to disposed VMs.
-        _modelToVm.Clear();
-        _modelToDb.Clear();
-        _dbToSynthetic.Clear();
-
-        if (_activeDbs.Count == 1)
-        {
-            // Single-DB: flat list of top-level members, identical to legacy.
-            var only = _activeDbs[0];
-            foreach (var member in only.Info.Members)
-            {
-                var vm = new MemberNodeViewModel(member, null, _commentLanguagePolicy);
-                SubscribeStartValueEdited(vm);
-                IndexSubtree(vm, only);
-                RootMembers.Add(vm);
-            }
-        }
-        else
-        {
-            // Multi-DB: one synthetic group node per DB. Children are the DB's
-            // real top-level members, reused by reference — Path strings stay
-            // unchanged, so existing rule patterns / scope-detection on member
-            // paths still match across DBs.
-            // Cross-PLC name collision: two PLCs can each host a DB called
-            // "DB_Foo". Tag any colliding synthetic root with its PLC prefix so
-            // the user can tell them apart in the tree.
-            var nameCounts = _activeDbs
-                .GroupBy(d => d.Info.Name, StringComparer.Ordinal)
-                .ToDictionary(g => g.Key, g => g.Count(), StringComparer.Ordinal);
-            for (int i = 0; i < _activeDbs.Count; i++)
-            {
-                var db = _activeDbs[i];
-                var plc = i == 0 ? _currentPlcName : db.PlcName;
-                bool collides = nameCounts.TryGetValue(db.Info.Name, out var c) && c > 1;
-                var displayName = collides && !string.IsNullOrEmpty(plc)
-                    ? $"{plc} / {db.Info.Name}"
-                    : db.Info.Name;
-                AddDbGroupRoot(db, displayName);
-            }
-        }
-
-        // Seed any pending values that survived the rebuild (active-set
-        // transitions preserve MemberNode instances but mint fresh VMs).
-        // Called unconditionally — single-DB rebuilds are just as likely to
-        // need store seeding as multi-DB ones (e.g. peer chip removed while
-        // the anchor DB had a pending inline edit in progress).
-        SeedVmsFromStore();
-    }
+    /// <summary>
+    /// Post-rebuild hook fired by <see cref="MemberTreeViewModel.RootsRebuilt"/>.
+    /// The tree slice owns the fresh <c>MemberNodeViewModel</c> instances; the
+    /// host owns the pending-edit store + the validator, so the seeding pass
+    /// stays here. (Slice 7a kept the host-side pending-store coupling so the
+    /// slice doesn't acquire a store reference.)
+    /// </summary>
+    private void OnTreeRootsRebuilt() => SeedVmsFromStore();
 
     /// <summary>
     /// Restores pending-edit state from <see cref="_pendingEditStore"/> onto
     /// freshly-constructed <see cref="MemberNodeViewModel"/> instances after a
-    /// tree rebuild. Called at the end of <see cref="BuildRootMembersFromActiveDbs"/>
-    /// so every active-set transition (solo, chip-×, reactivate) automatically
-    /// preserves in-progress edits without callers needing to stash/restore manually.
+    /// tree rebuild. Called via <see cref="MemberTreeViewModel.RootsRebuilt"/>
+    /// after every <c>BuildRootMembersFromActiveDbs</c>, so active-set
+    /// transitions (solo, chip-×, reactivate) automatically preserve
+    /// in-progress edits without callers needing to stash/restore manually.
     /// </summary>
     private void SeedVmsFromStore()
     {
         var validator = BuildValidator();
         foreach (var (node, pendingValue) in _pendingEditStore.GetAll())
         {
-            if (!_modelToVm.TryGetValue(node, out var vm))
+            if (!Tree.ModelToVm.TryGetValue(node, out var vm))
                 continue;
             // Set the field directly to avoid firing OnSingleValueEdited,
             // which would write back to the store (creating a loop) and
@@ -824,73 +783,6 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             vm.InlineErrorMessage = error;
         }
     }
-
-    private void AddDbGroupRoot(ActiveDb db, string displayName)
-    {
-        var info = db.Info;
-        var synthetic = new MemberNode(
-            name: displayName,
-            datatype: "DB",
-            startValue: null,
-            path: info.Name,
-            parent: null,
-            children: info.Members);
-        var groupVm = new MemberNodeViewModel(synthetic, null, _commentLanguagePolicy);
-        // Subscribe edited-value events on every leaf descendant so inline
-        // edits in any active DB bubble up to the VM the same way
-        // single-DB edits do.
-        foreach (var descendant in groupVm.AllDescendants())
-            SubscribeStartValueEdited(descendant);
-        groupVm.IsExpanded = true;
-        _dbToSynthetic[db] = groupVm;
-        // Map every real (non-synthetic) descendant to its VM + owning DB so
-        // multi-DB scope hits route writes to the right tree / xml.
-        foreach (var descendant in groupVm.AllDescendants())
-        {
-            // Skip the synthetic group node itself — its Model has Datatype="DB"
-            // and isn't a real member. Identifying it by reference equality
-            // against the synthetic instance avoids relying on Datatype string
-            // matching, which is fragile.
-            if (ReferenceEquals(descendant.Model, synthetic)) continue;
-            _modelToVm[descendant.Model] = descendant;
-            _modelToDb[descendant.Model] = db;
-        }
-        RootMembers.Add(groupVm);
-    }
-
-    /// <summary>
-    /// Indexes every node in <paramref name="rootVm"/>'s subtree (root
-    /// included) into <see cref="_modelToVm"/> + <see cref="_modelToDb"/>.
-    /// Used by the single-DB code path; multi-DB indexes inside
-    /// <see cref="AddDbGroupRoot"/> with the synthetic-skip rule.
-    /// </summary>
-    private void IndexSubtree(MemberNodeViewModel rootVm, ActiveDb db)
-    {
-        _modelToVm[rootVm.Model] = rootVm;
-        _modelToDb[rootVm.Model] = db;
-        foreach (var descendant in rootVm.AllDescendants())
-        {
-            _modelToVm[descendant.Model] = descendant;
-            _modelToDb[descendant.Model] = db;
-        }
-    }
-
-    /// <summary>
-    /// Resolves a <see cref="MemberNode"/> (model) to its tree VM. Preferred
-    /// over <see cref="FindNodeByPath"/> when the caller already has the
-    /// model — it's O(1), and unambiguous in multi-DB sessions where the
-    /// same Path string can exist in multiple DBs.
-    /// </summary>
-    private MemberNodeViewModel? FindVmByModel(MemberNode model) =>
-        _modelToVm.TryGetValue(model, out var vm) ? vm : null;
-
-    /// <summary>
-    /// Returns the active DB that owns <paramref name="model"/>, or null
-    /// when the node is not part of the current tree (e.g. a stale model
-    /// from before the last RefreshTree).
-    /// </summary>
-    private ActiveDb? FindActiveDbForModel(MemberNode model) =>
-        _modelToDb.TryGetValue(model, out var db) ? db : null;
 
     /// <summary>
     /// All DBs currently being edited in this dialog session (#58). Always
@@ -1572,8 +1464,9 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         _selectedFlatMember = null;
         _selectedScope = null;
         _manualSelectedPaths.Clear();
-        RootMembers.Clear();
-        BuildRootMembersFromActiveDbs();
+        // Tree.BuildRootMembersFromActiveDbs clears RootMembers + the lookup
+        // dicts internally — no separate RootMembers.Clear() needed.
+        Tree.BuildRootMembersFromActiveDbs();
         ApplyAllFilters();
         RefreshFlatList();
         RebuildPlcPills();
@@ -1774,11 +1667,11 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     private StashedDbState? CaptureStashForDb(ActiveDb db)
     {
         var entries = new List<StashedEditEntry>();
-        foreach (var (node, pendingValue) in _pendingEditStore.GetForDb(db, _modelToDb))
+        foreach (var (node, pendingValue) in _pendingEditStore.GetForDb(db, Tree.ModelToDb))
         {
             // Resolve to the VM to read StartValue (which is model-derived
             // and stable). If the VM can't be found the model is still valid.
-            var vm = FindVmByModel(node);
+            var vm = Tree.FindVmByModel(node);
             entries.Add(new StashedEditEntry(
                 node.Path,
                 vm?.StartValue ?? node.StartValue ?? "",
@@ -1876,18 +1769,18 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     /// </summary>
     private void ClearPendingValuesForDb(ActiveDb db)
     {
-        // Walk _modelToDb to find VMs owned by this DB and clear their
+        // Walk Tree.ModelToDb to find VMs owned by this DB and clear their
         // pending state. Keyed by MemberNode reference — safe in multi-DB
         // sessions where the same path can appear in multiple DBs.
-        foreach (var kvp in _modelToDb)
+        foreach (var kvp in Tree.ModelToDb)
         {
             if (!ReferenceEquals(kvp.Value, db)) continue;
-            if (_modelToVm.TryGetValue(kvp.Key, out var vm) && vm.IsPendingInlineEdit)
+            if (Tree.ModelToVm.TryGetValue(kvp.Key, out var vm) && vm.IsPendingInlineEdit)
                 vm.ClearPending();
         }
         // Evict from the store so a later tree rebuild doesn't re-populate
         // values that were just committed.
-        _pendingEditStore.ClearForDb(db, _modelToDb);
+        _pendingEditStore.ClearForDb(db, Tree.ModelToDb);
     }
 
     /// <summary>
@@ -1897,7 +1790,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     /// O(subtree size), and correct even when the tree hasn't rebuilt yet.
     /// </summary>
     private int CountPendingEditsForDb(ActiveDb db)
-        => _pendingEditStore.CountForDb(db, _modelToDb);
+        => _pendingEditStore.CountForDb(db, Tree.ModelToDb);
 
     /// <summary>
     /// Best-effort "apply this DB's edits before we remove it" (#58
@@ -1919,7 +1812,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
 
         // Store-based: unambiguous in multi-DB sessions (MemberNode identity),
         // correct even when the tree hasn't rebuilt yet (store survives rebuilds).
-        var pendingEdits = _pendingEditStore.GetForDb(db, _modelToDb).ToList();
+        var pendingEdits = _pendingEditStore.GetForDb(db, Tree.ModelToDb).ToList();
         if (pendingEdits.Count == 0) return true;
 
         var status = Subscription.GetUsageStatus();
@@ -1946,7 +1839,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             if (totalChanged > 0) Subscription.RecordUsage(totalChanged);
             // The edits are now committed to TIA — evict the DB's store entries
             // so a subsequent tree rebuild doesn't re-populate committed values.
-            _pendingEditStore.ClearForDb(db, _modelToDb);
+            _pendingEditStore.ClearForDb(db, Tree.ModelToDb);
             return true;
         }
         catch (OperationCanceledException)
@@ -2065,7 +1958,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         {
             var node = scopedTo != null
                 ? FindNodeByPathInDb(edit.Path, scopedTo)
-                : FindNodeByPath(edit.Path);
+                : Tree.FindNodeByPath(edit.Path);
             if (node is { IsLeaf: true })
             {
                 // Restore-without-quota: setting EditableStartValue would route
@@ -2266,22 +2159,11 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
 
     // --- Public methods (called from code-behind) ---
 
-    /// <summary>
-    /// Toggles expand/collapse for a node and refreshes the flat list.
-    /// </summary>
-    public void ToggleExpand(MemberNodeViewModel node)
-    {
-        _flatTreeManager.ToggleExpand(node, RootMembers);
-    }
+    // ToggleExpand / IsRefreshing moved to MemberTreeViewModel (slice 7a).
+    // Code-behind that needs them now reads `vm.Tree.ToggleExpand` /
+    // `vm.Tree.IsRefreshing`.
 
     // --- Private methods ---
-
-    /// <summary>
-    /// True while <see cref="RefreshFlatList"/> is rebuilding <see cref="FlatMembers"/>.
-    /// The view checks this in its SelectionChanged handler to ignore the ghost
-    /// "removed items" events WPF raises when the ItemsSource is mutated.
-    /// </summary>
-    public bool IsRefreshing => _isRefreshing;
 
     /// <summary>
     /// For scripted scenarios (DevLauncher screenshot capture, future UI tests):
@@ -2323,34 +2205,25 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
 
     public void RefreshFlatList()
     {
-        if (_isRefreshing) return;
-        _isRefreshing = true;
-        try
+        // Pre-PR shape (one combined try/finally on the host) is preserved by
+        // routing the selection-restore + multi-select rehydration through
+        // Tree.RebuildFlatList's insideRefreshScope callback — both still run
+        // while Tree.IsRefreshing is true, so SelectedFlatMember setter +
+        // code-behind SelectionChanged stay suppressed during the rebuild.
+        var selectedPath = _selectedFlatMember?.Path;
+        Tree.RebuildFlatList(insideRefreshScope: () =>
         {
-            var selectedPath = _selectedFlatMember?.Path;
-            _flatTreeManager.Refresh(RootMembers);
-
-            // Restore selection in the new flat list (same node by path)
             if (selectedPath != null)
             {
-                var restored = _flatTreeManager.FlatList
-                    .FirstOrDefault(m => m.Path == selectedPath);
+                var restored = Tree.FlatMembers.FirstOrDefault(m => m.Path == selectedPath);
                 // Set backing field directly to avoid re-triggering OnMemberSelected
                 _selectedFlatMember = restored;
                 OnPropertyChanged(nameof(SelectedFlatMember));
                 OnPropertyChanged(nameof(HasSelection));
                 OnPropertyChanged(nameof(SelectedMemberDisplay));
             }
-
-            // Rehydrate multi-selection while _isRefreshing is still true so that
-            // cascaded SelectedItem changes (e.g. from SelectedItems.Clear()) do
-            // NOT trigger OnMemberSelected → UpdateHighlighting → recursion.
             FlatListRefreshed?.Invoke();
-        }
-        finally
-        {
-            _isRefreshing = false;
-        }
+        });
     }
 
     private void OnMemberSelected(MemberNodeViewModel? memberVm)
@@ -2418,7 +2291,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         AnalysisResult result;
         if (HasMultipleActiveDbs)
         {
-            var owningDb = FindActiveDbForModel(memberVm.Model)?.Info ?? _active.Info;
+            var owningDb = Tree.FindActiveDbForModel(memberVm.Model)?.Info ?? _active.Info;
             var allInfos = AllActiveDbs.Select(a => a.Info).ToList();
             result = _analyzer.AnalyzeMulti(allInfos, owningDb, memberVm.Model);
         }
@@ -2544,7 +2417,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
                     // Multi-DB safe: route by model reference, not path string.
                     // Same path can exist in multiple DBs; FindVmByModel is
                     // O(1) and always picks the right DB's tree VM.
-                    var node = FindVmByModel(m);
+                    var node = Tree.FindVmByModel(m);
                     if (node == null || !node.IsLeaf) continue;
                     TryAddPreviewEntry(node);
                 }
@@ -2625,7 +2498,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         // Multi-DB safe lookup: a model is owned by exactly one ActiveDb,
         // so reference equality picks the right tree VM regardless of which
         // DBs share the path string.
-        var vm = FindVmByModel(model);
+        var vm = Tree.FindVmByModel(model);
         if (vm != null && vm.IsPendingInlineEdit)
             return vm.EditableStartValue;
         return model.StartValue;
@@ -2647,7 +2520,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         {
             // Comment previews target scope members → route by model
             // reference for cross-DB safety (#58).
-            var vm = FindVmByModel(target);
+            var vm = Tree.FindVmByModel(target);
             if (vm != null)
             {
                 vm.PreviewComment = comment;
@@ -2694,33 +2567,18 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         }
     }
 
-    private MemberNodeViewModel? FindNodeByPath(string path)
-    {
-        foreach (var root in RootMembers)
-        {
-            var found = FindNodeByPathRecursive(root, path);
-            if (found != null) return found;
-        }
-        return null;
-    }
-
     /// <summary>
-    /// DB-scoped variant of <see cref="FindNodeByPath"/>. Callers pass this
-    /// when member Paths can repeat across DBs (the stash holds the bare
-    /// member path, not "DbName.MemberPath") — without scoping, a
-    /// reactivate-additive would replay edits onto whichever DB happened
-    /// to be checked first.
-    ///
-    /// Strict: callers must only invoke this when the active set is in
-    /// multi-DB shape (i.e. after the State cascade has populated
-    /// <see cref="_dbToSynthetic"/> for <paramref name="owner"/>). If the
-    /// synthetic root isn't found, returns null + warns — a future
+    /// Diagnostic wrapper around <see cref="MemberTreeViewModel.FindNodeByPathInDb"/>:
+    /// the slice returns null when the active set isn't in multi-DB shape
+    /// yet (its <c>_dbToSynthetic</c> doesn't have an entry for
+    /// <paramref name="owner"/>), the host adds the warn-log so a future
     /// ordering bug surfaces as "stashed edit dropped" in the log instead
-    /// of silently aliasing onto another DB.
+    /// of silently aliasing onto another DB. The slice intentionally has
+    /// no <c>Serilog</c> dependency.
     /// </summary>
     private MemberNodeViewModel? FindNodeByPathInDb(string path, ActiveDb owner)
     {
-        if (!_dbToSynthetic.TryGetValue(owner, out var synthetic))
+        if (!Tree.DbToSynthetic.ContainsKey(owner))
         {
             Log.Warning(
                 "FindNodeByPathInDb({Path}) called for {Db} but no synthetic " +
@@ -2729,23 +2587,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
                 path, owner.Info.Name);
             return null;
         }
-        foreach (var child in synthetic.Children)
-        {
-            var found = FindNodeByPathRecursive(child, path);
-            if (found != null) return found;
-        }
-        return null;
-    }
-
-    private static MemberNodeViewModel? FindNodeByPathRecursive(MemberNodeViewModel node, string path)
-    {
-        if (node.Path == path) return node;
-        foreach (var child in node.Children)
-        {
-            var found = FindNodeByPathRecursive(child, path);
-            if (found != null) return found;
-        }
-        return null;
+        return Tree.FindNodeByPathInDb(path, owner);
     }
 
     /// <summary>
@@ -2759,7 +2601,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         var result = new HashSet<MemberNodeViewModel>();
         foreach (var m in models)
         {
-            var vm = FindVmByModel(m);
+            var vm = Tree.FindVmByModel(m);
             if (vm != null) result.Add(vm);
         }
         return result;
@@ -2831,7 +2673,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         {
             // Route per synthetic root so each DB's filter sets only affect
             // its own subtree.
-            foreach (var kvp in _dbToSynthetic)
+            foreach (var kvp in Tree.DbToSynthetic)
             {
                 var db = kvp.Key;
                 var syntheticRoot = kvp.Value;
@@ -2882,7 +2724,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         {
             // Per-DB search so a path that's a hit in one DB doesn't smart-
             // expand the same path in other active DBs that don't have a hit.
-            foreach (var kvp in _dbToSynthetic)
+            foreach (var kvp in Tree.DbToSynthetic)
             {
                 var db = kvp.Key;
                 var syntheticRoot = kvp.Value;
@@ -2969,7 +2811,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         if (_bulkErrorPaths.Count == 0) return;
         foreach (var path in _bulkErrorPaths)
         {
-            var n = FindNodeByPath(path);
+            var n = Tree.FindNodeByPath(path);
             if (n != null && !n.IsPendingInlineEdit)
             {
                 n.HasInlineError = false;
@@ -3167,35 +3009,9 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             : $"{newest:yyyy-MM-dd HH:mm}";
     }
 
-    private void ExecuteExpandAll()
-    {
-        FlatTreeManager.ExpandAll(RootMembers);
-        RefreshFlatList();
-    }
-
-    private void ExecuteCollapseAll()
-    {
-        FlatTreeManager.CollapseAll(RootMembers);
-        RefreshFlatList();
-    }
-
-    /// <summary>
-    /// Expands a node and all its descendants, then refreshes the flat list.
-    /// </summary>
-    public void ExpandAllChildren(MemberNodeViewModel node)
-    {
-        FlatTreeManager.ExpandAllChildren(node);
-        RefreshFlatList();
-    }
-
-    /// <summary>
-    /// Collapses a node and all its descendants, then refreshes the flat list.
-    /// </summary>
-    public void CollapseAllChildren(MemberNodeViewModel node)
-    {
-        FlatTreeManager.CollapseAllChildren(node);
-        RefreshFlatList();
-    }
+    // ExpandAll / CollapseAll commands + ExpandAllChildren / CollapseAllChildren
+    // methods moved to MemberTreeViewModel (slice 7a). Code-behind callers
+    // route through `vm.Tree.ExpandAllChildren(node)` etc.
 
     /// <summary>Can stage bulk scope or manual-selection values as pending.</summary>
     private bool CanExecuteSetPending()
@@ -3231,7 +3047,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
 
         return _selectedScope.MatchingMembers.Count(m =>
         {
-            var node = FindNodeByPath(m.Path);
+            var node = Tree.FindNodeByPath(m.Path);
             // Unresolved paths can't be staged by SetPendingOnNodes, so don't
             // count them — that's exactly the inflation the old label had.
             return node != null && WouldChange(node);
@@ -3604,7 +3420,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         {
             // Store-based: unambiguous in multi-PLC sessions; correct even if
             // the tree hasn't rebuilt after a recent active-set transition.
-            var edits = _pendingEditStore.GetForDb(db, _modelToDb).ToList();
+            var edits = _pendingEditStore.GetForDb(db, Tree.ModelToDb).ToList();
             if (edits.Count == 0) continue;
             totalChanges += edits.Count;
             perDb.Add((db, edits));
@@ -3817,7 +3633,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             var byDb = new Dictionary<ActiveDb, List<MemberNode>>();
             foreach (var member in _selectedScope.MatchingMembers)
             {
-                var owningDb = FindActiveDbForModel(member);
+                var owningDb = Tree.FindActiveDbForModel(member);
                 if (owningDb == null) continue;
                 if (!byDb.TryGetValue(owningDb, out var list))
                 {
@@ -4139,8 +3955,9 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         // the committed (and now applied) edit set.
         _pendingEditStore.ClearAll();
 
-        RootMembers.Clear();
-        BuildRootMembersFromActiveDbs();
+        // Tree.BuildRootMembersFromActiveDbs clears RootMembers + the lookup
+        // dicts internally.
+        Tree.BuildRootMembersFromActiveDbs();
         RefreshRuleHints();
         RebuildExistingIssues();
 
@@ -4154,7 +3971,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         // Restore selection and re-trigger scope analysis
         if (selectedPath != null)
         {
-            var restored = _flatTreeManager.FlatList.FirstOrDefault(m => m.Path == selectedPath);
+            var restored = Tree.FlatMembers.FirstOrDefault(m => m.Path == selectedPath);
             if (restored != null)
             {
                 _selectedFlatMember = restored;
@@ -4172,7 +3989,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
                 AnalysisResult result;
                 if (HasMultipleActiveDbs)
                 {
-                    var owningDb = FindActiveDbForModel(restored.Model)?.Info ?? _active.Info;
+                    var owningDb = Tree.FindActiveDbForModel(restored.Model)?.Info ?? _active.Info;
                     var allInfos = AllActiveDbs.Select(a => a.Info).ToList();
                     result = _analyzer.AnalyzeMulti(allInfos, owningDb, restored.Model);
                 }

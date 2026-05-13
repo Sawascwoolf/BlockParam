@@ -175,7 +175,7 @@ public class BulkChangeViewModelRegressionTests : IDisposable
             bulkService, tracker, configLoader, messageBox: new NopMessageBox());
 
         // Verify initial state — Config is present at root level with children collapsed
-        var configRoot = vm.RootMembers.FirstOrDefault(r => r.Name == "Config");
+        var configRoot = vm.Tree.RootMembers.FirstOrDefault(r => r.Name == "Config");
         configRoot.Should().NotBeNull("fixture must have a Config struct");
 
         vm.Filter.SearchQuery = "Timeout";
@@ -316,10 +316,10 @@ public class BulkChangeViewModelRegressionTests : IDisposable
     {
         var vm = CreateUdtVm();
 
-        FlatTreeManager.ExpandAll(vm.RootMembers);
+        FlatTreeManager.ExpandAll(vm.Tree.RootMembers);
         vm.RefreshFlatList();
 
-        var leaf = vm.FlatMembers.First(m => m.Name == "ModuleId" && m.IsLeaf);
+        var leaf = vm.Tree.FlatMembers.First(m => m.Name == "ModuleId" && m.IsLeaf);
         vm.SelectedFlatMember = leaf;
 
         // Pick the broadest scope (all 4 ModuleId instances)
@@ -346,10 +346,10 @@ public class BulkChangeViewModelRegressionTests : IDisposable
     {
         var vm = CreateUdtVm();
 
-        FlatTreeManager.ExpandAll(vm.RootMembers);
+        FlatTreeManager.ExpandAll(vm.Tree.RootMembers);
         vm.RefreshFlatList();
 
-        var leaf = vm.FlatMembers.First(m => m.Name == "ModuleId" && m.IsLeaf);
+        var leaf = vm.Tree.FlatMembers.First(m => m.Name == "ModuleId" && m.IsLeaf);
         vm.SelectedFlatMember = leaf;
 
         var scope = vm.AvailableScopes.OrderByDescending(s => s.MatchCount).First();
@@ -384,10 +384,10 @@ public class BulkChangeViewModelRegressionTests : IDisposable
     {
         var vm = CreateUdtVm();
 
-        FlatTreeManager.ExpandAll(vm.RootMembers);
+        FlatTreeManager.ExpandAll(vm.Tree.RootMembers);
         vm.RefreshFlatList();
 
-        var moduleLeaves = vm.FlatMembers.Where(m => m.Name == "ModuleId" && m.IsLeaf).ToList();
+        var moduleLeaves = vm.Tree.FlatMembers.Where(m => m.Name == "ModuleId" && m.IsLeaf).ToList();
         moduleLeaves.Should().HaveCount(4, "fixture has 4 ModuleId leaves");
 
         // Stage a pending inline edit on the first leaf
@@ -422,10 +422,10 @@ public class BulkChangeViewModelRegressionTests : IDisposable
     {
         var vm = CreateUdtVm();
 
-        FlatTreeManager.ExpandAll(vm.RootMembers);
+        FlatTreeManager.ExpandAll(vm.Tree.RootMembers);
         vm.RefreshFlatList();
 
-        vm.SelectedFlatMember = vm.FlatMembers.First(m => m.Name == "ModuleId" && m.IsLeaf);
+        vm.SelectedFlatMember = vm.Tree.FlatMembers.First(m => m.Name == "ModuleId" && m.IsLeaf);
         var scope = vm.AvailableScopes.OrderByDescending(s => s.MatchCount).First();
         vm.SelectedScope = scope;
 
@@ -438,7 +438,7 @@ public class BulkChangeViewModelRegressionTests : IDisposable
             "homogeneous originals should produce 'orig ⇢ new' format");
 
         // Make one leaf heterogeneous by staging a pending edit
-        var leaves = vm.FlatMembers.Where(m => m.Name == "ModuleId" && m.IsLeaf).ToList();
+        var leaves = vm.Tree.FlatMembers.Where(m => m.Name == "ModuleId" && m.IsLeaf).ToList();
         // SPEC AMBIGUITY: The BulkPreviewSummary checks OriginalValue (StartValue) for
         // homogeneity, not PendingValue. So editing one leaf's EditableStartValue changes
         // its effective value shown in BulkPreview but OriginalValue stays as StartValue="42".
@@ -453,11 +453,11 @@ public class BulkChangeViewModelRegressionTests : IDisposable
         vm.Dispose();
 
         var vm2 = CreateFlatDbVm();
-        FlatTreeManager.ExpandAll(vm2.RootMembers);
+        FlatTreeManager.ExpandAll(vm2.Tree.RootMembers);
         vm2.RefreshFlatList();
 
-        var speed = vm2.FlatMembers.First(m => m.Name == "Speed" && m.IsLeaf);
-        var enable = vm2.FlatMembers.First(m => m.Name == "Enable" && m.IsLeaf);
+        var speed = vm2.Tree.FlatMembers.First(m => m.Name == "Speed" && m.IsLeaf);
+        var enable = vm2.Tree.FlatMembers.First(m => m.Name == "Enable" && m.IsLeaf);
 
         vm2.UpdateManualSelection(
             added: new[] { speed, enable },
@@ -489,10 +489,10 @@ public class BulkChangeViewModelRegressionTests : IDisposable
     {
         var vm = CreateUdtVm();
 
-        FlatTreeManager.ExpandAll(vm.RootMembers);
+        FlatTreeManager.ExpandAll(vm.Tree.RootMembers);
         vm.RefreshFlatList();
 
-        var leaves = vm.FlatMembers.Where(m => m.IsLeaf).Take(2).ToList();
+        var leaves = vm.Tree.FlatMembers.Where(m => m.IsLeaf).Take(2).ToList();
         leaves.Should().HaveCount(2, "fixture must have at least 2 leaves");
 
         vm.UpdateManualSelection(
@@ -518,13 +518,13 @@ public class BulkChangeViewModelRegressionTests : IDisposable
     {
         var vm = CreateFlatDbVm();
 
-        FlatTreeManager.ExpandAll(vm.RootMembers);
+        FlatTreeManager.ExpandAll(vm.Tree.RootMembers);
         vm.RefreshFlatList();
 
         // flat-db.xml: Speed (Int), Temperature (Real), Enable (Bool)
-        var speed = vm.FlatMembers.First(m => m.Name == "Speed" && m.IsLeaf);
-        var temp = vm.FlatMembers.First(m => m.Name == "Temperature" && m.IsLeaf);
-        var enable = vm.FlatMembers.First(m => m.Name == "Enable" && m.IsLeaf);
+        var speed = vm.Tree.FlatMembers.First(m => m.Name == "Speed" && m.IsLeaf);
+        var temp = vm.Tree.FlatMembers.First(m => m.Name == "Temperature" && m.IsLeaf);
+        var enable = vm.Tree.FlatMembers.First(m => m.Name == "Enable" && m.IsLeaf);
 
         speed.Datatype.Should().NotBe(enable.Datatype,
             "Speed (Int) and Enable (Bool) must have different datatypes");
@@ -536,11 +536,11 @@ public class BulkChangeViewModelRegressionTests : IDisposable
         vm.Dispose();
 
         var vm2 = CreateUdtVm();
-        FlatTreeManager.ExpandAll(vm2.RootMembers);
+        FlatTreeManager.ExpandAll(vm2.Tree.RootMembers);
         vm2.RefreshFlatList();
 
         // UDT fixture: ModuleId (Int), ElementId (Int), MessageId (Int), Active (Bool)
-        var intLeaves = vm2.FlatMembers.Where(m => m.Name == "ModuleId" && m.IsLeaf).Take(2).ToList();
+        var intLeaves = vm2.Tree.FlatMembers.Where(m => m.Name == "ModuleId" && m.IsLeaf).Take(2).ToList();
         intLeaves.Should().HaveCount(2, "fixture needs at least 2 Int leaves");
         intLeaves.Should().AllSatisfy(l => l.Datatype.Should().Be("Int"));
 
@@ -554,7 +554,7 @@ public class BulkChangeViewModelRegressionTests : IDisposable
             "2 Int leaves → all same datatype → homogeneous");
 
         // Add a Bool leaf — breaks homogeneity
-        var boolLeaf = vm2.FlatMembers.First(m => m.Name == "Active" && m.IsLeaf);
+        var boolLeaf = vm2.Tree.FlatMembers.First(m => m.Name == "Active" && m.IsLeaf);
         boolLeaf.Datatype.Should().Be("Bool");
 
         vm2.UpdateManualSelection(
@@ -585,11 +585,11 @@ public class BulkChangeViewModelRegressionTests : IDisposable
     {
         var vm = CreateFlatDbVm();
 
-        FlatTreeManager.ExpandAll(vm.RootMembers);
+        FlatTreeManager.ExpandAll(vm.Tree.RootMembers);
         vm.RefreshFlatList();
 
         // Stage 2 leaves (manual mode requires >= 2)
-        var leaves = vm.FlatMembers.Where(m => m.IsLeaf).Take(2).ToList();
+        var leaves = vm.Tree.FlatMembers.Where(m => m.IsLeaf).Take(2).ToList();
         vm.UpdateManualSelection(
             added: leaves,
             removed: System.Array.Empty<MemberNodeViewModel>(),
@@ -660,9 +660,9 @@ public class BulkChangeViewModelRegressionTests : IDisposable
             tagTableCache: cache,
             messageBox: new NopMessageBox());
 
-        FlatTreeManager.ExpandAll(vm2.RootMembers);
+        FlatTreeManager.ExpandAll(vm2.Tree.RootMembers);
         vm2.RefreshFlatList();
-        var leaf = vm2.FlatMembers.First(m => m.Name == "ModuleId" && m.IsLeaf);
+        var leaf = vm2.Tree.FlatMembers.First(m => m.Name == "ModuleId" && m.IsLeaf);
         leaf.IsLeaf.Should().BeTrue();
 
         // Empty filter → all 50
@@ -717,9 +717,9 @@ public class BulkChangeViewModelRegressionTests : IDisposable
             messageBox: new NopMessageBox());
 
         // Select a leaf so ReloadSuggestions has a model to work with
-        FlatTreeManager.ExpandAll(vm.RootMembers);
+        FlatTreeManager.ExpandAll(vm.Tree.RootMembers);
         vm.RefreshFlatList();
-        var leaf = vm.FlatMembers.First(m => m.IsLeaf);
+        var leaf = vm.Tree.FlatMembers.First(m => m.IsLeaf);
         vm.SelectedFlatMember = leaf;
 
         // Confirm starting state: ShowConstants=false → Suggestions empty
@@ -773,9 +773,9 @@ public class BulkChangeViewModelRegressionTests : IDisposable
             tagTableCache: cache,
             messageBox: new NopMessageBox());
 
-        FlatTreeManager.ExpandAll(vm.RootMembers);
+        FlatTreeManager.ExpandAll(vm.Tree.RootMembers);
         vm.RefreshFlatList();
-        vm.SelectedFlatMember = vm.FlatMembers.First(m => m.IsLeaf);
+        vm.SelectedFlatMember = vm.Tree.FlatMembers.First(m => m.IsLeaf);
 
         // Force ShowConstants on to populate _suggestions
         vm.ShowConstants = true;
@@ -849,11 +849,11 @@ public class BulkChangeViewModelRegressionTests : IDisposable
             bulkService, tracker, configLoader,
             messageBox: new NopMessageBox());
 
-        FlatTreeManager.ExpandAll(vm.RootMembers);
+        FlatTreeManager.ExpandAll(vm.Tree.RootMembers);
         vm.RefreshFlatList();
 
         // Select a ModuleId leaf (child of Msg_CommError) and pick the broadest scope
-        var leaf = vm.FlatMembers.First(m => m.Name == "ModuleId" && m.IsLeaf);
+        var leaf = vm.Tree.FlatMembers.First(m => m.Name == "ModuleId" && m.IsLeaf);
         vm.SelectedFlatMember = leaf;
         vm.AvailableScopes.Should().NotBeEmpty("ModuleId has repeated occurrences → scope available");
         vm.SelectedScope = vm.AvailableScopes.OrderByDescending(s => s.MatchCount).First();
@@ -863,7 +863,7 @@ public class BulkChangeViewModelRegressionTests : IDisposable
 
         // The Msg_CommError parent nodes should have PreviewComment populated
         // (GenerateForScope walks up from ModuleId → Msg_CommError, finds the rule)
-        var nodesWithPreviewComment = vm.RootMembers
+        var nodesWithPreviewComment = vm.Tree.RootMembers
             .SelectMany(r => new[] { r }.Concat(r.AllDescendants()))
             .Where(n => n.PreviewComment != null)
             .ToList();
@@ -874,9 +874,9 @@ public class BulkChangeViewModelRegressionTests : IDisposable
 
         // No-comment-rule path: VM without comment rules should have no PreviewComment set
         var vm2 = CreateUdtVm(); // no rules
-        FlatTreeManager.ExpandAll(vm2.RootMembers);
+        FlatTreeManager.ExpandAll(vm2.Tree.RootMembers);
         vm2.RefreshFlatList();
-        vm2.SelectedFlatMember = vm2.FlatMembers.First(m => m.Name == "ModuleId" && m.IsLeaf);
+        vm2.SelectedFlatMember = vm2.Tree.FlatMembers.First(m => m.Name == "ModuleId" && m.IsLeaf);
         if (vm2.AvailableScopes.Count > 0)
         {
             vm2.SelectedScope = vm2.AvailableScopes.First();
@@ -884,7 +884,7 @@ public class BulkChangeViewModelRegressionTests : IDisposable
             vm2.FlushPendingHighlighting();
         }
 
-        var commentedNoRule = vm2.RootMembers
+        var commentedNoRule = vm2.Tree.RootMembers
             .SelectMany(r => new[] { r }.Concat(r.AllDescendants()))
             .Where(n => n.PreviewComment != null)
             .ToList();
@@ -930,13 +930,13 @@ public class BulkChangeViewModelRegressionTests : IDisposable
             bulkService, tracker, configLoader,
             messageBox: new NopMessageBox());
 
-        FlatTreeManager.ExpandAll(vm.RootMembers);
+        FlatTreeManager.ExpandAll(vm.Tree.RootMembers);
         vm.RefreshFlatList();
 
         // Select a ModuleId leaf and pick the broadest scope — same setup as
         // test 14. The scope cascade populates PreviewComment on the
         // Msg_CommError parents.
-        var leaf = vm.FlatMembers.First(m => m.Name == "ModuleId" && m.IsLeaf);
+        var leaf = vm.Tree.FlatMembers.First(m => m.Name == "ModuleId" && m.IsLeaf);
         vm.SelectedFlatMember = leaf;
         vm.SelectedScope = vm.AvailableScopes.OrderByDescending(s => s.MatchCount).First();
         vm.NewValue = "99";
@@ -954,9 +954,9 @@ public class BulkChangeViewModelRegressionTests : IDisposable
         // PreviewComment set, so CollectPendingCommentNodes finds zero targets
         // and ApplyCommentPreviews returns the input XML unchanged.
         var vm2 = CreateFlatDbVm();
-        FlatTreeManager.ExpandAll(vm2.RootMembers);
+        FlatTreeManager.ExpandAll(vm2.Tree.RootMembers);
         vm2.RefreshFlatList();
-        vm2.RootMembers.First(m => m.Name == "Speed").EditableStartValue = "99";
+        vm2.Tree.RootMembers.First(m => m.Name == "Speed").EditableStartValue = "99";
 
         var flatXml = TestFixtures.LoadXml("flat-db.xml");
         var unchanged = vm2.ApplyCommentPreviews(flatXml);

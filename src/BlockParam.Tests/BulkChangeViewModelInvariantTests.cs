@@ -66,8 +66,8 @@ public class BulkChangeViewModelInvariantTests
         env.Vm.AllActiveDbs.Should().HaveCount(2);
         env.Vm.PlcPills.Select(p => p.PlcName).Should().BeEquivalentTo(
             new[] { "PLC_A", "PLC_B" });
-        env.Vm.RootMembers.Should().HaveCount(2);
-        env.Vm.RootMembers.Should().AllSatisfy(r => r.Datatype.Should().Be("DB"));
+        env.Vm.Tree.RootMembers.Should().HaveCount(2);
+        env.Vm.Tree.RootMembers.Should().AllSatisfy(r => r.Datatype.Should().Be("DB"));
         env.Mbx.AskYesNoCancelCallCount.Should().Be(0, "pure-add does not prompt");
         AssertInvariants(env.Vm);
     }
@@ -256,7 +256,7 @@ public class BulkChangeViewModelInvariantTests
             "NestedStructDB's stash entry pops on restore");
 
         // Stash edits replay onto the live tree.
-        var restored = env.Vm.RootMembers
+        var restored = env.Vm.Tree.RootMembers
             .SelectMany(r => new[] { r }.Concat(r.AllDescendants()))
             .FirstOrDefault(n => n.IsLeaf && n.PendingValue == pendingValue);
         restored.Should().NotBeNull("stashed edit must land on the rebuilt tree");
@@ -306,7 +306,7 @@ public class BulkChangeViewModelInvariantTests
         env.Vm.AllActiveDbs[0].Info.Name.Should().Be("NestedStructDB");
         env.Vm.HasStashedDbs.Should().BeFalse();
 
-        var restored = env.Vm.RootMembers
+        var restored = env.Vm.Tree.RootMembers
             .SelectMany(r => new[] { r }.Concat(r.AllDescendants()))
             .FirstOrDefault(n => n.IsLeaf && n.PendingValue == pendingValue);
         restored.Should().NotBeNull("stashed edit lands on the single-DB tree");
@@ -347,7 +347,7 @@ public class BulkChangeViewModelInvariantTests
         // peer drop, i.e. while we're in single-DB shape. Use EditableStartValue
         // (production path) so the PendingEditStore is populated — CountPendingEditsForDb
         // reads from the store to decide whether to prompt before remove.
-        var anchorLeaf = env.Vm.RootMembers.SelectMany(r => new[] { r }.Concat(r.AllDescendants()))
+        var anchorLeaf = env.Vm.Tree.RootMembers.SelectMany(r => new[] { r }.Concat(r.AllDescendants()))
             .First(n => n.IsLeaf && !string.IsNullOrEmpty(n.StartValue));
         anchorLeaf.EditableStartValue = anchorLeaf.StartValue == "0" ? "1" : "0";
 
@@ -559,7 +559,7 @@ public class BulkChangeViewModelInvariantTests
             .Build();
 
         // Multi-DB shape: pick 2 leaves from FlatDB's synthetic subtree.
-        var anchorRoot = env.Vm.RootMembers.First(r => r.Name == "FlatDB");
+        var anchorRoot = env.Vm.Tree.RootMembers.First(r => r.Name == "FlatDB");
         var anchorLeaves = new[] { anchorRoot }
             .Concat(anchorRoot.AllDescendants())
             .Where(n => n.IsLeaf)
@@ -585,7 +585,7 @@ public class BulkChangeViewModelInvariantTests
         env.Vm.IsManualMode.Should().BeFalse("0 manual paths → not in manual mode");
 
         // Now the second half: select 2 leaves in the survivor (now flat tree).
-        var peerLeaves = env.Vm.RootMembers
+        var peerLeaves = env.Vm.Tree.RootMembers
             .SelectMany(r => new[] { r }.Concat(r.AllDescendants()))
             .Where(n => n.IsLeaf)
             .Take(2)
@@ -634,7 +634,7 @@ public class BulkChangeViewModelInvariantTests
         // Tree rebuilt: multi-DB → single-DB (flat) shape, all VMs replaced.
         env.Vm.AllActiveDbs.Should().HaveCount(1, "peer was silently removed");
         env.Mbx.AskYesNoCancelCallCount.Should().Be(0, "no edits on peer → no prompt");
-        env.Vm.RootMembers.Should().AllSatisfy(r =>
+        env.Vm.Tree.RootMembers.Should().AllSatisfy(r =>
             r.Datatype.Should().NotBe("DB"), "single-DB shape: no synthetic roots");
 
         // Find the anchor's leaf in the new flat tree.
@@ -699,11 +699,11 @@ public class BulkChangeViewModelInvariantTests
             .WithPeer("nested-struct-db.xml")
             .Build();
 
-        env.Vm.RootMembers.Should().HaveCount(2,
+        env.Vm.Tree.RootMembers.Should().HaveCount(2,
             "setup: multi-DB tree with one synthetic root per DB");
 
-        var dbARoot = env.Vm.RootMembers.First(r => r.Name == "FlatDB");
-        var dbBRoot = env.Vm.RootMembers.First(r => r.Name == "NestedStructDB");
+        var dbARoot = env.Vm.Tree.RootMembers.First(r => r.Name == "FlatDB");
+        var dbBRoot = env.Vm.Tree.RootMembers.First(r => r.Name == "NestedStructDB");
         var dbALeaf = new[] { dbARoot }.Concat(dbARoot.AllDescendants())
             .First(n => n.IsLeaf);
         var dbBLeaf = new[] { dbBRoot }.Concat(dbBRoot.AllDescendants())
@@ -714,7 +714,7 @@ public class BulkChangeViewModelInvariantTests
         // Then select a leaf in DB A — DB B's selection must clear.
         dbALeaf.IsSelected = true;
 
-        var allLeaves = env.Vm.RootMembers
+        var allLeaves = env.Vm.Tree.RootMembers
             .SelectMany(r => new[] { r }.Concat(r.AllDescendants()))
             .Where(n => n.IsLeaf)
             .ToList();
@@ -816,14 +816,14 @@ public class BulkChangeViewModelInvariantTests
         // (3) tree shape matches active-set count
         if (vm.AllActiveDbs.Count == 1)
         {
-            vm.RootMembers.Should().AllSatisfy(r => r.Datatype.Should().NotBe("DB"),
+            vm.Tree.RootMembers.Should().AllSatisfy(r => r.Datatype.Should().NotBe("DB"),
                 "invariant 3 (single-DB): top-level members are flat, no synthetic group");
         }
         else
         {
-            vm.RootMembers.Should().HaveCount(vm.AllActiveDbs.Count,
+            vm.Tree.RootMembers.Should().HaveCount(vm.AllActiveDbs.Count,
                 "invariant 3 (multi-DB): one synthetic root per active DB");
-            vm.RootMembers.Should().AllSatisfy(r => r.Datatype.Should().Be("DB",
+            vm.Tree.RootMembers.Should().AllSatisfy(r => r.Datatype.Should().Be("DB",
                 "invariant 3 (multi-DB): every root is a synthetic Datatype='DB' group"));
         }
 
@@ -845,7 +845,7 @@ public class BulkChangeViewModelInvariantTests
         // (6) PendingEdits only references nodes still reachable in the live
         // tree — removing a DB from the active set must vacate that DB's
         // leaves from the bound "pending changes" inspector list.
-        var reachableNodes = vm.RootMembers
+        var reachableNodes = vm.Tree.RootMembers
             .SelectMany(r => new[] { r }.Concat(r.AllDescendants()))
             .ToHashSet();
         var orphanedPaths = vm.Pending.PendingEdits
@@ -913,9 +913,9 @@ public class BulkChangeViewModelInvariantTests
     /// </summary>
     private static MemberNodeViewModel FindFirstPendingLeaf(BulkChangeViewModel vm, string dbName)
     {
-        var roots = vm.RootMembers.Count > 0 && vm.RootMembers[0].Datatype == "DB"
-            ? vm.RootMembers.Where(r => r.Name == dbName)
-            : vm.RootMembers;
+        var roots = vm.Tree.RootMembers.Count > 0 && vm.Tree.RootMembers[0].Datatype == "DB"
+            ? vm.Tree.RootMembers.Where(r => r.Name == dbName)
+            : vm.Tree.RootMembers;
         return roots.SelectMany(r => new[] { r }.Concat(r.AllDescendants()))
             .First(n => n.IsLeaf && n.IsPendingInlineEdit);
     }
@@ -1070,10 +1070,10 @@ public class BulkChangeViewModelInvariantTests
             {
                 var dbName = kvp.Key;
                 var count = kvp.Value;
-                var roots = vm.RootMembers.Count > 0 && vm.RootMembers[0].Datatype == "DB"
-                    ? vm.RootMembers.Where(r => r.Name == dbName).ToList()
+                var roots = vm.Tree.RootMembers.Count > 0 && vm.Tree.RootMembers[0].Datatype == "DB"
+                    ? vm.Tree.RootMembers.Where(r => r.Name == dbName).ToList()
                     : (loaded.Values.Any(v => v.info.Name == dbName)
-                        ? vm.RootMembers.ToList()
+                        ? vm.Tree.RootMembers.ToList()
                         : new List<MemberNodeViewModel>());
                 if (roots.Count == 0)
                     throw new System.InvalidOperationException(

@@ -143,7 +143,7 @@ public class BulkChangeViewModelTests : IDisposable
             "existing violations must not flip HasInlineError — that's the Apply blocker");
 
         // Stage a valid pending edit on a *different* member so Apply has work
-        var enable = vm.RootMembers.Single(m => m.Name == "Enable");
+        var enable = vm.Tree.RootMembers.Single(m => m.Name == "Enable");
         enable.EditableStartValue = "false";
 
         vm.ApplyCommand.CanExecute(null).Should().BeTrue(
@@ -162,11 +162,11 @@ public class BulkChangeViewModelTests : IDisposable
     {
         var vm = CreateViewModelWithRule("udt-instances-db.xml", @"{ ""rules"": [] }");
 
-        FlatTreeManager.ExpandAll(vm.RootMembers);
+        FlatTreeManager.ExpandAll(vm.Tree.RootMembers);
         vm.RefreshFlatList();
 
         // Fixture has 4 ModuleId leaves, all already at "42".
-        var moduleId = vm.FlatMembers.First(m => m.Name == "ModuleId" && m.IsLeaf);
+        var moduleId = vm.Tree.FlatMembers.First(m => m.Name == "ModuleId" && m.IsLeaf);
         vm.SelectedFlatMember = moduleId;
 
         var dbScope = vm.AvailableScopes.First(s => s.MatchCount == 4);
@@ -193,12 +193,12 @@ public class BulkChangeViewModelTests : IDisposable
     {
         var vm = CreateViewModelWithRule("udt-instances-db.xml", @"{ ""rules"": [] }");
 
-        FlatTreeManager.ExpandAll(vm.RootMembers);
+        FlatTreeManager.ExpandAll(vm.Tree.RootMembers);
         vm.RefreshFlatList();
 
         // Pick 3 ModuleId leaves (all "42") + 1 MessageId leaf (e.g. "101").
-        var moduleIds = vm.FlatMembers.Where(m => m.Name == "ModuleId" && m.IsLeaf).Take(3).ToList();
-        var messageId = vm.FlatMembers.First(m => m.Name == "MessageId" && m.IsLeaf);
+        var moduleIds = vm.Tree.FlatMembers.Where(m => m.Name == "ModuleId" && m.IsLeaf).Take(3).ToList();
+        var messageId = vm.Tree.FlatMembers.First(m => m.Name == "MessageId" && m.IsLeaf);
         var picks = moduleIds.Concat(new[] { messageId }).ToList();
 
         vm.UpdateManualSelection(picks, Array.Empty<MemberNodeViewModel>(), false);
@@ -235,8 +235,8 @@ public class BulkChangeViewModelTests : IDisposable
         var vm = new BulkChangeViewModel(db, xml, analyzer, bulkService, usageTracker, configLoader);
 
         // Stage two pending edits — one would fit (remaining=1), two will not.
-        vm.RootMembers.Single(m => m.Name == "Enable").EditableStartValue = "false";
-        vm.RootMembers.Single(m => m.Name == "Speed").EditableStartValue = "42";
+        vm.Tree.RootMembers.Single(m => m.Name == "Enable").EditableStartValue = "false";
+        vm.Tree.RootMembers.Single(m => m.Name == "Speed").EditableStartValue = "42";
 
         vm.Pending.PendingInlineEditCount.Should().Be(2);
         vm.ApplyCommand.CanExecute(null).Should().BeFalse(
@@ -263,8 +263,8 @@ public class BulkChangeViewModelTests : IDisposable
 
         var vm = new BulkChangeViewModel(db, xml, analyzer, bulkService, usageTracker, configLoader);
 
-        vm.RootMembers.Single(m => m.Name == "Enable").EditableStartValue = "false";
-        vm.RootMembers.Single(m => m.Name == "Speed").EditableStartValue = "42";
+        vm.Tree.RootMembers.Single(m => m.Name == "Enable").EditableStartValue = "false";
+        vm.Tree.RootMembers.Single(m => m.Name == "Speed").EditableStartValue = "42";
 
         vm.ApplyCommand.CanExecute(null).Should().BeTrue(
             "two pending edits fit under remaining=10");
@@ -303,8 +303,8 @@ public class BulkChangeViewModelTests : IDisposable
         license.IsProActive.Returns(true);
         var vm = CreateViewModelWithUsage(new UsageStatus(150, 200), license);
 
-        vm.RootMembers.Single(m => m.Name == "Enable").EditableStartValue = "false";
-        vm.RootMembers.Single(m => m.Name == "Speed").EditableStartValue = "42";
+        vm.Tree.RootMembers.Single(m => m.Name == "Enable").EditableStartValue = "false";
+        vm.Tree.RootMembers.Single(m => m.Name == "Speed").EditableStartValue = "42";
 
         vm.ApplyTooltip.Should().NotContain(
             "remaining today",
@@ -331,7 +331,7 @@ public class BulkChangeViewModelTests : IDisposable
     public void ApplyTooltip_SingleEditWithHeadroom_OmitsCostLine()
     {
         var vm = CreateViewModelWithUsage(new UsageStatus(0, 200)); // 200 remaining
-        vm.RootMembers.Single(m => m.Name == "Enable").EditableStartValue = "false";
+        vm.Tree.RootMembers.Single(m => m.Name == "Enable").EditableStartValue = "false";
 
         vm.Pending.PendingInlineEditCount.Should().Be(1);
         vm.ApplyTooltip.Should().NotContain("remaining today",
@@ -368,8 +368,8 @@ public class BulkChangeViewModelTests : IDisposable
         WithEnglishUICulture(() =>
         {
             var vm = CreateViewModelWithUsage(new UsageStatus(0, 200));
-            vm.RootMembers.Single(m => m.Name == "Enable").EditableStartValue = "false";
-            vm.RootMembers.Single(m => m.Name == "Speed").EditableStartValue = "42";
+            vm.Tree.RootMembers.Single(m => m.Name == "Enable").EditableStartValue = "false";
+            vm.Tree.RootMembers.Single(m => m.Name == "Speed").EditableStartValue = "42";
 
             vm.Pending.PendingInlineEditCount.Should().Be(2);
             vm.ApplyTooltip.Should()
@@ -390,7 +390,7 @@ public class BulkChangeViewModelTests : IDisposable
         WithEnglishUICulture(() =>
         {
             var vm = CreateViewModelWithUsage(new UsageStatus(170, 200)); // 30 remaining
-            vm.RootMembers.Single(m => m.Name == "Enable").EditableStartValue = "false";
+            vm.Tree.RootMembers.Single(m => m.Name == "Enable").EditableStartValue = "false";
 
             vm.Pending.PendingInlineEditCount.Should().Be(1);
             vm.ApplyTooltip.Should()
@@ -415,8 +415,8 @@ public class BulkChangeViewModelTests : IDisposable
         ((INotifyPropertyChanged)vm).PropertyChanged += (_, e) => changedProps.Add(e.PropertyName);
 
         // Stage two edits — both transitions (0 → 1 and 1 → 2) should re-fire ApplyTooltip.
-        vm.RootMembers.Single(m => m.Name == "Enable").EditableStartValue = "false";
-        vm.RootMembers.Single(m => m.Name == "Speed").EditableStartValue = "42";
+        vm.Tree.RootMembers.Single(m => m.Name == "Enable").EditableStartValue = "false";
+        vm.Tree.RootMembers.Single(m => m.Name == "Speed").EditableStartValue = "42";
 
         changedProps.Should().Contain(nameof(BulkChangeViewModel.ApplyTooltip),
             "the binding can't re-evaluate without this notification");
