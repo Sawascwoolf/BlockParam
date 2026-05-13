@@ -499,7 +499,7 @@ public class BulkChangeViewModelInvariantTests
         env.Vm.HasStashedDbs.Should().BeTrue("Keep moves pending edits into the stash");
         env.Vm.StashedDbs.Should().ContainSingle(s => s.DbName == "FlatDB",
             "anchor's pending edit must land in the stash dictionary, not be silently dropped");
-        env.Vm.PendingEdits.Should().BeEmpty(
+        env.Vm.Pending.PendingEdits.Should().BeEmpty(
             "removed DB's pending leaves must vacate the bound PendingEdits list");
         AssertInvariants(env.Vm);
     }

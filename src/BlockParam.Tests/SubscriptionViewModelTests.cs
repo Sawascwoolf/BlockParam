@@ -181,7 +181,9 @@ public class SubscriptionViewModelTests
         public void DeactivateKey() { }
         public void StartHeartbeat() { }
         public void StopHeartbeat() { }
-        public event EventHandler? LicenseStateChanged;
+        // Manual add/remove avoids CS0067 ("event never used") — the SUT
+        // subscribes via `+=` but never invokes; auto-impl flags as unused.
+        public event EventHandler? LicenseStateChanged { add { } remove { } }
         public void Dispose() { }
     }
 
