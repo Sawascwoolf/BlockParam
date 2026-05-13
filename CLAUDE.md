@@ -115,6 +115,29 @@ the debugging investment. Regenerate visual assets locally:
 - Screenshots: run the scripts in `assets/screenshots/scripts/` from the repo root.
 - Workflow video: use the `recreate-workflow-video` skill.
 
+### Checking CI status from Claude
+
+When verifying whether a CI run passed or failed:
+
+- **Use `mcp__github__pull_request_read` with `method: "get_check_runs"`.**
+  It returns the actual `conclusion` (`"success"` / `"failure"` /
+  `"skipped"` / `"cancelled"`) for each job.
+- **Do NOT trust `WebFetch` on `/actions` or `/actions/workflows/ci.yml`
+  pages to determine pass/fail.** The status icons are SVGs that don't
+  survive HTML→markdown conversion, so WebFetch reports things like
+  "no failure indicators visible" even when jobs are red. It's fine for
+  reading run numbers, durations, and titles — just not conclusions.
+- **`method: "get_status"` is the legacy commit-status API**, which
+  GitHub Actions doesn't populate. It will return
+  `state: "pending"`, `total_count: 0` even when check-runs have already
+  succeeded or failed. Don't rely on it.
+- For failure details (which step failed, error messages), `WebFetch`
+  on the specific job URL (`/actions/runs/<run_id>/job/<job_id>`) does
+  extract the log text and is reliable.
+- `[run-ci]` push triggers and `pull_request` triggers each produce
+  their own check-runs on the same SHA — expect to see duplicates after
+  opening a PR on a branch that was already CI'd via the marker.
+
 ## DevLauncher (UI Testing without TIA Portal)
 
 The project includes a standalone WPF launcher for testing the UI without TIA Portal:
