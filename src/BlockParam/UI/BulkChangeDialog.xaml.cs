@@ -40,7 +40,7 @@ public partial class BulkChangeDialog : Window
         DataContext = viewModel;
         viewModel.RequestClose += () => Close();
         viewModel.FlatListRefreshed += RehydrateManualSelection;
-        viewModel.PropertyChanged += OnViewModelPropertyChanged;
+        viewModel.Inspector.PropertyChanged += OnInspectorPropertyChanged;
         Closed += (_, _) => viewModel.Dispose();
 
         // Briefly set Topmost to appear above TIA Portal, then release
@@ -53,12 +53,12 @@ public partial class BulkChangeDialog : Window
         };
     }
 
-    private void OnViewModelPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    private void OnInspectorPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
-        if (e.PropertyName != nameof(BulkChangeViewModel.IsInspectorCollapsed)) return;
+        if (e.PropertyName != nameof(InspectorPanelsViewModel.IsInspectorCollapsed)) return;
         if (DataContext is not BulkChangeViewModel vm) return;
 
-        if (vm.IsInspectorCollapsed)
+        if (vm.Inspector.IsInspectorCollapsed)
         {
             // Save the user's last expanded width before collapsing.
             if (SidebarColumn.Width.IsAbsolute && SidebarColumn.Width.Value > CollapsedSidebarWidth)
@@ -1054,10 +1054,10 @@ public partial class BulkChangeDialog : Window
         // ExtentHeight — otherwise ScrollToVerticalOffset clamps short.
         switch (idx)
         {
-            case 0: vm.IsBulkEditExpanded = true; break;
-            case 1: vm.IsBulkPreviewExpanded = true; break;
-            case 2: vm.IsPendingExpanded = true; break;
-            case 3: vm.IsIssuesExpanded = true; break;
+            case 0: vm.Inspector.IsBulkEditExpanded = true; break;
+            case 1: vm.Inspector.IsBulkPreviewExpanded = true; break;
+            case 2: vm.Inspector.IsPendingExpanded = true; break;
+            case 3: vm.Inspector.IsIssuesExpanded = true; break;
         }
         UpdateLayout();
 

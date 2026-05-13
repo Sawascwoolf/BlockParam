@@ -128,30 +128,30 @@
                 <!-- Update-available badge (#61). Hidden until the async
                      check resolves with a newer release; clicking opens the
                      details popup with changelog + "Open download page". -->
-                <Button Content="{Binding UpdateBadgeText}" FontSize="10"
-                        Command="{Binding ShowUpdateDetailsCommand}"
-                        Visibility="{Binding HasUpdateAvailable, Converter={StaticResource BoolToVis}}"
+                <Button Content="{Binding Subscription.UpdateBadgeText}" FontSize="10"
+                        Command="{Binding Subscription.ShowUpdateDetailsCommand}"
+                        Visibility="{Binding Subscription.HasUpdateAvailable, Converter={StaticResource BoolToVis}}"
                         Background="#FFF4DA" BorderBrush="#E0A030" BorderThickness="1"
                         Foreground="#7A5200" Cursor="Hand" Padding="6,2"
                         VerticalAlignment="Center" Margin="0,0,12,0" FontWeight="SemiBold"
-                        ToolTip="{Binding UpdateBadgeTooltip}"/>
+                        ToolTip="{Binding Subscription.UpdateBadgeTooltip}"/>
                 <!-- License / usage summary — clickable to open the license dialog.
                      Single control replaces the old tier badge + separate Manage link. -->
-                <Button Content="{Binding UsageStatusText}" FontSize="10"
-                        Command="{Binding EnterLicenseKeyCommand}"
-                        Visibility="{Binding ShowLicenseKeyButton, Converter={StaticResource BoolToVis}}"
+                <Button Content="{Binding Subscription.UsageStatusText}" FontSize="10"
+                        Command="{Binding Subscription.EnterLicenseKeyCommand}"
+                        Visibility="{Binding Subscription.ShowLicenseKeyButton, Converter={StaticResource BoolToVis}}"
                         Background="Transparent" BorderThickness="0" Foreground="#666"
                         Cursor="Hand" Padding="0" VerticalAlignment="Center" Margin="0,0,12,0"
-                        ToolTip="{Binding LicenseKeyButtonText}"/>
+                        ToolTip="{Binding Subscription.LicenseKeyButtonText}"/>
                 <Button Content="{loc:Loc License_UpgradeToPro}" FontSize="10"
-                        Command="{Binding UpgradeToProCommand}"
-                        Visibility="{Binding IsLimitReached, Converter={StaticResource BoolToVis}}"
+                        Command="{Binding Subscription.UpgradeToProCommand}"
+                        Visibility="{Binding Subscription.IsLimitReached, Converter={StaticResource BoolToVis}}"
                         Background="#0078D7" Foreground="White" BorderThickness="0"
                         Cursor="Hand" Padding="8,3" Margin="0,0,12,0"
                         VerticalAlignment="Center" FontWeight="SemiBold"/>
                 <Button Content="{loc:Loc Dialog_Discard}" Command="{Binding DiscardPendingCommand}"
                         MinWidth="60" Height="26" Margin="0,0,4,0" Padding="8,0"
-                        Visibility="{Binding PendingStatusText, Converter={StaticResource NullToVis}}"/>
+                        Visibility="{Binding Pending.PendingStatusText, Converter={StaticResource NullToVis}}"/>
                 <Button x:Name="ApplyButton"
                         Content="{loc:Loc Dialog_Apply}" Command="{Binding ApplyCommand}"
                         MinWidth="70" Height="26" Margin="0,0,4,0" Padding="8,0"
@@ -165,9 +165,9 @@
                 <Button Content="{loc:Loc Dialog_Close}" Click="OnClose"
                         MinWidth="60" Height="26" Padding="8,0"/>
             </StackPanel>
-            <TextBlock Text="{Binding PendingStatusText}" FontSize="10"
+            <TextBlock Text="{Binding Pending.PendingStatusText}" FontSize="10"
                        Foreground="#B8860B" VerticalAlignment="Center"
-                       Visibility="{Binding PendingStatusText, Converter={StaticResource NullToVis}}"
+                       Visibility="{Binding Pending.PendingStatusText, Converter={StaticResource NullToVis}}"
                        Margin="0,0,8,0"/>
             <TextBlock Text="{Binding StatusText}" VerticalAlignment="Center"
                        Foreground="#333"/>
@@ -589,7 +589,7 @@
             <GridSplitter Grid.Column="1"
                           HorizontalAlignment="Stretch" VerticalAlignment="Stretch"
                           Background="#D6D9DE" ShowsPreview="False"
-                          Visibility="{Binding IsInspectorExpanded, Converter={StaticResource BoolToVis}}"/>
+                          Visibility="{Binding Inspector.IsInspectorExpanded, Converter={StaticResource BoolToVis}}"/>
 
             <!-- Right: Inspector sidebar -->
             <Border Grid.Column="2" BorderBrush="#B9BEC6" BorderThickness="1,1,0,1"
@@ -600,7 +600,7 @@
                             BorderBrush="#B9BEC6" BorderThickness="0,0,0,1" Height="26">
                         <DockPanel LastChildFill="True">
                             <Button DockPanel.Dock="Left"
-                                    Command="{Binding ToggleInspectorCommand}"
+                                    Command="{Binding Inspector.ToggleInspectorCommand}"
                                     Width="22" Height="24" Background="Transparent" BorderThickness="0"
                                     Cursor="Hand" Focusable="False"
                                     ToolTip="Collapse / expand inspector">
@@ -609,26 +609,26 @@
                                     <Path HorizontalAlignment="Center" VerticalAlignment="Center"
                                           Fill="#5b6471" Stretch="Uniform" Width="8" Height="8"
                                           Data="M 0,0 L 6,4 L 0,8 Z"
-                                          Visibility="{Binding IsInspectorExpanded, Converter={StaticResource BoolToVis}}"/>
+                                          Visibility="{Binding Inspector.IsInspectorExpanded, Converter={StaticResource BoolToVis}}"/>
                                     <!-- Collapsed: chevron points left (click to pull sidebar back / expand) -->
                                     <Path HorizontalAlignment="Center" VerticalAlignment="Center"
                                           Fill="#5b6471" Stretch="Uniform" Width="8" Height="8"
                                           Data="M 6,0 L 0,4 L 6,8 Z"
-                                          Visibility="{Binding IsInspectorExpanded, Converter={StaticResource BoolToVis}, ConverterParameter=Invert}"/>
+                                          Visibility="{Binding Inspector.IsInspectorExpanded, Converter={StaticResource BoolToVis}, ConverterParameter=Invert}"/>
                                 </Grid>
                             </Button>
                             <TextBlock Text="INSPECTOR" VerticalAlignment="Center"
                                        Margin="4,0,0,0" FontSize="10" FontWeight="Bold"
                                        Foreground="#1e2227"
-                                       Visibility="{Binding IsInspectorExpanded, Converter={StaticResource BoolToVis}}"/>
+                                       Visibility="{Binding Inspector.IsInspectorExpanded, Converter={StaticResource BoolToVis}}"/>
                         </DockPanel>
                     </Border>
 
                     <!-- Collapsed rail: vertical icon stack, clicking any icon expands inspector -->
                     <StackPanel DockPanel.Dock="Top" HorizontalAlignment="Center"
-                                Visibility="{Binding IsInspectorCollapsed, Converter={StaticResource BoolToVis}}">
+                                Visibility="{Binding Inspector.IsInspectorCollapsed, Converter={StaticResource BoolToVis}}">
                         <!-- Bulk edit -->
-                        <Button Command="{Binding ToggleInspectorCommand}"
+                        <Button Command="{Binding Inspector.ToggleInspectorCommand}"
                                 Width="26" Height="26" Margin="0,6,0,2"
                                 Background="Transparent" BorderThickness="0" Cursor="Hand"
                                 ToolTip="{loc:Loc Dialog_BulkEdit}">
@@ -638,7 +638,7 @@
                         </Button>
                         <!-- Bulk preview + count badge -->
                         <Grid Width="26" Height="26" Margin="0,2">
-                            <Button Command="{Binding ToggleInspectorCommand}"
+                            <Button Command="{Binding Inspector.ToggleInspectorCommand}"
                                     Background="Transparent" BorderThickness="0" Cursor="Hand"
                                     ToolTip="Bulk preview">
                                 <Viewbox Width="16" Height="16">
@@ -649,15 +649,15 @@
                                     HorizontalAlignment="Right" VerticalAlignment="Top"
                                     Padding="3,0" Margin="0,-2,-2,0"
                                     IsHitTestVisible="False"
-                                    Visibility="{Binding HasBulkPreview, Converter={StaticResource BoolToVis}}">
-                                <TextBlock Text="{Binding BulkPreviewCount}" FontSize="8"
+                                    Visibility="{Binding BulkPreview.HasEntries, Converter={StaticResource BoolToVis}}">
+                                <TextBlock Text="{Binding BulkPreview.Count}" FontSize="8"
                                            FontWeight="Bold" Foreground="White"
                                            HorizontalAlignment="Center" VerticalAlignment="Center"/>
                             </Border>
                         </Grid>
                         <!-- Pending edits + count badge -->
                         <Grid Width="26" Height="26" Margin="0,2">
-                            <Button Command="{Binding ToggleInspectorCommand}"
+                            <Button Command="{Binding Inspector.ToggleInspectorCommand}"
                                     Background="Transparent" BorderThickness="0" Cursor="Hand"
                                     ToolTip="Pending edits">
                                 <Viewbox Width="16" Height="16">
@@ -668,15 +668,15 @@
                                     HorizontalAlignment="Right" VerticalAlignment="Top"
                                     Padding="3,0" Margin="0,-2,-2,0"
                                     IsHitTestVisible="False"
-                                    Visibility="{Binding HasPendingEdits, Converter={StaticResource BoolToVis}}">
-                                <TextBlock Text="{Binding PendingInlineEditCount}" FontSize="8"
+                                    Visibility="{Binding Pending.HasPendingEdits, Converter={StaticResource BoolToVis}}">
+                                <TextBlock Text="{Binding Pending.PendingInlineEditCount}" FontSize="8"
                                            FontWeight="Bold" Foreground="White"
                                            HorizontalAlignment="Center" VerticalAlignment="Center"/>
                             </Border>
                         </Grid>
                         <!-- Issues + count badge (#26) -->
                         <Grid Width="26" Height="26" Margin="0,2,0,6">
-                            <Button Command="{Binding ToggleInspectorCommand}"
+                            <Button Command="{Binding Inspector.ToggleInspectorCommand}"
                                     Background="Transparent" BorderThickness="0" Cursor="Hand"
                                     ToolTip="{loc:Loc Issues_Tooltip}">
                                 <Viewbox Width="16" Height="16">
@@ -688,8 +688,8 @@
                                     HorizontalAlignment="Right" VerticalAlignment="Top"
                                     Padding="3,0" Margin="0,-2,-2,0"
                                     IsHitTestVisible="False"
-                                    Visibility="{Binding HasExistingIssues, Converter={StaticResource BoolToVis}}">
-                                <TextBlock Text="{Binding ExistingIssuesCount}" FontSize="8"
+                                    Visibility="{Binding Pending.HasExistingIssues, Converter={StaticResource BoolToVis}}">
+                                <TextBlock Text="{Binding Pending.ExistingIssuesCount}" FontSize="8"
                                            FontWeight="Bold" Foreground="White"
                                            HorizontalAlignment="Center" VerticalAlignment="Center"/>
                             </Border>
@@ -705,7 +705,7 @@
                          scroll position. See OnInspectorScrollChanged in the .xaml.cs. -->
                     <ScrollViewer x:Name="InspectorScroll"
                                   VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
-                                  Visibility="{Binding IsInspectorExpanded, Converter={StaticResource BoolToVis}}">
+                                  Visibility="{Binding Inspector.IsInspectorExpanded, Converter={StaticResource BoolToVis}}">
                         <StackPanel x:Name="InspectorContent">
                             <!-- =========================================================
                                  Section 1 — BULK EDIT (input)
@@ -735,16 +735,16 @@
                                         </Border.RenderTransform>
                                         <DockPanel Margin="0,0,0,0">
                                             <Button DockPanel.Dock="Left"
-                                                    Command="{Binding ToggleBulkEditCommand}"
+                                                    Command="{Binding Inspector.ToggleBulkEditCommand}"
                                                     Background="Transparent" BorderThickness="0"
                                                     Width="18" Height="24" Cursor="Hand" Focusable="False">
                                                 <Grid Width="10" Height="10">
                                                     <TextBlock Text="&#x25BC;" FontSize="9" Foreground="#5b6471"
                                                                HorizontalAlignment="Center" VerticalAlignment="Center"
-                                                               Visibility="{Binding IsBulkEditExpanded, Converter={StaticResource BoolToVis}}"/>
+                                                               Visibility="{Binding Inspector.IsBulkEditExpanded, Converter={StaticResource BoolToVis}}"/>
                                                     <TextBlock Text="&#x25B6;" FontSize="9" Foreground="#5b6471"
                                                                HorizontalAlignment="Center" VerticalAlignment="Center"
-                                                               Visibility="{Binding IsBulkEditExpanded, Converter={StaticResource BoolToVis}, ConverterParameter=Invert}"/>
+                                                               Visibility="{Binding Inspector.IsBulkEditExpanded, Converter={StaticResource BoolToVis}, ConverterParameter=Invert}"/>
                                                 </Grid>
                                             </Button>
                                             <!-- Section icon: pencil = edit input -->
@@ -760,7 +760,7 @@
 
                                     <!-- Body -->
                                     <StackPanel Background="White" Margin="0"
-                                                Visibility="{Binding IsBulkEditExpanded, Converter={StaticResource BoolToVis}}">
+                                                Visibility="{Binding Inspector.IsBulkEditExpanded, Converter={StaticResource BoolToVis}}">
                                         <!-- Target field (readonly display) -->
                                         <StackPanel Margin="12,10,12,0">
                                             <TextBlock Text="TARGET FIELD" FontSize="9.5" FontWeight="Bold"
@@ -847,8 +847,8 @@
                                                  below the TextBox inside the sidebar column. -->
                                             <Border Background="White" BorderBrush="#CCC" BorderThickness="1"
                                                     MaxHeight="250" Margin="0,-1,0,0"
-                                                    Visibility="{Binding HasFilteredSuggestions, Converter={StaticResource BoolToVis}}">
-                                                <ListBox ItemsSource="{Binding FilteredSuggestions}"
+                                                    Visibility="{Binding Autocomplete.HasFilteredSuggestions, Converter={StaticResource BoolToVis}}">
+                                                <ListBox ItemsSource="{Binding Autocomplete.FilteredSuggestions}"
                                                          MaxHeight="250" BorderThickness="0"
                                                          VirtualizingStackPanel.IsVirtualizing="True"
                                                          ItemContainerStyle="{StaticResource SuggestionItemStyle}"
@@ -908,8 +908,8 @@
                                         <!-- Overlap warning: bulk will overwrite existing pending edits -->
                                         <Border Margin="12,0,12,12" Padding="6,4"
                                                 Background="#fffbef" BorderBrush="#e0a93a" BorderThickness="1"
-                                                Visibility="{Binding HasBulkPreviewConflict, Converter={StaticResource BoolToVis}}">
-                                            <TextBlock Text="{Binding BulkPreviewConflictWarning}"
+                                                Visibility="{Binding BulkPreview.HasConflict, Converter={StaticResource BoolToVis}}">
+                                            <TextBlock Text="{Binding BulkPreview.ConflictWarning}"
                                                        FontSize="10.5" Foreground="#6b4a0a"
                                                        TextWrapping="Wrap"/>
                                         </Border>
@@ -918,7 +918,7 @@
 
                                 <!-- Limit-reached overlay over Section 1 only -->
                                 <Border Background="#E6FFFFFF"
-                                        Visibility="{Binding IsLimitReached, Converter={StaticResource BoolToVis}}">
+                                        Visibility="{Binding Subscription.IsLimitReached, Converter={StaticResource BoolToVis}}">
                                     <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center"
                                                 Margin="14,10">
                                         <TextBlock Text="{loc:Loc Dialog_LimitReachedOverlay_Title}"
@@ -929,13 +929,13 @@
                                                    HorizontalAlignment="Center" TextWrapping="Wrap"
                                                    TextAlignment="Center"/>
                                         <Button Content="{loc:Loc License_UpgradeToPro}" FontSize="11"
-                                                Command="{Binding UpgradeToProCommand}"
+                                                Command="{Binding Subscription.UpgradeToProCommand}"
                                                 Background="#0078D7" Foreground="White" BorderThickness="0"
                                                 Cursor="Hand" Padding="14,6" FontWeight="SemiBold"
                                                 Margin="0,0,0,6"/>
-                                        <Button Content="{Binding LicenseKeyButtonText}" FontSize="11"
-                                                Command="{Binding EnterLicenseKeyCommand}"
-                                                Visibility="{Binding ShowLicenseKeyButton, Converter={StaticResource BoolToVis}}"
+                                        <Button Content="{Binding Subscription.LicenseKeyButtonText}" FontSize="11"
+                                                Command="{Binding Subscription.EnterLicenseKeyCommand}"
+                                                Visibility="{Binding Subscription.ShowLicenseKeyButton, Converter={StaticResource BoolToVis}}"
                                                 Background="Transparent" BorderThickness="1"
                                                 BorderBrush="#0078D7" Foreground="#0078D7"
                                                 Cursor="Hand" Padding="14,5"/>
@@ -956,16 +956,16 @@
                                 </Border.RenderTransform>
                                 <DockPanel>
                                     <Button DockPanel.Dock="Left"
-                                            Command="{Binding ToggleBulkPreviewCommand}"
+                                            Command="{Binding Inspector.ToggleBulkPreviewCommand}"
                                             Background="Transparent" BorderThickness="0"
                                             Width="18" Height="24" Cursor="Hand" Focusable="False">
                                         <Grid Width="10" Height="10">
                                             <TextBlock Text="&#x25BC;" FontSize="9" Foreground="#5b6471"
                                                        HorizontalAlignment="Center" VerticalAlignment="Center"
-                                                       Visibility="{Binding IsBulkPreviewExpanded, Converter={StaticResource BoolToVis}}"/>
+                                                       Visibility="{Binding Inspector.IsBulkPreviewExpanded, Converter={StaticResource BoolToVis}}"/>
                                             <TextBlock Text="&#x25B6;" FontSize="9" Foreground="#5b6471"
                                                        HorizontalAlignment="Center" VerticalAlignment="Center"
-                                                       Visibility="{Binding IsBulkPreviewExpanded, Converter={StaticResource BoolToVis}, ConverterParameter=Invert}"/>
+                                                       Visibility="{Binding Inspector.IsBulkPreviewExpanded, Converter={StaticResource BoolToVis}, ConverterParameter=Invert}"/>
                                         </Grid>
                                     </Button>
                                     <!-- Section icon: eye = preview -->
@@ -980,12 +980,12 @@
                                     <Border DockPanel.Dock="Left" Margin="6,0,0,0" Padding="5,0"
                                             Background="#1f6feb" CornerRadius="8"
                                             VerticalAlignment="Center"
-                                            Visibility="{Binding HasBulkPreview, Converter={StaticResource BoolToVis}}">
-                                        <TextBlock Text="{Binding BulkPreviewCount}"
+                                            Visibility="{Binding BulkPreview.HasEntries, Converter={StaticResource BoolToVis}}">
+                                        <TextBlock Text="{Binding BulkPreview.Count}"
                                                    FontSize="10" FontWeight="Bold" Foreground="White"/>
                                     </Border>
                                     <TextBlock DockPanel.Dock="Right" HorizontalAlignment="Right"
-                                               Text="{Binding BulkPreviewSummary}"
+                                               Text="{Binding BulkPreview.Summary}"
                                                FontSize="10" Foreground="#5b6471"
                                                FontFamily="Consolas,Courier New"
                                                VerticalAlignment="Center" Margin="0,0,10,0"/>
@@ -999,8 +999,8 @@
                                         <Style.Triggers>
                                             <MultiDataTrigger>
                                                 <MultiDataTrigger.Conditions>
-                                                    <Condition Binding="{Binding IsBulkPreviewExpanded}" Value="True"/>
-                                                    <Condition Binding="{Binding HasBulkPreview}" Value="False"/>
+                                                    <Condition Binding="{Binding Inspector.IsBulkPreviewExpanded}" Value="True"/>
+                                                    <Condition Binding="{Binding BulkPreview.HasEntries}" Value="False"/>
                                                 </MultiDataTrigger.Conditions>
                                                 <Setter Property="Visibility" Value="Visible"/>
                                             </MultiDataTrigger>
@@ -1012,7 +1012,7 @@
                                            TextWrapping="Wrap"/>
                             </Border>
                             <!-- List -->
-                            <ItemsControl ItemsSource="{Binding BulkPreview}"
+                            <ItemsControl ItemsSource="{Binding BulkPreview.Entries}"
                                           Background="White">
                                 <ItemsControl.Style>
                                     <Style TargetType="ItemsControl">
@@ -1020,8 +1020,8 @@
                                         <Style.Triggers>
                                             <MultiDataTrigger>
                                                 <MultiDataTrigger.Conditions>
-                                                    <Condition Binding="{Binding IsBulkPreviewExpanded}" Value="True"/>
-                                                    <Condition Binding="{Binding HasBulkPreview}" Value="True"/>
+                                                    <Condition Binding="{Binding Inspector.IsBulkPreviewExpanded}" Value="True"/>
+                                                    <Condition Binding="{Binding BulkPreview.HasEntries}" Value="True"/>
                                                 </MultiDataTrigger.Conditions>
                                                 <Setter Property="Visibility" Value="Visible"/>
                                             </MultiDataTrigger>
@@ -1096,16 +1096,16 @@
                                 </Border.RenderTransform>
                                 <DockPanel>
                                     <Button DockPanel.Dock="Left"
-                                            Command="{Binding TogglePendingCommand}"
+                                            Command="{Binding Inspector.TogglePendingCommand}"
                                             Background="Transparent" BorderThickness="0"
                                             Width="18" Height="24" Cursor="Hand" Focusable="False">
                                         <Grid Width="10" Height="10">
                                             <TextBlock Text="&#x25BC;" FontSize="9" Foreground="#5b6471"
                                                        HorizontalAlignment="Center" VerticalAlignment="Center"
-                                                       Visibility="{Binding IsPendingExpanded, Converter={StaticResource BoolToVis}}"/>
+                                                       Visibility="{Binding Inspector.IsPendingExpanded, Converter={StaticResource BoolToVis}}"/>
                                             <TextBlock Text="&#x25B6;" FontSize="9" Foreground="#5b6471"
                                                        HorizontalAlignment="Center" VerticalAlignment="Center"
-                                                       Visibility="{Binding IsPendingExpanded, Converter={StaticResource BoolToVis}, ConverterParameter=Invert}"/>
+                                                       Visibility="{Binding Inspector.IsPendingExpanded, Converter={StaticResource BoolToVis}, ConverterParameter=Invert}"/>
                                         </Grid>
                                     </Button>
                                     <!-- Section icon: clock = pending/waiting -->
@@ -1120,8 +1120,8 @@
                                     <Border DockPanel.Dock="Left" Margin="6,0,0,0" Padding="5,0"
                                             Background="#e0a93a" CornerRadius="8"
                                             VerticalAlignment="Center"
-                                            Visibility="{Binding HasPendingEdits, Converter={StaticResource BoolToVis}}">
-                                        <TextBlock Text="{Binding PendingInlineEditCount}"
+                                            Visibility="{Binding Pending.HasPendingEdits, Converter={StaticResource BoolToVis}}">
+                                        <TextBlock Text="{Binding Pending.PendingInlineEditCount}"
                                                    FontSize="10" FontWeight="Bold" Foreground="White"/>
                                     </Border>
                                     <!-- Invalid-count badge (#11): appears when any pending entry fails validation. -->
@@ -1129,8 +1129,8 @@
                                             Background="#D32F2F" CornerRadius="8"
                                             VerticalAlignment="Center"
                                             ToolTip="{loc:Loc Pending_InvalidBadgeTooltip}"
-                                            Visibility="{Binding HasInvalidPending, Converter={StaticResource BoolToVis}}">
-                                        <TextBlock Text="{Binding InvalidPendingBadge}"
+                                            Visibility="{Binding Pending.HasInvalidPending, Converter={StaticResource BoolToVis}}">
+                                        <TextBlock Text="{Binding Pending.InvalidPendingBadge}"
                                                    FontSize="10" FontWeight="Bold" Foreground="White"/>
                                     </Border>
                                     <Button DockPanel.Dock="Right" HorizontalAlignment="Right"
@@ -1140,7 +1140,7 @@
                                             Foreground="#0b4fbf" Cursor="Hand"
                                             FontSize="10" FontWeight="SemiBold"
                                             Padding="4,0" Margin="0,0,8,0"
-                                            Visibility="{Binding HasPendingEdits, Converter={StaticResource BoolToVis}}"/>
+                                            Visibility="{Binding Pending.HasPendingEdits, Converter={StaticResource BoolToVis}}"/>
                                 </DockPanel>
                             </Border>
                             <!-- Empty state -->
@@ -1151,8 +1151,8 @@
                                         <Style.Triggers>
                                             <MultiDataTrigger>
                                                 <MultiDataTrigger.Conditions>
-                                                    <Condition Binding="{Binding IsPendingExpanded}" Value="True"/>
-                                                    <Condition Binding="{Binding HasPendingEdits}" Value="False"/>
+                                                    <Condition Binding="{Binding Inspector.IsPendingExpanded}" Value="True"/>
+                                                    <Condition Binding="{Binding Pending.HasPendingEdits}" Value="False"/>
                                                 </MultiDataTrigger.Conditions>
                                                 <Setter Property="Visibility" Value="Visible"/>
                                             </MultiDataTrigger>
@@ -1165,7 +1165,7 @@
                             </Border>
                             <!-- List -->
                             <ItemsControl x:Name="PendingEditsList"
-                                          ItemsSource="{Binding PendingEdits}"
+                                          ItemsSource="{Binding Pending.PendingEdits}"
                                           Background="White">
                                 <ItemsControl.Style>
                                     <Style TargetType="ItemsControl">
@@ -1173,8 +1173,8 @@
                                         <Style.Triggers>
                                             <MultiDataTrigger>
                                                 <MultiDataTrigger.Conditions>
-                                                    <Condition Binding="{Binding IsPendingExpanded}" Value="True"/>
-                                                    <Condition Binding="{Binding HasPendingEdits}" Value="True"/>
+                                                    <Condition Binding="{Binding Inspector.IsPendingExpanded}" Value="True"/>
+                                                    <Condition Binding="{Binding Pending.HasPendingEdits}" Value="True"/>
                                                 </MultiDataTrigger.Conditions>
                                                 <Setter Property="Visibility" Value="Visible"/>
                                             </MultiDataTrigger>
@@ -1425,16 +1425,16 @@
                                 </Border.RenderTransform>
                                 <DockPanel ToolTip="{loc:Loc Issues_Tooltip}">
                                     <Button DockPanel.Dock="Left"
-                                            Command="{Binding ToggleIssuesCommand}"
+                                            Command="{Binding Inspector.ToggleIssuesCommand}"
                                             Background="Transparent" BorderThickness="0"
                                             Width="18" Height="24" Cursor="Hand" Focusable="False">
                                         <Grid Width="10" Height="10">
                                             <TextBlock Text="&#x25BC;" FontSize="9" Foreground="#5b6471"
                                                        HorizontalAlignment="Center" VerticalAlignment="Center"
-                                                       Visibility="{Binding IsIssuesExpanded, Converter={StaticResource BoolToVis}}"/>
+                                                       Visibility="{Binding Inspector.IsIssuesExpanded, Converter={StaticResource BoolToVis}}"/>
                                             <TextBlock Text="&#x25B6;" FontSize="9" Foreground="#5b6471"
                                                        HorizontalAlignment="Center" VerticalAlignment="Center"
-                                                       Visibility="{Binding IsIssuesExpanded, Converter={StaticResource BoolToVis}, ConverterParameter=Invert}"/>
+                                                       Visibility="{Binding Inspector.IsIssuesExpanded, Converter={StaticResource BoolToVis}, ConverterParameter=Invert}"/>
                                         </Grid>
                                     </Button>
                                     <!-- Section icon: triangle/exclamation = warning finding -->
@@ -1450,8 +1450,8 @@
                                     <Border DockPanel.Dock="Left" Margin="6,0,0,0" Padding="5,0"
                                             Background="#9C27B0" CornerRadius="8"
                                             VerticalAlignment="Center"
-                                            Visibility="{Binding HasExistingIssues, Converter={StaticResource BoolToVis}}">
-                                        <TextBlock Text="{Binding ExistingIssuesCount}"
+                                            Visibility="{Binding Pending.HasExistingIssues, Converter={StaticResource BoolToVis}}">
+                                        <TextBlock Text="{Binding Pending.ExistingIssuesCount}"
                                                    FontSize="10" FontWeight="Bold" Foreground="White"/>
                                     </Border>
                                     <!-- Filler to consume remaining space (avoids the icon's tooltip
@@ -1467,8 +1467,8 @@
                                         <Style.Triggers>
                                             <MultiDataTrigger>
                                                 <MultiDataTrigger.Conditions>
-                                                    <Condition Binding="{Binding IsIssuesExpanded}" Value="True"/>
-                                                    <Condition Binding="{Binding HasExistingIssues}" Value="False"/>
+                                                    <Condition Binding="{Binding Inspector.IsIssuesExpanded}" Value="True"/>
+                                                    <Condition Binding="{Binding Pending.HasExistingIssues}" Value="False"/>
                                                 </MultiDataTrigger.Conditions>
                                                 <Setter Property="Visibility" Value="Visible"/>
                                             </MultiDataTrigger>
@@ -1481,7 +1481,7 @@
                             </Border>
                             <!-- List -->
                             <ItemsControl x:Name="ExistingIssuesList"
-                                          ItemsSource="{Binding ExistingIssues}"
+                                          ItemsSource="{Binding Pending.ExistingIssues}"
                                           Background="White">
                                 <ItemsControl.Style>
                                     <Style TargetType="ItemsControl">
@@ -1489,8 +1489,8 @@
                                         <Style.Triggers>
                                             <MultiDataTrigger>
                                                 <MultiDataTrigger.Conditions>
-                                                    <Condition Binding="{Binding IsIssuesExpanded}" Value="True"/>
-                                                    <Condition Binding="{Binding HasExistingIssues}" Value="True"/>
+                                                    <Condition Binding="{Binding Inspector.IsIssuesExpanded}" Value="True"/>
+                                                    <Condition Binding="{Binding Pending.HasExistingIssues}" Value="True"/>
                                                 </MultiDataTrigger.Conditions>
                                                 <Setter Property="Visibility" Value="Visible"/>
                                             </MultiDataTrigger>

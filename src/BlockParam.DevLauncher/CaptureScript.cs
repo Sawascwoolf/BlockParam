@@ -354,18 +354,18 @@ public static class SceneApplier
 
         if (scene.RevertPending != null)
         {
-            var entry = vm.PendingEdits.FirstOrDefault(p => p.Node?.Path == scene.RevertPending);
+            var entry = vm.Pending.PendingEdits.FirstOrDefault(p => p.Node?.Path == scene.RevertPending);
             if (entry == null)
                 Serilog.Log.Warning("Scene {Id}: revertPending path not found in queue: {Path}. Queue: {Paths}",
                     scene.Id, scene.RevertPending,
-                    string.Join(", ", vm.PendingEdits.Select(p => p.Node?.Path ?? "?")));
+                    string.Join(", ", vm.Pending.PendingEdits.Select(p => p.Node?.Path ?? "?")));
             else
                 vm.UndoPendingEdit(entry);
         }
 
         if (scene.DiscardAllPending == true)
         {
-            if (vm.HasPendingEdits)
+            if (vm.Pending.HasPendingEdits)
                 vm.DiscardPendingSilent();
             else
                 Serilog.Log.Warning("Scene {Id}: discardAllPending requested but queue is empty", scene.Id);
@@ -382,7 +382,7 @@ public static class SceneApplier
         if (scene.Sidebar != null)
         {
             if (scene.Sidebar.Collapsed.HasValue)
-                vm.IsInspectorCollapsed = scene.Sidebar.Collapsed.Value;
+                vm.Inspector.IsInspectorCollapsed = scene.Sidebar.Collapsed.Value;
         }
 
         if (scene.InlineEdit != null)
@@ -439,7 +439,7 @@ public static class SceneApplier
         BulkChangeViewModel vm, BulkChangeDialog dialog, string displayName)
     {
         bool matched = false;
-        foreach (var s in vm.FilteredSuggestions)
+        foreach (var s in vm.Autocomplete.FilteredSuggestions)
         {
             if (s.DisplayName == displayName) { s.IsHoverPreview = true; matched = true; }
         }
@@ -460,7 +460,7 @@ public static class SceneApplier
 
     private static void ClearHoverPreview(BulkChangeViewModel vm, BulkChangeDialog dialog)
     {
-        foreach (var s in vm.FilteredSuggestions) s.IsHoverPreview = false;
+        foreach (var s in vm.Autocomplete.FilteredSuggestions) s.IsHoverPreview = false;
         if (dialog.InlineOverlayList.ItemsSource is System.Collections.IEnumerable items)
             foreach (var o in items)
                 if (o is AutocompleteSuggestion s) s.IsHoverPreview = false;
@@ -506,9 +506,9 @@ public static class SceneApplier
     {
         // Clear any pending edits staged by a prior scene so a clean run
         // doesn't inherit them. DiscardPendingSilent skips the confirm dialog.
-        if (vm.HasPendingEdits)
+        if (vm.Pending.HasPendingEdits)
             vm.DiscardPendingSilent();
-        vm.IsInspectorCollapsed = false;
+        vm.Inspector.IsInspectorCollapsed = false;
         foreach (var root in vm.RootMembers)
             CollapseRecursive(root);
         vm.SelectedFlatMember = null;

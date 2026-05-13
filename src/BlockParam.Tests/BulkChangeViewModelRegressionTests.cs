@@ -251,7 +251,7 @@ public class BulkChangeViewModelRegressionTests : IDisposable
         vm.NewValue = "";
         vm.FlushPendingHighlighting();
 
-        vm.BulkPreview.Should().BeEmpty(
+        vm.BulkPreview.Entries.Should().BeEmpty(
             "empty NewValue must produce no BulkPreview entries (hasInput guard at ComputeBulkPreview)");
     }
 
@@ -281,14 +281,14 @@ public class BulkChangeViewModelRegressionTests : IDisposable
         vm.NewValue = "42";
         vm.FlushPendingHighlighting();
 
-        vm.BulkPreview.Count.Should().Be(0,
+        vm.BulkPreview.Entries.Count.Should().Be(0,
             "all 4 leaves already hold the target value — skip-already-matching must produce 0 entries");
 
         // Now a different value — all 4 differ
         vm.NewValue = "99";
         vm.FlushPendingHighlighting();
 
-        vm.BulkPreview.Count.Should().Be(4,
+        vm.BulkPreview.Entries.Count.Should().Be(4,
             "all 4 leaves differ from target '99' — all must appear in BulkPreview");
     }
 
@@ -324,10 +324,10 @@ public class BulkChangeViewModelRegressionTests : IDisposable
         vm.NewValue = "99";
         vm.FlushPendingHighlighting();
 
-        vm.BulkPreviewConflictCount.Should().Be(1,
+        vm.BulkPreview.ConflictCount.Should().Be(1,
             "one leaf has a pending inline edit that the bulk Set would overwrite");
-        vm.HasBulkPreviewConflict.Should().BeTrue();
-        vm.BulkPreviewConflictWarning.Should().Contain("1 overlap",
+        vm.BulkPreview.HasConflict.Should().BeTrue();
+        vm.BulkPreview.ConflictWarning.Should().Contain("1 overlap",
             "warning must mention the count of overlapping edits");
     }
 
@@ -354,8 +354,8 @@ public class BulkChangeViewModelRegressionTests : IDisposable
         vm.NewValue = "85";
         vm.FlushPendingHighlighting();
 
-        vm.BulkPreview.Should().HaveCount(4, "all 4 differ from 85");
-        vm.BulkPreviewSummary.Should().Be("42 ⇢ 85",
+        vm.BulkPreview.Entries.Should().HaveCount(4, "all 4 differ from 85");
+        vm.BulkPreview.Summary.Should().Be("42 ⇢ 85",
             "homogeneous originals should produce 'orig ⇢ new' format");
 
         // Make one leaf heterogeneous by staging a pending edit
@@ -391,7 +391,7 @@ public class BulkChangeViewModelRegressionTests : IDisposable
 
         // Speed.StartValue="1500", Enable.StartValue="true" — different originals
         vm2.BulkPreview.Count.Should().BeGreaterThan(0, "both differ from 'ON'");
-        vm2.BulkPreviewSummary.Should().MatchRegex(@"^\d+ targets$",
+        vm2.BulkPreview.Summary.Should().MatchRegex(@"^\d+ targets$",
             "heterogeneous originals (Speed='1500' vs Enable='true') must use '{N} targets' format");
 
         vm2.Dispose();
@@ -645,12 +645,12 @@ public class BulkChangeViewModelRegressionTests : IDisposable
 
         // Confirm starting state: ShowConstants=false → Suggestions empty
         vm.ShowConstants.Should().BeFalse("no rule forces ShowConstants on");
-        vm.Suggestions.Should().BeEmpty("ShowConstants is off — no suggestions loaded yet");
+        vm.Autocomplete.Suggestions.Should().BeEmpty("ShowConstants is off — no suggestions loaded yet");
 
         // Toggle on → Suggestions must populate from the tag-table cache
         vm.ShowConstants = true;
 
-        vm.Suggestions.Should().NotBeEmpty(
+        vm.Autocomplete.Suggestions.Should().NotBeEmpty(
             "ShowConstants=true must load suggestions from the tag-table cache");
     }
 
@@ -700,22 +700,22 @@ public class BulkChangeViewModelRegressionTests : IDisposable
 
         // Force ShowConstants on to populate _suggestions
         vm.ShowConstants = true;
-        vm.Suggestions.Should().HaveCount(10, "all 10 entries loaded");
-        vm.FilteredSuggestions.Should().BeEmpty("not yet toggled open");
+        vm.Autocomplete.Suggestions.Should().HaveCount(10, "all 10 entries loaded");
+        vm.Autocomplete.FilteredSuggestions.Should().BeEmpty("not yet toggled open");
 
         // Set NewValue without flushing the debounce — FilteredSuggestions stays empty
         // (we want to test the toggle path, not the auto-filter path)
         vm.NewValue = "ON";
         // Don't flush: we want to test ToggleAllSuggestions when the list starts empty.
 
-        vm.FilteredSuggestions.Should().BeEmpty("debounce not yet flushed — list still empty");
+        vm.Autocomplete.FilteredSuggestions.Should().BeEmpty("debounce not yet flushed — list still empty");
 
         // First toggle: closed → open (FilteredSuggestions filtered by NewValue="ON")
         vm.ToggleAllSuggestions();
 
-        vm.FilteredSuggestions.Should().NotBeEmpty("toggle-open must populate FilteredSuggestions");
+        vm.Autocomplete.FilteredSuggestions.Should().NotBeEmpty("toggle-open must populate FilteredSuggestions");
         // Only VAL_ON_1 and VAL_ON_2 have "ON" in name — rest do not
-        vm.FilteredSuggestions.Should().AllSatisfy(s =>
+        vm.Autocomplete.FilteredSuggestions.Should().AllSatisfy(s =>
             (s.DisplayName.IndexOf("ON", StringComparison.OrdinalIgnoreCase) >= 0
              || s.Value.IndexOf("ON", StringComparison.OrdinalIgnoreCase) >= 0
              || (s.Comment?.IndexOf("ON", StringComparison.OrdinalIgnoreCase) ?? -1) >= 0)
@@ -724,7 +724,7 @@ public class BulkChangeViewModelRegressionTests : IDisposable
         // Second toggle: close → FilteredSuggestions clears
         vm.ToggleAllSuggestions();
 
-        vm.FilteredSuggestions.Should().BeEmpty("second toggle-call must close the list");
+        vm.Autocomplete.FilteredSuggestions.Should().BeEmpty("second toggle-call must close the list");
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -909,7 +909,7 @@ public class BulkChangeViewModelRegressionTests : IDisposable
         vm.SearchQuery = "Speed";    // schedules _searchDebounceTimer
         vm.NewValue = "42";          // schedules _valueDebounceTimer
 
-        var usageTextBefore = vm.UsageStatusText;
+        var usageTextBefore = vm.Subscription.UsageStatusText;
 
         // First Dispose
         var ex1 = Record.Exception(() => vm.Dispose());

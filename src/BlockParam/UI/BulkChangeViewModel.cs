@@ -1,6 +1,5 @@
 using System.Collections.ObjectModel;
 using System.Collections.Specialized;
-using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Threading;
@@ -59,12 +58,10 @@ namespace BlockParam.UI;
 /// </summary>
 public class BulkChangeViewModel : ViewModelBase, IDisposable
 {
-    private EventHandler? _licenseStateChangedHandler;
     private bool _disposed;
 
     private readonly HierarchyAnalyzer _analyzer;
     private readonly BulkChangeService _bulkChangeService;
-    private readonly IUsageTracker _usageTracker;
     private readonly ConfigLoader _configLoader;
     private readonly Func<string>? _onBackup;   // callback to create backup, returns backup path
     private readonly Action<string>? _onRestore; // callback to restore from backup path
@@ -164,9 +161,6 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     // current selection are skipped while this is true, so user-entered input
     // isn't clobbered by selection changes.
     private bool _newValueTouched;
-    private GlobSuggestionProvider? _suggestionProvider;
-    private IReadOnlyList<AutocompleteSuggestion> _suggestions = Array.Empty<AutocompleteSuggestion>();
-    private IReadOnlyList<AutocompleteSuggestion> _filteredSuggestions = Array.Empty<AutocompleteSuggestion>();
     private string _statusText = "";
     private string _validationError = "";
     private string _constraintInfo = "";
@@ -180,21 +174,11 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     private bool _constantsForced;
     private string _tagTableAge = "";
     private bool _isRefreshing;
-    private bool _suppressSuggestions;
     private bool _lastApplySucceeded;
     private bool _hasPendingChanges;
-    private bool _limitWarningShown;
-    private bool _isInspectorCollapsed;
-    private bool _isBulkEditExpanded = true;
-    private bool _isBulkPreviewExpanded = true;
-    private bool _isPendingExpanded = true;
-    private bool _isIssuesExpanded = true;
     private readonly IReadOnlyList<string> _projectLanguages;
     private readonly CommentLanguagePolicy _commentLanguagePolicy;
     private readonly Dispatcher _dispatcher;
-    private readonly ILicenseService? _licenseService;
-    private readonly IUpdateCheckService? _updateCheckService;
-    private UpdateInfo? _availableUpdate;
 
     public BulkChangeViewModel(
         DataBlockInfo dataBlockInfo,
@@ -233,7 +217,6 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             _activeDbs.AddRange(additionalActiveDbs);
         _analyzer = analyzer;
         _bulkChangeService = bulkChangeService;
-        _usageTracker = usageTracker;
         _configLoader = configLoader;
         _onBackup = onBackup;
         _onRestore = onRestore;
@@ -245,8 +228,12 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         _udtDir = udtDir;
         _udtResolver = udtResolver;
         _commentResolver = commentResolver;
-        _licenseService = licenseService;
-        _updateCheckService = updateCheckService;
+        Subscription = new SubscriptionViewModel(
+            usageTracker, licenseService, updateCheckService,
+            configLoader, _messageBox, _dispatcher);
+        // ApplyTooltip composes license + remaining-quota state, so re-raise
+        // it whenever Subscription publishes a tier / quota change.
+        Subscription.StateChanged += () => OnPropertyChanged(nameof(ApplyTooltip));
         _enumerateDataBlocks = enumerateDataBlocks;
         _switchToDataBlock = switchToDataBlock;
         _buildActiveDbForSummary = buildActiveDbForSummary;
@@ -264,6 +251,8 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         _autocompleteProvider = tagTableCache != null
             ? new AutocompleteProvider(configLoader, tagTableCache)
             : null;
+        // Autocomplete suggestion slice (#80 slice 3).
+        Autocomplete = new AutocompleteViewModel();
 
         UpdateTagTableAge();
 
@@ -281,9 +270,15 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
 
         InlineRuleExtractor.ApplyTo(configLoader.GetConfig(), dataBlockInfo);
 
-        BulkPreview = new ObservableCollection<BulkPreviewEntry>();
-        PendingEdits = new ObservableCollection<PendingEditEntry>();
-        ExistingIssues = new ObservableCollection<ExistingIssueEntry>();
+        // Bulk-preview collection slice (#80 slice 5). NewValue is host-owned;
+        // pass it via callback so the slice's Summary stays in sync without
+        // pulling NewValue into the slice's surface.
+        BulkPreview = new BulkPreviewViewModel(() => _newValue);
+        // Pending-edits + existing-issues collections slice (#80 slice 4).
+        // The underlying PendingEditStore stays on the host VM — too many
+        // call sites mutate it directly to make moving it worth the churn
+        // in this PR. The slice owns only the visible collections + badges.
+        Pending = new PendingEditsViewModel(() => _pendingEditStore.Count);
         StashedDbs = new ObservableCollection<StashedDbState>();
 
         // Build tree view models. Multi-DB workflow (#58): when more than
@@ -307,16 +302,13 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
 
         EditConfigCommand = new RelayCommand(ExecuteEditConfig);
         RefreshConstantsCommand = new RelayCommand(ExecuteRefreshConstants);
-        EnterLicenseKeyCommand = new RelayCommand(ExecuteEnterLicenseKey);
-        ShowUpdateDetailsCommand = new RelayCommand(ExecuteShowUpdateDetails, () => HasUpdateAvailable);
-        UpgradeToProCommand = new RelayCommand(ExecuteUpgradeToPro);
         ExpandAllCommand = new RelayCommand(ExecuteExpandAll);
         CollapseAllCommand = new RelayCommand(ExecuteCollapseAll);
-        ToggleInspectorCommand = new RelayCommand(() => IsInspectorCollapsed = !IsInspectorCollapsed);
-        ToggleBulkEditCommand = new RelayCommand(() => IsBulkEditExpanded = !IsBulkEditExpanded);
-        ToggleBulkPreviewCommand = new RelayCommand(() => IsBulkPreviewExpanded = !IsBulkPreviewExpanded);
-        TogglePendingCommand = new RelayCommand(() => IsPendingExpanded = !IsPendingExpanded);
-        ToggleIssuesCommand = new RelayCommand(() => IsIssuesExpanded = !IsIssuesExpanded);
+        // Inspector-panel expand/collapse state lives on its own slice VM
+        // (#80 slice 1). The dialog code-behind subscribes to
+        // `Inspector.PropertyChanged` directly for the splitter-column
+        // animation — no host-side relay needed.
+        Inspector = new InspectorPanelsViewModel();
         ClearManualSelectionCommand = new RelayCommand(ExecuteClearManualSelection,
             () => _manualSelectedPaths.Count > 0);
 
@@ -339,18 +331,11 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             if (parameter is StashedDbState stash) ReactivateStashedDb(stash);
         });
 
-        if (_licenseService != null)
-        {
-            _licenseStateChangedHandler = (_, __) =>
-                _dispatcher.BeginInvoke(new Action(() => UpdateUsageStatus()));
-            _licenseService.LicenseStateChanged += _licenseStateChangedHandler;
-        }
-
         // Apply initial filter and build flat list
         ApplyAllFilters();
         RefreshFlatList();
-        UpdateUsageStatus();
-        InitializeUpdateCheck();
+        Subscription.UpdateUsageStatus();
+        Subscription.InitializeUpdateCheck();
 
         // #26: Surface pre-existing rule violations on dialog load. Runs after
         // RefreshRuleHints so RuleHint is available for the issue tooltip.
@@ -433,26 +418,18 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     public ObservableCollection<ScopeLevel> AvailableScopes { get; }
 
     /// <summary>
-    /// Live preview of the rows that would be staged if the user clicked "Set".
-    /// Rebuilt reactively whenever target / scope / value changes — it does
-    /// NOT itself mutate any node. On Set, entries are transferred to
-    /// pending and the collection is cleared.
+    /// Bulk-preview collection slice (#80 slice 5). Owns the live preview
+    /// rows plus the section-header summary / conflict-overlap readouts.
+    /// XAML binds via <c>{Binding BulkPreview.Entries}</c> etc.
     /// </summary>
-    public ObservableCollection<BulkPreviewEntry> BulkPreview { get; }
+    public BulkPreviewViewModel BulkPreview { get; }
 
     /// <summary>
-    /// Aggregated view of every node that currently has a pending inline edit.
-    /// Rebuilt whenever <c>PendingInlineEditCount</c> changes.
+    /// Pending-edits + existing-issues slice (#80 slice 4). Owns the
+    /// PendingEdits / ExistingIssues collections + badge properties.
+    /// XAML binds via <c>{Binding Pending.PendingEdits}</c> etc.
     /// </summary>
-    public ObservableCollection<PendingEditEntry> PendingEdits { get; }
-
-    /// <summary>
-    /// Findings produced by running the validator over the *existing* StartValues
-    /// when the dialog opens (and after every tree refresh / inline edit). Read-only —
-    /// these are pre-existing rule violations the user can fix manually, not pending
-    /// edits. They never block Apply (#26).
-    /// </summary>
-    public ObservableCollection<ExistingIssueEntry> ExistingIssues { get; }
+    public PendingEditsViewModel Pending { get; }
 
     /// <summary>
     /// One entry per DB the user has switched away from with un-applied
@@ -463,47 +440,6 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     public ObservableCollection<StashedDbState> StashedDbs { get; }
 
     public bool HasStashedDbs => StashedDbs.Count > 0;
-
-    public bool HasBulkPreview => BulkPreview.Count > 0;
-    public int BulkPreviewCount => BulkPreview.Count;
-    public bool HasPendingEdits => PendingEdits.Count > 0;
-    public bool HasExistingIssues => ExistingIssues.Count > 0;
-    public int ExistingIssuesCount => ExistingIssues.Count;
-
-    /// <summary>Preview rows whose node already has a pending edit — they'd overwrite it on Set.</summary>
-    public int BulkPreviewConflictCount => BulkPreview.Count(e => e.HasPendingConflict);
-
-    public bool HasBulkPreviewConflict => BulkPreviewConflictCount > 0;
-
-    public string BulkPreviewConflictWarning
-    {
-        get
-        {
-            int n = BulkPreviewConflictCount;
-            if (n == 0) return "";
-            return n == 1
-                ? "\u26A0 1 overlap with pending edits \u2014 will be overwritten."
-                : $"\u26A0 {n} overlap with pending edits \u2014 will be overwritten.";
-        }
-    }
-
-    /// <summary>
-    /// Summary shown in the section header, e.g. "90 ⇢ 85" when all rows share
-    /// the same original value, or "{count} targets" otherwise.
-    /// </summary>
-    public string BulkPreviewSummary
-    {
-        get
-        {
-            if (BulkPreview.Count == 0) return "";
-            var firstOrig = BulkPreview[0].OriginalValue;
-            bool homogeneous = BulkPreview.All(e =>
-                string.Equals(e.OriginalValue, firstOrig, StringComparison.Ordinal));
-            if (homogeneous && !string.IsNullOrEmpty(firstOrig))
-                return $"{firstOrig} \u21E2 {_newValue}";
-            return $"{BulkPreview.Count} targets";
-        }
-    }
 
     /// <summary>Flat list for the ListView (proper column alignment).</summary>
     public ObservableCollection<MemberNodeViewModel> FlatMembers => _flatTreeManager.FlatList;
@@ -756,8 +692,6 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         set => SetProperty(ref _constraintInfo, value);
     }
 
-    public string UsageStatusText { get; private set; } = "";
-
     public bool HasSelection => _selectedFlatMember is { IsLeaf: true };
     public bool HasScope => _selectedScope != null && !IsManualMode;
     public bool HasValidationError => !string.IsNullOrEmpty(_validationError);
@@ -868,13 +802,9 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     public ICommand DiscardPendingCommand { get; }
 
     public ICommand EditConfigCommand { get; }
-    public ICommand EnterLicenseKeyCommand { get; }
-    public ICommand UpgradeToProCommand { get; }
-    public ICommand ShowUpdateDetailsCommand { get; }
     public ICommand ExpandAllCommand { get; }
     public ICommand CollapseAllCommand { get; }
     public ICommand ClearManualSelectionCommand { get; }
-    public ICommand ToggleInspectorCommand { get; }
 
     // --- DB-switcher dropdown (#59) ---
 
@@ -1304,7 +1234,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     /// </summary>
     private string SnapshotState() =>
         $"active=[{string.Join(",", _activeDbs.Select(d => d.Info.Name))}] " +
-        $"pending={PendingEdits.Count} stashed={StashedDbs.Count} " +
+        $"pending={Pending.PendingEdits.Count} stashed={StashedDbs.Count} " +
         $"treeShape={(_activeDbs.Count == 1 ? "single" : "multi")}";
 
     /// <summary>
@@ -1746,6 +1676,12 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         // owns the cleanup of every collection that holds VM references.
         RebuildPendingEdits();
         BulkPreview.Clear();
+        // Clear() raises the underlying CollectionChanged event, but the
+        // slice's derived properties (Count, HasEntries, Summary, Conflict*)
+        // are separate INotifyPropertyChanged signals — without this, the
+        // inspector header badge/summary stays stale until the next
+        // ComputeBulkPreview cycle.
+        BulkPreview.RaiseDerivedChanged();
         OnPropertyChanged(nameof(HasMultipleActiveDbs));
         OnPropertyChanged(nameof(SelectedFlatMember));
         OnPropertyChanged(nameof(SelectedScope));
@@ -2067,7 +2003,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         var pendingEdits = _pendingEditStore.GetForDb(db, _modelToDb).ToList();
         if (pendingEdits.Count == 0) return true;
 
-        var status = _usageTracker.GetStatus();
+        var status = Subscription.GetUsageStatus();
         if (pendingEdits.Count > status.RemainingToday)
         {
             StatusText = Res.Format("Status_WouldExceedLimit",
@@ -2088,7 +2024,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
                 }
             }
             db.OnApply.Invoke(db.Xml);
-            if (totalChanged > 0) _usageTracker.RecordUsage(totalChanged);
+            if (totalChanged > 0) Subscription.RecordUsage(totalChanged);
             // The edits are now committed to TIA — evict the DB's store entries
             // so a subsequent tree rebuild doesn't re-populate committed values.
             _pendingEditStore.ClearForDb(db, _modelToDb);
@@ -2241,7 +2177,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         {
             RefreshPendingAndPreview();
             OnPropertyChanged(nameof(HasInlineErrors));
-            RaiseInvalidPendingChanged();
+            Pending.RaiseInvalidPendingChanged();
         }
         Log.Information("Restored {Restored} stashed edit(s) for {Db} ({Dropped} dropped)",
             restored, state.Summary.Name, dropped);
@@ -2261,48 +2197,11 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(HasStashedDbs));
     }
 
-    public bool IsInspectorCollapsed
-    {
-        get => _isInspectorCollapsed;
-        set
-        {
-            if (_isInspectorCollapsed == value) return;
-            _isInspectorCollapsed = value;
-            OnPropertyChanged(nameof(IsInspectorCollapsed));
-            OnPropertyChanged(nameof(IsInspectorExpanded));
-        }
-    }
-
-    public bool IsInspectorExpanded => !_isInspectorCollapsed;
-
-    public bool IsBulkEditExpanded
-    {
-        get => _isBulkEditExpanded;
-        set { if (_isBulkEditExpanded != value) { _isBulkEditExpanded = value; OnPropertyChanged(nameof(IsBulkEditExpanded)); } }
-    }
-
-    public bool IsBulkPreviewExpanded
-    {
-        get => _isBulkPreviewExpanded;
-        set { if (_isBulkPreviewExpanded != value) { _isBulkPreviewExpanded = value; OnPropertyChanged(nameof(IsBulkPreviewExpanded)); } }
-    }
-
-    public bool IsPendingExpanded
-    {
-        get => _isPendingExpanded;
-        set { if (_isPendingExpanded != value) { _isPendingExpanded = value; OnPropertyChanged(nameof(IsPendingExpanded)); } }
-    }
-
-    public bool IsIssuesExpanded
-    {
-        get => _isIssuesExpanded;
-        set { if (_isIssuesExpanded != value) { _isIssuesExpanded = value; OnPropertyChanged(nameof(IsIssuesExpanded)); } }
-    }
-
-    public ICommand ToggleBulkEditCommand { get; }
-    public ICommand ToggleBulkPreviewCommand { get; }
-    public ICommand TogglePendingCommand { get; }
-    public ICommand ToggleIssuesCommand { get; }
+    /// <summary>
+    /// Inspector-panel expand/collapse state (#80 slice 1).
+    /// XAML binds via <c>{Binding Inspector.IsBulkEditExpanded}</c> etc.
+    /// </summary>
+    public InspectorPanelsViewModel Inspector { get; }
 
     /// <summary>
     /// Raised after the flat list has been refreshed so the view can rehydrate
@@ -2310,20 +2209,13 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     /// </summary>
     public event Action? FlatListRefreshed;
 
-    public string LicenseTierText { get; private set; } = "";
-
     /// <summary>
-    /// Show the license dialog opener whenever a license service is available — users need
-    /// access even when Pro (to view status, remove / re-activate on a new machine, etc.).
+    /// Subscription / usage / update slice (#80 slice 2). Owns license-tier
+    /// display, usage status, license-key dialog opener, upgrade prompt,
+    /// update-available badge. The host VM keeps <see cref="ApplyTooltip"/>
+    /// because it composes Apply-pipeline state with subscription state.
     /// </summary>
-    public bool ShowLicenseKeyButton => _licenseService != null;
-
-    /// <summary>Label on the license dialog opener — adapts to tier.</summary>
-    public string LicenseKeyButtonText =>
-        _licenseService?.IsProActive == true
-            ? Res.Get("License_ManageKey")
-            : Res.Get("License_EnterKey");
-    public bool IsLimitReached => _usageTracker.GetStatus().IsLimitReached;
+    public SubscriptionViewModel Subscription { get; }
 
     /// <summary>
     /// Picked so a few back-to-back bulk applies on a normal day stay quiet, but
@@ -2343,12 +2235,12 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         get
         {
             var baseText = Res.Get("Dialog_ApplyTooltip");
-            if (_licenseService?.IsProActive == true) return baseText;
+            if (Subscription.IsProActive) return baseText;
 
             var cost = PendingInlineEditCount;
             if (cost == 0) return baseText;
 
-            var remaining = _usageTracker.GetStatus().RemainingToday;
+            var remaining = Subscription.GetUsageStatus().RemainingToday;
             if (cost <= 1 && remaining >= TightHeadroomThreshold) return baseText;
 
             return baseText + Environment.NewLine + Environment.NewLine +
@@ -2357,44 +2249,14 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>Number of individual inline edits waiting to be applied.</summary>
-    public int PendingInlineEditCount => _pendingEditStore.Count;
+    public int PendingInlineEditCount => Pending.PendingInlineEditCount;
 
-    /// <summary>Status text showing pending inline edits count.</summary>
-    public string? PendingStatusText
-    {
-        get
-        {
-            var count = PendingInlineEditCount;
-            return count > 0 ? $"{count} pending inline edit{(count == 1 ? "" : "s")}" : null;
-        }
-    }
-
-    /// <summary>Suggestion provider for autocomplete (null = no suggestions).</summary>
-    public GlobSuggestionProvider? SuggestionProvider
-    {
-        get => _suggestionProvider;
-        private set => SetProperty(ref _suggestionProvider, value);
-    }
-
-    /// <summary>All autocomplete suggestions for the current member.</summary>
-    public IReadOnlyList<AutocompleteSuggestion> Suggestions
-    {
-        get => _suggestions;
-        private set => SetProperty(ref _suggestions, value);
-    }
-
-    /// <summary>Filtered suggestions based on current text input.</summary>
-    public IReadOnlyList<AutocompleteSuggestion> FilteredSuggestions
-    {
-        get => _filteredSuggestions;
-        private set
-        {
-            if (SetProperty(ref _filteredSuggestions, value))
-                OnPropertyChanged(nameof(HasFilteredSuggestions));
-        }
-    }
-
-    public bool HasFilteredSuggestions => _filteredSuggestions.Count > 0;
+    /// <summary>
+    /// Autocomplete suggestion slice (#80 slice 3). Owns the candidate
+    /// pool, the filtered subset, and the glob provider. XAML binds via
+    /// <c>{Binding Autocomplete.FilteredSuggestions}</c> etc.
+    /// </summary>
+    public AutocompleteViewModel Autocomplete { get; }
 
     /// <summary>Returns filtered suggestions for a specific member (used by inline autocomplete).</summary>
     public IReadOnlyList<AutocompleteSuggestion> GetSuggestionsForMember(MemberNodeViewModel memberVm, string filter)
@@ -2418,15 +2280,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         else
             return Array.Empty<AutocompleteSuggestion>();
 
-        if (string.IsNullOrWhiteSpace(filter))
-            return all;
-
-        var terms = filter.Trim().Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
-        return all.Where(s => terms.All(term =>
-            s.DisplayName.IndexOf(term, StringComparison.OrdinalIgnoreCase) >= 0 ||
-            s.Value.IndexOf(term, StringComparison.OrdinalIgnoreCase) >= 0 ||
-            (s.Comment != null && s.Comment.IndexOf(term, StringComparison.OrdinalIgnoreCase) >= 0)))
-            .ToList();
+        return AutocompleteViewModel.Match(all, filter);
     }
 
     /// <summary>
@@ -2448,57 +2302,15 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         _newValue = value; // Set backing field to avoid re-triggering filter
         OnPropertyChanged(nameof(NewValue));
         ValidateValue();
-        FilteredSuggestions = Array.Empty<AutocompleteSuggestion>();
+        Autocomplete.ClearFiltered();
         UpdateHighlighting();
     }
 
     /// <summary>Show suggestions filtered by current text (always opens).</summary>
-    public void ShowAllSuggestions()
-    {
-        if (_suggestions.Count == 0) return;
-
-        var filter = _newValue?.Trim() ?? "";
-        if (string.IsNullOrEmpty(filter))
-        {
-            FilteredSuggestions = _suggestions.ToList();
-            return;
-        }
-
-        var terms = filter.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
-        FilteredSuggestions = _suggestions
-            .Where(s => terms.All(term =>
-                s.DisplayName.IndexOf(term, StringComparison.OrdinalIgnoreCase) >= 0 ||
-                s.Value.IndexOf(term, StringComparison.OrdinalIgnoreCase) >= 0 ||
-                (s.Comment != null && s.Comment.IndexOf(term, StringComparison.OrdinalIgnoreCase) >= 0)))
-            .ToList();
-    }
+    public void ShowAllSuggestions() => Autocomplete.ShowAll(_newValue?.Trim() ?? "");
 
     /// <summary>Toggle: show filtered suggestions or hide them.</summary>
-    public void ToggleAllSuggestions()
-    {
-        if (_filteredSuggestions.Count > 0)
-        {
-            FilteredSuggestions = Array.Empty<AutocompleteSuggestion>();
-        }
-        else
-        {
-            // Apply current text as filter (empty = show all)
-            var filter = _newValue?.Trim() ?? "";
-            if (string.IsNullOrEmpty(filter))
-            {
-                FilteredSuggestions = _suggestions.ToList();
-                return;
-            }
-
-            var terms = filter.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
-            FilteredSuggestions = _suggestions
-                .Where(s => terms.All(term =>
-                    s.DisplayName.IndexOf(term, StringComparison.OrdinalIgnoreCase) >= 0 ||
-                    s.Value.IndexOf(term, StringComparison.OrdinalIgnoreCase) >= 0 ||
-                    (s.Comment != null && s.Comment.IndexOf(term, StringComparison.OrdinalIgnoreCase) >= 0)))
-                .ToList();
-        }
-    }
+    public void ToggleAllSuggestions() => Autocomplete.Toggle(_newValue?.Trim() ?? "");
 
     /// <summary>Whether to show constant suggestions. Forced on when a rule with tagTableReference matches.</summary>
     public bool ShowConstants
@@ -2634,9 +2446,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(CanEdit));
         ValidationError = "";
         ConstraintInfo = "";
-        SuggestionProvider = null;
-        Suggestions = Array.Empty<AutocompleteSuggestion>();
-        FilteredSuggestions = Array.Empty<AutocompleteSuggestion>();
+        Autocomplete.ClearCandidates();
 
         // In manual multi-select mode, scope analysis does not apply.
         if (IsManualMode)
@@ -2827,14 +2637,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
 
         // Only raise bindings when the result might actually have changed.
         if (wasNonEmpty || BulkPreview.Count > 0)
-        {
-            OnPropertyChanged(nameof(HasBulkPreview));
-            OnPropertyChanged(nameof(BulkPreviewCount));
-            OnPropertyChanged(nameof(BulkPreviewSummary));
-            OnPropertyChanged(nameof(BulkPreviewConflictCount));
-            OnPropertyChanged(nameof(HasBulkPreviewConflict));
-            OnPropertyChanged(nameof(BulkPreviewConflictWarning));
-        }
+            BulkPreview.RaiseDerivedChanged();
     }
 
     private void TryAddPreviewEntry(MemberNodeViewModel node)
@@ -2857,60 +2660,27 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     /// that could shift which nodes are pending OR which rows the preview
     /// would overwrite — the two sides are coupled (preview conflict flags
     /// depend on pending state, pending overwrite flags depend on preview).
-    /// Call order matters: preview first so <c>RebuildPendingEdits</c> can
-    /// read the just-built BulkPreview paths.
+    /// Call order matters: preview first so the rebuild can read the
+    /// just-built BulkPreview paths.
     /// </summary>
     private void RefreshPendingAndPreview()
     {
+        Pending.RaisePendingCountChanged();
         OnPropertyChanged(nameof(PendingInlineEditCount));
-        OnPropertyChanged(nameof(PendingStatusText));
         OnPropertyChanged(nameof(ApplyTooltip));
         ComputeBulkPreview();
         RebuildPendingEdits();
     }
 
     /// <summary>
-    /// Rebuilds <see cref="PendingEdits"/> from the current tree state.
-    /// Call whenever <c>PendingInlineEditCount</c> is expected to have changed.
+    /// Rebuilds the pending-edits side panel from the current tree state.
     /// </summary>
     private void RebuildPendingEdits()
     {
-        PendingEdits.Clear();
         var bulkPaths = BulkPreview.Count > 0
-            ? new HashSet<string>(BulkPreview.Select(e => e.Path), StringComparer.Ordinal)
+            ? new HashSet<string>(BulkPreview.Entries.Select(e => e.Path), StringComparer.Ordinal)
             : null;
-        CollectPendingEntries(RootMembers, bulkPaths);
-        OnPropertyChanged(nameof(HasPendingEdits));
-        RaiseInvalidPendingChanged();
-    }
-
-    /// <summary>
-    /// Nudges bindings attached to <see cref="InvalidPendingCount"/> and friends.
-    /// Call after any mutation that could flip a pending entry's error state.
-    /// </summary>
-    private void RaiseInvalidPendingChanged()
-    {
-        OnPropertyChanged(nameof(InvalidPendingCount));
-        OnPropertyChanged(nameof(HasInvalidPending));
-        OnPropertyChanged(nameof(InvalidPendingBadge));
-    }
-
-    private void CollectPendingEntries(IEnumerable<MemberNodeViewModel> nodes,
-        HashSet<string>? bulkPaths)
-    {
-        foreach (var node in nodes)
-        {
-            if (node.IsPendingInlineEdit)
-            {
-                bool overwritten = bulkPaths != null && bulkPaths.Contains(node.Path);
-                PendingEdits.Add(new PendingEditEntry(
-                    node,
-                    node.StartValue ?? "",
-                    node.PendingValue ?? "",
-                    willBeOverwrittenByBulk: overwritten));
-            }
-            CollectPendingEntries(node.Children, bulkPaths);
-        }
+        Pending.Rebuild(RootMembers, bulkPaths);
     }
 
     /// <summary>
@@ -3340,66 +3110,11 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     /// validator already short-circuits cleanly when the cache is missing
     /// (no false positives for tag-table rules with no cache yet).
     /// </remarks>
-    private void RebuildExistingIssues()
-    {
-        ExistingIssues.Clear();
-        var validator = BuildValidator();
+    private void RebuildExistingIssues() =>
+        Pending.RebuildExistingIssues(RootMembers, BuildValidator());
 
-        foreach (var root in RootMembers)
-            ScanExistingViolations(root, validator);
-
-        OnPropertyChanged(nameof(HasExistingIssues));
-        OnPropertyChanged(nameof(ExistingIssuesCount));
-    }
-
-    private void ScanExistingViolations(MemberNodeViewModel node, MemberValidator validator)
-    {
-        if (node.IsLeaf && !string.IsNullOrEmpty(node.StartValue))
-        {
-            var error = validator.Validate(node.Model, node.StartValue);
-            if (error != null)
-            {
-                node.HasExistingViolation = true;
-                node.ExistingViolationMessage = error;
-                ExistingIssues.Add(new ExistingIssueEntry(
-                    node, node.StartValue ?? "", error, node.RuleHint));
-            }
-            else if (node.HasExistingViolation)
-            {
-                node.HasExistingViolation = false;
-                node.ExistingViolationMessage = null;
-            }
-        }
-        foreach (var child in node.Children)
-            ScanExistingViolations(child, validator);
-    }
-
-    private void UpdateFilteredSuggestions()
-    {
-        if (_suggestions.Count == 0 || _suppressSuggestions)
-        {
-            FilteredSuggestions = Array.Empty<AutocompleteSuggestion>();
-            return;
-        }
-
-        var filter = _newValue?.Trim() ?? "";
-        if (string.IsNullOrEmpty(filter))
-        {
-            // Don't show list when input is empty
-            FilteredSuggestions = Array.Empty<AutocompleteSuggestion>();
-            return;
-        }
-
-        // Split by whitespace → AND: all terms must match somewhere
-        var terms = filter.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
-
-        FilteredSuggestions = _suggestions
-            .Where(s => terms.All(term =>
-                s.DisplayName.IndexOf(term, StringComparison.OrdinalIgnoreCase) >= 0 ||
-                s.Value.IndexOf(term, StringComparison.OrdinalIgnoreCase) >= 0 ||
-                (s.Comment != null && s.Comment.IndexOf(term, StringComparison.OrdinalIgnoreCase) >= 0)))
-            .ToList();
-    }
+    private void UpdateFilteredSuggestions() =>
+        Autocomplete.ApplyFilter(_newValue?.Trim() ?? "");
 
     /// <summary>
     /// Ensures tag tables are exported and cached. Called lazily on first need.
@@ -3428,9 +3143,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     /// </summary>
     private void ReloadSuggestions()
     {
-        Suggestions = Array.Empty<AutocompleteSuggestion>();
-        FilteredSuggestions = Array.Empty<AutocompleteSuggestion>();
-        SuggestionProvider = null;
+        Autocomplete.ClearCandidates();
 
         if (_selectedFlatMember == null || !_selectedFlatMember.IsLeaf) return;
         if (!_showConstants) return;
@@ -3459,10 +3172,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         }
 
         if (suggestions.Count > 0)
-        {
-            SuggestionProvider = new GlobSuggestionProvider(suggestions);
-            Suggestions = suggestions;
-        }
+            Autocomplete.SetCandidates(suggestions, new GlobSuggestionProvider(suggestions));
     }
 
     /// <summary>
@@ -3647,7 +3357,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
 
         if (_selectedScope == null) return;
 
-        MaybeWarnLimitReachedOnce();
+        Subscription.MaybeWarnLimitReachedOnce();
 
         // Multi-DB safe (#58 review must-fix #2): resolve scope members to
         // their owning DB's tree VMs by reference. Path-string staging used
@@ -3681,7 +3391,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     /// </summary>
     private void ExecuteSetPendingManual()
     {
-        MaybeWarnLimitReachedOnce();
+        Subscription.MaybeWarnLimitReachedOnce();
 
         int count = 0;
         foreach (var node in _manualSelectedPaths)
@@ -3789,7 +3499,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
 
         // Free-tier cap: block Apply when the pending batch would push past
         // the daily quota. The user has to drop some edits or upgrade.
-        var status = _usageTracker.GetStatus();
+        var status = Subscription.GetUsageStatus();
         if (PendingInlineEditCount > status.RemainingToday) return false;
 
         return true;
@@ -3807,24 +3517,6 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         return false;
     }
 
-    /// <summary>
-    /// Count of pending entries whose staged value fails validation (#11).
-    /// Derived from the tree so it stays in sync with inline-edit validation.
-    /// </summary>
-    public int InvalidPendingCount => PendingEdits.Count(e => e.Node.HasInlineError);
-
-    public bool HasInvalidPending => InvalidPendingCount > 0;
-
-    /// <summary>"N of M invalid" summary shown on the sidebar header badge.</summary>
-    public string InvalidPendingBadge
-    {
-        get
-        {
-            var total = PendingEdits.Count;
-            var invalid = InvalidPendingCount;
-            return invalid == 0 ? "" : Res.Format("Pending_InvalidBadge", invalid, total);
-        }
-    }
 
     /// <summary>
     /// Applies ALL pending changes (bulk-staged + inline edits) to XML.
@@ -3856,12 +3548,12 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         // would push past the limit — partial Apply leaves the user in a
         // confusing half-applied state. Pro tier always passes (DailyLimit
         // is int.MaxValue via LicensedUsageTracker).
-        var status = _usageTracker.GetStatus();
+        var status = Subscription.GetUsageStatus();
         if (pendingEdits.Count > status.RemainingToday)
         {
             StatusText = Res.Format("Status_WouldExceedLimit",
                 pendingEdits.Count, status.RemainingToday);
-            UpdateUsageStatus();
+            Subscription.UpdateUsageStatus();
             return;
         }
 
@@ -3919,7 +3611,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
                 // Preserve pending edits in the tree so they can retry — skip RefreshTree
                 // because TIA still holds the pre-Apply state.
                 _lastApplySucceeded = false;
-                UpdateUsageStatus();
+                Subscription.UpdateUsageStatus();
                 return;
             }
 
@@ -3930,10 +3622,10 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             // already committed at this point, so we can't roll back — but we
             // CAN consume whatever quota remains so the next Apply is blocked
             // by CanExecuteApply, and warn the user that they're over-cap.
-            if (totalChanged > 0 && !_usageTracker.RecordUsage(totalChanged))
+            if (totalChanged > 0 && !Subscription.RecordUsage(totalChanged))
             {
-                var remaining = _usageTracker.GetStatus().RemainingToday;
-                if (remaining > 0 && !_usageTracker.RecordUsage(remaining))
+                var remaining = Subscription.GetUsageStatus().RemainingToday;
+                if (remaining > 0 && !Subscription.RecordUsage(remaining))
                 {
                     Log.Warning(
                         "ExecuteApply: second RecordUsage({Remaining}) also failed — " +
@@ -3960,7 +3652,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             HandleErrorWithRollback(ex, backupPath);
         }
 
-        UpdateUsageStatus();
+        Subscription.UpdateUsageStatus();
     }
 
     private void ExecuteApplyAndClose()
@@ -4005,12 +3697,12 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
 
         // Pre-check the daily cap against the SUM across all DBs (#58:
         // unified counter, no per-DB quota).
-        var status = _usageTracker.GetStatus();
+        var status = Subscription.GetUsageStatus();
         if (totalChanges > status.RemainingToday)
         {
             StatusText = Res.Format("Status_WouldExceedLimit",
                 totalChanges, status.RemainingToday);
-            UpdateUsageStatus();
+            Subscription.UpdateUsageStatus();
             return;
         }
 
@@ -4093,10 +3785,10 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
                 // Charge the partial committed sum so the user can't
                 // accidentally double-spend on the next click. Counter
                 // race handling mirrors the all-success path.
-                if (committedChanges > 0 && !_usageTracker.RecordUsage(committedChanges))
+                if (committedChanges > 0 && !Subscription.RecordUsage(committedChanges))
                 {
-                    var remaining = _usageTracker.GetStatus().RemainingToday;
-                    if (remaining > 0 && !_usageTracker.RecordUsage(remaining))
+                    var remaining = Subscription.GetUsageStatus().RemainingToday;
+                    if (remaining > 0 && !Subscription.RecordUsage(remaining))
                     {
                         Log.Warning(
                             "ExecuteApplyMultiDb partial-commit: second RecordUsage({Remaining}) " +
@@ -4124,7 +3816,11 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
                 }
                 _lastApplySucceeded = false;
                 HasPendingChanges = false;
-                UpdateUsageStatus();
+                // Pending list + count + ApplyTooltip would otherwise stay
+                // showing the pre-clear total — both happy paths below call
+                // RefreshPendingAndPreview, this early-return branch must too.
+                RefreshPendingAndPreview();
+                Subscription.UpdateUsageStatus();
                 return;
             }
 
@@ -4133,10 +3829,10 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             // Phase 3: charge the unified daily counter once for the sum
             // (#58 decision: no separate multi-DB counter). Race handling
             // mirrors the single-DB path.
-            if (totalChanged > 0 && !_usageTracker.RecordUsage(totalChanged))
+            if (totalChanged > 0 && !Subscription.RecordUsage(totalChanged))
             {
-                var remaining = _usageTracker.GetStatus().RemainingToday;
-                if (remaining > 0 && !_usageTracker.RecordUsage(remaining))
+                var remaining = Subscription.GetUsageStatus().RemainingToday;
+                if (remaining > 0 && !Subscription.RecordUsage(remaining))
                 {
                     Log.Warning(
                         "ExecuteApplyMultiDb full-commit: second RecordUsage({Remaining}) " +
@@ -4177,7 +3873,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             HandleErrorWithRollback(ex, backupPath);
         }
 
-        UpdateUsageStatus();
+        Subscription.UpdateUsageStatus();
     }
 
 
@@ -4250,7 +3946,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             StatusText = Res.Format("Status_ErrorComments", ex.Message);
         }
 
-        UpdateUsageStatus();
+        Subscription.UpdateUsageStatus();
     }
 
     private bool CanExecuteUpdateComments()
@@ -4396,7 +4092,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         // per dialog open if the user starts editing while already at 0 left,
         // so they aren't blindsided when Apply is disabled.
         if (!memberVm.IsPendingInlineEdit)
-            MaybeWarnLimitReachedOnce();
+            Subscription.MaybeWarnLimitReachedOnce();
 
         // Shared validator → same rule language as the bulk inspector (#7).
         var error = BuildValidator().Validate(memberVm.Model, newValue);
@@ -4418,7 +4114,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
 
         RefreshPendingAndPreview();
         OnPropertyChanged(nameof(HasInlineErrors));
-        RaiseInvalidPendingChanged();
+        Pending.RaiseInvalidPendingChanged();
     }
 
     /// <summary>
@@ -4583,11 +4279,11 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
                 // Value is reset after Apply: the just-committed value would
                 // misrepresent the current state (#8). Clear touched so the
                 // next selection can prefill cleanly.
-                _suppressSuggestions = true;
+                Autocomplete.SuppressSuggestions = true;
                 _newValueTouched = false;
                 _newValue = "";
                 OnPropertyChanged(nameof(NewValue));
-                _suppressSuggestions = false;
+                Autocomplete.SuppressSuggestions = false;
             }
         }
     }
@@ -4609,138 +4305,6 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         }
         foreach (var child in vm.Children)
             RestoreExpandStates(child, states);
-    }
-
-    private void UpdateUsageStatus()
-    {
-        if (_licenseService != null && _licenseService.IsProActive)
-        {
-            UsageStatusText = Res.Get("Status_Pro");
-            LicenseTierText = Res.Get("License_Tier_Pro");
-        }
-        else
-        {
-            var status = _usageTracker.GetStatus();
-            UsageStatusText = Res.Format("Status_Remaining",
-                status.RemainingToday, status.DailyLimit);
-            LicenseTierText = Res.Get("License_Tier_Free");
-        }
-
-        OnPropertyChanged(nameof(UsageStatusText));
-        OnPropertyChanged(nameof(LicenseTierText));
-        OnPropertyChanged(nameof(ShowLicenseKeyButton));
-        OnPropertyChanged(nameof(LicenseKeyButtonText));
-        OnPropertyChanged(nameof(IsLimitReached));
-        OnPropertyChanged(nameof(ApplyTooltip));
-    }
-
-    /// <summary>
-    /// Shows the daily-cap-reached modal once per dialog open, when the user
-    /// first attempts to stage or edit a change while at 0 remaining quota.
-    /// Staging itself isn't blocked — Apply is the choke point — but a single
-    /// proactive heads-up beats discovering it via a disabled Apply button.
-    /// </summary>
-    private void MaybeWarnLimitReachedOnce()
-    {
-        if (_limitWarningShown) return;
-        if (!_usageTracker.GetStatus().IsLimitReached) return;
-
-        _limitWarningShown = true;
-        _messageBox.ShowInfo(
-            Res.Get("LimitReached_Modal_Message"),
-            Res.Get("LimitReached_Modal_Title"));
-    }
-
-    private void ExecuteEnterLicenseKey()
-    {
-        if (_licenseService == null) return;
-
-        var dialog = new LicenseKeyDialog(_licenseService, _updateCheckService, _configLoader);
-        dialog.Owner = Application.Current?.Windows.OfType<Window>().FirstOrDefault(w => w.IsActive);
-        dialog.ShowDialog();
-        UpdateUsageStatus();
-        // The user may have toggled "Check for updates" — re-evaluate the badge.
-        InitializeUpdateCheck(forceRefresh: false);
-    }
-
-    /// <summary>
-    /// Update available (#61). Null when no newer version is on offer
-    /// (offline / opted out / already on latest / skipped).
-    /// </summary>
-    public UpdateInfo? AvailableUpdate
-    {
-        get => _availableUpdate;
-        private set
-        {
-            if (ReferenceEquals(_availableUpdate, value)) return;
-            _availableUpdate = value;
-            OnPropertyChanged(nameof(AvailableUpdate));
-            OnPropertyChanged(nameof(HasUpdateAvailable));
-            OnPropertyChanged(nameof(UpdateBadgeText));
-            OnPropertyChanged(nameof(UpdateBadgeTooltip));
-            (ShowUpdateDetailsCommand as RelayCommand)?.RaiseCanExecuteChanged();
-        }
-    }
-
-    public bool HasUpdateAvailable => _availableUpdate != null;
-
-    public string UpdateBadgeText
-    {
-        get
-        {
-            if (_availableUpdate == null) return "";
-            var current = typeof(BulkChangeViewModel).Assembly.GetName().Version;
-            var currentText = current != null
-                ? $"v{current.Major}.{Math.Max(0, current.Minor)}.{Math.Max(0, current.Build)}"
-                : "v?";
-            var latest = _availableUpdate.TagName;
-            if (latest.Length > 0 && latest[0] != 'v' && latest[0] != 'V') latest = "v" + latest;
-            return Res.Format("Update_BadgeText", currentText, latest);
-        }
-    }
-
-    public string UpdateBadgeTooltip => _availableUpdate == null
-        ? ""
-        : Res.Format("Update_BadgeTooltip",
-            string.IsNullOrEmpty(_availableUpdate.Name)
-                ? _availableUpdate.TagName
-                : _availableUpdate.Name);
-
-    private void InitializeUpdateCheck(bool forceRefresh = true)
-    {
-        if (_updateCheckService == null) return;
-
-        // Synchronous cached read so the badge shows up the moment the
-        // dialog opens — no flash where it appears half a second later.
-        try { AvailableUpdate = _updateCheckService.GetCached(); }
-        catch (Exception ex) { Log.Warning(ex, "UpdateCheck: GetCached threw"); }
-
-        if (!forceRefresh) return;
-
-        // Fire-and-forget refresh — never blocks the UI thread, never
-        // surfaces an error. Cache TTL gates the actual network hit.
-        _ = Task.Run(async () =>
-        {
-            try
-            {
-                var info = await _updateCheckService.CheckAsync().ConfigureAwait(false);
-                _ = _dispatcher.BeginInvoke(new Action(() => AvailableUpdate = info));
-            }
-            catch (Exception ex)
-            {
-                Log.Warning(ex, "UpdateCheck: background CheckAsync threw");
-            }
-        });
-    }
-
-    private void ExecuteShowUpdateDetails()
-    {
-        var info = _availableUpdate;
-        if (info == null || _updateCheckService == null) return;
-
-        var dialog = new UpdateAvailableDialog(info);
-        dialog.Owner = Application.Current?.Windows.OfType<Window>().FirstOrDefault(w => w.IsActive);
-        dialog.ShowDialog();
     }
 
     /// <summary>
@@ -4898,18 +4462,6 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         return types;
     }
 
-    private void ExecuteUpgradeToPro()
-    {
-        try
-        {
-            Process.Start(new ProcessStartInfo(ShopUrls.CheckoutUrl) { UseShellExecute = true });
-        }
-        catch
-        {
-            // Fallback: silently ignore if browser cannot be opened
-        }
-    }
-
     public void Dispose()
     {
         if (_disposed) return;
@@ -4920,12 +4472,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         _searchDebounceTimer?.Dispose();
         _searchDebounceTimer = null;
 
-        // Unsubscribe so the lambda's `this` capture stops keeping the VM alive.
-        // We do NOT dispose _licenseService — the caller that constructed it owns it.
-        if (_licenseService != null && _licenseStateChangedHandler != null)
-        {
-            _licenseService.LicenseStateChanged -= _licenseStateChangedHandler;
-            _licenseStateChangedHandler = null;
-        }
+        // Subscription owns the LicenseStateChanged subscription (#80 slice 2).
+        Subscription.Dispose();
     }
 }
