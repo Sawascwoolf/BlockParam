@@ -164,12 +164,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     private string _statusText = "";
     private string _validationError = "";
     private string _constraintInfo = "";
-    private string _searchQuery = "";
-    private int _searchHitCount;
-    private Timer? _searchDebounceTimer;
     private Timer? _valueDebounceTimer;
-    private int _hiddenByRuleCount;
-    private bool _showSetpointsOnly;
     private bool _showConstants;
     private bool _constantsForced;
     private string _tagTableAge = "";
@@ -253,6 +248,20 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             : null;
         // Autocomplete suggestion slice (#80 slice 3).
         Autocomplete = new AutocompleteViewModel();
+        // Search + tree-filter slice (#80 slice 6). Slice owns SearchQuery /
+        // SetPoint toggle / banner state; the filter pass itself (ApplyAllFilters
+        // + RefreshFlatList) stays here because it walks the multi-DB tree
+        // and is too entangled with host state to move in this PR.
+        Filter = new SearchFilterViewModel(
+            _dispatcher,
+            getAnchorInfo: () => _active.Info,
+            hasUdtRefresh: _onRefreshUdtTypes != null,
+            onFiltersChanged: () =>
+            {
+                ApplyAllFilters();
+                RefreshFlatList();
+            },
+            onSetpointsTurnedOn: _onRefreshUdtTypes != null ? TryRefreshUdtCache : (Action?)null);
 
         UpdateTagTableAge();
 
@@ -432,6 +441,13 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     public PendingEditsViewModel Pending { get; }
 
     /// <summary>
+    /// Search + tree-filter slice (#80 slice 6). Owns the search box,
+    /// search-hit / hidden-by-rule counters, and the SetPoint-only toggle.
+    /// XAML binds via <c>{Binding Filter.SearchQuery}</c> etc.
+    /// </summary>
+    public SearchFilterViewModel Filter { get; }
+
+    /// <summary>
     /// One entry per DB the user has switched away from with un-applied
     /// pending edits (#59). Each entry renders as its own inspector section
     /// so the staged work stays visible across switches; clicking the section
@@ -565,110 +581,6 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             }
         }
     }
-
-    public string SearchQuery
-    {
-        get => _searchQuery;
-        set
-        {
-            if (SetProperty(ref _searchQuery, value))
-            {
-                OnPropertyChanged(nameof(HasSearchQuery));
-                // Debounce search: WPF Binding.Delay uses DispatcherTimer which
-                // doesn't work reliably when hosted inside TIA Portal (WinForms host
-                // without Application.Current). Use Threading.Timer + Dispatcher instead.
-                _searchDebounceTimer?.Dispose();
-                _searchDebounceTimer = new Timer(_ =>
-                {
-                    _dispatcher.BeginInvoke(new Action(() =>
-                    {
-                        ApplyAllFilters();
-                        RefreshFlatList();
-                    }));
-                }, null, 200, Timeout.Infinite);
-            }
-        }
-    }
-
-    public int SearchHitCount
-    {
-        get => _searchHitCount;
-        private set => SetProperty(ref _searchHitCount, value);
-    }
-
-    public bool HasSearchQuery => !string.IsNullOrWhiteSpace(_searchQuery);
-
-    /// <summary>
-    /// Number of leaf members currently hidden by <c>excludeFromSetpoints</c> rules.
-    /// Rules are always applied — the banner surfaces their effect so users understand
-    /// why entries are missing and can open the Config Editor to review them (#23).
-    /// </summary>
-    public int HiddenByRuleCount
-    {
-        get => _hiddenByRuleCount;
-        private set
-        {
-            if (SetProperty(ref _hiddenByRuleCount, value))
-            {
-                OnPropertyChanged(nameof(ShowRuleFilterBanner));
-                OnPropertyChanged(nameof(RuleFilterBannerText));
-            }
-        }
-    }
-
-    /// <summary>True when at least one rule is currently hiding a leaf member.</summary>
-    public bool ShowRuleFilterBanner => _hiddenByRuleCount > 0;
-
-    /// <summary>Localized banner text: "Rule filter is hiding N member(s) — review rules in Config Editor".</summary>
-    public string RuleFilterBannerText => Res.Format("Dialog_RuleFilterBanner", _hiddenByRuleCount);
-
-    /// <summary>
-    /// When on, hide every leaf that is not a UDT-resolved SetPoint. AND-combined
-    /// with the always-on rule filter. If UDT types are missing when toggled on,
-    /// the VM transparently exports them from TIA Portal and re-parses the DB.
-    /// </summary>
-    public bool ShowSetpointsOnly
-    {
-        get => _showSetpointsOnly;
-        set
-        {
-            // On OFF→ON we revalidate the UDT cache against TIA's ModifiedDate stamps.
-            // The check is cheap when nothing changed; stale entries get re-exported.
-            if (value && !_showSetpointsOnly && _onRefreshUdtTypes != null)
-                TryRefreshUdtCache();
-
-            if (SetProperty(ref _showSetpointsOnly, value))
-            {
-                ApplyAllFilters();
-                RefreshFlatList();
-            }
-        }
-    }
-
-    /// <summary>
-    /// The checkbox is enabled unless we are certain the filter cannot work —
-    /// i.e. the DB references UDTs that are not cached AND no refresh path is wired.
-    /// When a refresh callback exists, clicking triggers a fresh export automatically.
-    /// </summary>
-    public bool CanShowSetpointsOnly
-        => _active.Info.UnresolvedUdts.Count == 0 || _onRefreshUdtTypes != null;
-
-    /// <summary>Tooltip shown on the checkbox.</summary>
-    public string ShowSetpointsOnlyTooltip
-    {
-        get
-        {
-            if (_active.Info.UnresolvedUdts.Count == 0)
-                return "Only show members marked as SetPoint (Einstellwert) in the UDT type definition.";
-
-            if (_onRefreshUdtTypes != null)
-                return "Only show members marked as SetPoint. UDT types will be re-exported from TIA Portal when enabled.";
-
-            var missing = string.Join(", ", _active.Info.UnresolvedUdts);
-            return $"Disabled: UDT type definitions are missing ({missing}) and no PLC connection is available to export them.";
-        }
-    }
-
 
     public string StatusText
     {
@@ -2381,16 +2293,13 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
 
     /// <summary>
     /// Scripted-only companion to <see cref="FlushPendingHighlighting"/>:
-    /// cancels the 200ms debounce on <see cref="SearchQuery"/> and runs the
-    /// filter + flat-list refresh synchronously.
+    /// cancels the 200ms debounce on <see cref="SearchFilterViewModel.SearchQuery"/>
+    /// and runs the filter + flat-list refresh synchronously. Delegates to
+    /// <see cref="SearchFilterViewModel.FlushPendingSearch"/> on the
+    /// <see cref="Filter"/> slice; kept as a host-side shim so existing test /
+    /// capture-script call sites don't have to chase the new path.
     /// </summary>
-    internal void FlushPendingSearch()
-    {
-        _searchDebounceTimer?.Dispose();
-        _searchDebounceTimer = null;
-        ApplyAllFilters();
-        RefreshFlatList();
-    }
+    internal void FlushPendingSearch() => Filter.FlushPendingSearch();
 
     /// <summary>
     /// Scripted-only: clears <see cref="NewValue"/> and the internal
@@ -2881,17 +2790,18 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         // path leaves in other active DBs as search hits.
         var perDbSearchPaths = new Dictionary<ActiveDb, HashSet<string>>();
         int totalSearchHits = 0;
-        if (!string.IsNullOrWhiteSpace(_searchQuery))
+        var searchQuery = Filter.SearchQuery;
+        if (!string.IsNullOrWhiteSpace(searchQuery))
         {
             foreach (var db in AllActiveDbs)
             {
-                var result = _searchService.Search(db.Info, _searchQuery);
+                var result = _searchService.Search(db.Info, searchQuery);
                 perDbSearchPaths[db] =
                     new HashSet<string>(result.Matches.Select(m => m.Path));
                 totalSearchHits += result.HitCount;
             }
         }
-        SearchHitCount = totalSearchHits;
+        Filter.SearchHitCount = totalSearchHits;
 
         var config = _configLoader.GetConfig();
 
@@ -2908,7 +2818,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
                 totalHidden += db.Info.AllMembers().Count(m => m.IsLeaf && excl.Contains(m.Path));
             }
         }
-        HiddenByRuleCount = totalHidden;
+        Filter.HiddenByRuleCount = totalHidden;
 
         if (HasMultipleActiveDbs)
         {
@@ -2924,7 +2834,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
                     ruleFilterActive: true,
                     searchMatchPaths: sp,
                     excludedByRules: ex,
-                    showSetpointsOnly: _showSetpointsOnly);
+                    showSetpointsOnly: Filter.ShowSetpointsOnly);
                 if (sp != null) SmartExpandSearchMatches(syntheticRoot, sp);
             }
         }
@@ -2933,7 +2843,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             perDbSearchPaths.TryGetValue(_active, out var searchPaths);
             perDbExcludeSet.TryGetValue(_active, out var excludeSet);
             foreach (var root in RootMembers)
-                root.ApplyFilter(ruleFilterActive: true, searchPaths, excludeSet, _showSetpointsOnly);
+                root.ApplyFilter(ruleFilterActive: true, searchPaths, excludeSet, Filter.ShowSetpointsOnly);
             if (searchPaths != null)
             {
                 foreach (var root in RootMembers)
@@ -2958,7 +2868,8 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     /// </summary>
     private void ReExpandNonAffected()
     {
-        if (string.IsNullOrWhiteSpace(_searchQuery)) return;
+        var searchQuery = Filter.SearchQuery;
+        if (string.IsNullOrWhiteSpace(searchQuery)) return;
 
         if (HasMultipleActiveDbs)
         {
@@ -2968,14 +2879,14 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             {
                 var db = kvp.Key;
                 var syntheticRoot = kvp.Value;
-                var result = _searchService.Search(db.Info, _searchQuery);
+                var result = _searchService.Search(db.Info, searchQuery);
                 var searchPaths = new HashSet<string>(result.Matches.Select(m => m.Path));
                 SmartExpandSearchMatches(syntheticRoot, searchPaths);
             }
         }
         else
         {
-            var result = _searchService.Search(_active.Info, _searchQuery);
+            var result = _searchService.Search(_active.Info, searchQuery);
             var searchPaths = new HashSet<string>(result.Matches.Select(m => m.Path));
             foreach (var root in RootMembers)
                 SmartExpandSearchMatches(root, searchPaths);
@@ -3197,8 +3108,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
 
             RefreshTree(_active.Xml, resolver, commentResolver);
 
-            OnPropertyChanged(nameof(CanShowSetpointsOnly));
-            OnPropertyChanged(nameof(ShowSetpointsOnlyTooltip));
+            Filter.RaiseSetpointsCapabilityChanged();
         }
         catch (Exception ex)
         {
@@ -4469,10 +4379,9 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
 
         _valueDebounceTimer?.Dispose();
         _valueDebounceTimer = null;
-        _searchDebounceTimer?.Dispose();
-        _searchDebounceTimer = null;
 
-        // Subscription owns the LicenseStateChanged subscription (#80 slice 2).
+        // Slices own their own disposable state.
+        Filter.Dispose();
         Subscription.Dispose();
     }
 }

@@ -268,10 +268,10 @@ public static class SceneApplier
         if (scene.Filter != null)
         {
             if (scene.Filter.SetpointsOnly.HasValue)
-                vm.ShowSetpointsOnly = scene.Filter.SetpointsOnly.Value;
+                vm.Filter.ShowSetpointsOnly = scene.Filter.SetpointsOnly.Value;
             if (scene.Filter.SearchText != null)
             {
-                vm.SearchQuery = scene.Filter.SearchText;
+                vm.Filter.SearchQuery = scene.Filter.SearchText;
                 vm.FlushPendingSearch();
             }
         }
@@ -513,7 +513,7 @@ public static class SceneApplier
             CollapseRecursive(root);
         vm.SelectedFlatMember = null;
         vm.SelectedScope = null;
-        vm.SearchQuery = "";
+        vm.Filter.SearchQuery = "";
         // Reset NewValue without tripping the user-touched flag so the next
         // scene's member selection can still drive the normal prefill path.
         vm.ResetNewValueSilent();

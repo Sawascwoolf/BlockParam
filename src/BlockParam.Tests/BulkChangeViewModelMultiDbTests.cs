@@ -409,13 +409,13 @@ public class BulkChangeViewModelMultiDbTests
         // common substring in member names. "speed" appears in flat-db.xml.
         // Even if it doesn't match in the peer, the multi-DB code path
         // still has to run against it without crashing.
-        vm.SearchQuery = "speed";
+        vm.Filter.SearchQuery = "speed";
 
         // No assertion on a specific number — the test asserts the wiring
         // (no crash, hit count is consistent with the AND-over-DBs result).
         // The pre-fix bug would silently report only focused-DB hits even
         // if the peer DB had matching members.
-        vm.SearchHitCount.Should().BeGreaterOrEqualTo(0);
+        vm.Filter.SearchHitCount.Should().BeGreaterOrEqualTo(0);
     }
 
     [Fact]

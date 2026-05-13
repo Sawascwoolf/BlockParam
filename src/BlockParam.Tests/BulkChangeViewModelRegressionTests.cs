@@ -143,12 +143,12 @@ public class BulkChangeViewModelRegressionTests : IDisposable
     {
         var vm = CreateTwoDbVm();
 
-        vm.SearchQuery = "Speed";
+        vm.Filter.SearchQuery = "Speed";
         vm.FlushPendingSearch(); // cancels debounce, runs synchronously
 
         // FlatDB: "Speed" → 1 hit
         // NestedStructDB: "MaxSpeed" + "MinSpeed" → 2 hits
-        vm.SearchHitCount.Should().Be(3,
+        vm.Filter.SearchHitCount.Should().Be(3,
             "search hit count must sum across all active DBs: " +
             "FlatDB.Speed(1) + NestedStructDB.MaxSpeed+MinSpeed(2) = 3");
     }
@@ -178,7 +178,7 @@ public class BulkChangeViewModelRegressionTests : IDisposable
         var configRoot = vm.RootMembers.FirstOrDefault(r => r.Name == "Config");
         configRoot.Should().NotBeNull("fixture must have a Config struct");
 
-        vm.SearchQuery = "Timeout";
+        vm.Filter.SearchQuery = "Timeout";
         vm.FlushPendingSearch();
 
         // After search the ancestor chain Config → Config.Settings must be expanded
@@ -216,9 +216,9 @@ public class BulkChangeViewModelRegressionTests : IDisposable
         }");
         var vm = CreateFlatDbVm(configLoader: configLoader);
 
-        vm.HiddenByRuleCount.Should().Be(1,
+        vm.Filter.HiddenByRuleCount.Should().Be(1,
             "one rule hides Speed — count must be 1");
-        vm.ShowRuleFilterBanner.Should().BeTrue(
+        vm.Filter.ShowRuleFilterBanner.Should().BeTrue(
             "banner is shown whenever at least one member is hidden by a rule");
     }
 
@@ -906,7 +906,7 @@ public class BulkChangeViewModelRegressionTests : IDisposable
         var vm = CreateFlatDbVm(licenseService: licenseService);
 
         // Kick both debounce timers
-        vm.SearchQuery = "Speed";    // schedules _searchDebounceTimer
+        vm.Filter.SearchQuery = "Speed";    // schedules Filter slice debounce timer
         vm.NewValue = "42";          // schedules _valueDebounceTimer
 
         var usageTextBefore = vm.Subscription.UsageStatusText;
