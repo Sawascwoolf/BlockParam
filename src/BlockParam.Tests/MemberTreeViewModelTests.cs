@@ -193,17 +193,20 @@ public class MemberTreeViewModelTests
         vm.BuildRootMembersFromActiveDbs();
 
         // MakeNestedDb produces one struct ("Group") with two leaves
-        // ("Speed", "Temp") per DB. Multi-DB also adds the synthetic group VM
-        // per DB. Subscribe is called for every descendant including the
-        // synthetic group itself (which is fine — the synthetic node has no
-        // StartValueEdited semantics, the subscription is a no-op).
-        subscribed.Should().HaveCountGreaterOrEqualTo(
-            /* per DB: synthetic + Group + Speed + Temp = 4, two DBs = 8 */ 8,
+        // ("Speed", "Temp") per DB. AddDbGroupRoot iterates
+        // groupVm.AllDescendants() which excludes the synthetic root itself
+        // (AllDescendants returns child-and-below only), so per DB the slice
+        // subscribes Group + Speed + Temp = 3. Two DBs = 6 total. Asserting
+        // the exact contract count: an accidental "subscribe roots only" or
+        // "subscribe leaves only" regression would shift this number.
+        subscribed.Should().HaveCount(6,
             "every descendant in every active DB's synthetic subtree must be wired");
         // Both DB subtrees must contribute — a single-DB regression would
-        // produce 4 entries from dbA only.
-        subscribed.Select(v => v.Name).Should().Contain("Speed");
-        subscribed.Select(v => v.Name).Should().Contain("Temp");
+        // produce 3 entries from dbA only.
+        subscribed.Select(v => v.Name).Where(n => n == "Speed").Should().HaveCount(2,
+            "the Speed leaf in each of the two active DBs must be wired");
+        subscribed.Select(v => v.Name).Where(n => n == "Temp").Should().HaveCount(2,
+            "the Temp leaf in each of the two active DBs must be wired");
     }
 
     [Fact]
