@@ -203,23 +203,32 @@ public class SearchFilterViewModelTests
     [Fact]
     public void SearchQuery_RapidKeystrokes_CoalesceIntoSingleCallback()
     {
+        using var done = new ManualResetEventSlim();
         int callbackCount = 0;
-        var vm = Build(onFiltersChanged: () => Interlocked.Increment(ref callbackCount));
+        var vm = Build(onFiltersChanged: () =>
+        {
+            Interlocked.Increment(ref callbackCount);
+            done.Set();
+        });
 
         vm.SearchQuery = "S";
         vm.SearchQuery = "Sp";
         vm.SearchQuery = "Spe";
 
-        // Wait past the 200ms debounce window so the third (latest) timer
-        // can fire; the first two should have been disposed and never run.
-        Thread.Sleep(400);
+        // The threadpool timer fires ~200ms after the last setter, then
+        // posts work via _dispatcher.BeginInvoke. The test thread's
+        // dispatcher only drains when we pump it, so poll-pump until the
+        // callback signals (or we time out generously).
+        var deadline = DateTime.UtcNow.AddSeconds(3);
+        while (DateTime.UtcNow < deadline && !done.IsSet)
+        {
+            PumpDispatcher();
+            if (done.IsSet) break;
+            Thread.Sleep(25);
+        }
 
-        // Timer callbacks land on the threadpool and post their work via
-        // _dispatcher.BeginInvoke(...). The test thread's dispatcher queue
-        // doesn't pump on its own — drain it explicitly so the coalesced
-        // callback runs before we assert.
-        PumpDispatcher();
-
+        done.IsSet.Should().BeTrue(
+            "the debounce timer must eventually fire its filter callback");
         callbackCount.Should().Be(1,
             "three consecutive keystrokes inside the 200ms window must coalesce " +
             "into one filter pass; otherwise WPF would over-filter on every keystroke");
