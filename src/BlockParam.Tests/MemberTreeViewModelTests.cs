@@ -102,6 +102,38 @@ public class MemberTreeViewModelTests
         rebuiltCount.Should().Be(2);
     }
 
+    /// <summary>
+    /// The host's <c>SeedVmsFromStore</c> subscribes to <c>RootsRebuilt</c>
+    /// and immediately calls <c>Tree.ModelToVm.TryGetValue(node, ...)</c> on
+    /// every pending entry. If the slice ever fires the event before the
+    /// lookup dictionaries are populated, pending-edit seeding would
+    /// silently drop every entry — which is exactly the kind of regression
+    /// the slice extraction was supposed to prevent.
+    /// </summary>
+    [Fact]
+    public void BuildFromActiveDbs_RootsRebuilt_FiresAfterLookupsArePopulated()
+    {
+        var (db, speed, _) = MakeFlatDb("DB_X");
+        var vm = Build(activeDbs: new[] { db });
+
+        bool lookupReadyInHandler = false;
+        bool speedResolvedInHandler = false;
+        vm.RootsRebuilt += () =>
+        {
+            lookupReadyInHandler = vm.ModelToVm.Count > 0;
+            speedResolvedInHandler = vm.FindVmByModel(speed) != null;
+        };
+
+        vm.BuildRootMembersFromActiveDbs();
+
+        lookupReadyInHandler.Should().BeTrue(
+            "ModelToVm must be populated before the event fires — the host's " +
+            "SeedVmsFromStore looks up by MemberNode and would silently drop " +
+            "every pending edit if the dict were still empty");
+        speedResolvedInHandler.Should().BeTrue(
+            "FindVmByModel must work inside the handler for every minted node");
+    }
+
     [Fact]
     public void BuildFromActiveDbs_ClearsPriorLookupsAndRoots()
     {
@@ -127,7 +159,7 @@ public class MemberTreeViewModelTests
     }
 
     [Fact]
-    public void BuildFromActiveDbs_InvokesSubscribeCallbackForEveryMintedVm()
+    public void BuildFromActiveDbs_SingleDb_InvokesSubscribeCallbackForEveryMintedVm()
     {
         var (db, _, _) = MakeFlatDb("DB_S");
         var subscribed = new List<MemberNodeViewModel>();
@@ -140,6 +172,38 @@ public class MemberTreeViewModelTests
             "so inline edits in the new tree route into the pending store");
         // Each subscription is for a distinct minted VM.
         subscribed.Distinct().Count().Should().Be(subscribed.Count);
+    }
+
+    /// <summary>
+    /// Multi-DB rebuilds go through <c>AddDbGroupRoot</c>, which iterates
+    /// every descendant of the synthetic group VM and invokes
+    /// <c>_subscribeToVm</c> per node. Single-DB coverage (above) only
+    /// exercises the top-level loop; this test locks the multi-DB
+    /// descendant-walk so an accidental "subscribe roots only" regression
+    /// would leave nested members unwired for inline editing.
+    /// </summary>
+    [Fact]
+    public void BuildFromActiveDbs_MultiDb_InvokesSubscribeCallbackForEveryDescendant()
+    {
+        var (dbA, _, _) = MakeNestedDb("DB_A");
+        var (dbB, _, _) = MakeNestedDb("DB_B");
+        var subscribed = new List<MemberNodeViewModel>();
+        var vm = Build(activeDbs: new[] { dbA, dbB }, subscribeToVm: subscribed.Add);
+
+        vm.BuildRootMembersFromActiveDbs();
+
+        // MakeNestedDb produces one struct ("Group") with two leaves
+        // ("Speed", "Temp") per DB. Multi-DB also adds the synthetic group VM
+        // per DB. Subscribe is called for every descendant including the
+        // synthetic group itself (which is fine — the synthetic node has no
+        // StartValueEdited semantics, the subscription is a no-op).
+        subscribed.Should().HaveCountGreaterOrEqualTo(
+            /* per DB: synthetic + Group + Speed + Temp = 4, two DBs = 8 */ 8,
+            "every descendant in every active DB's synthetic subtree must be wired");
+        // Both DB subtrees must contribute — a single-DB regression would
+        // produce 4 entries from dbA only.
+        subscribed.Select(v => v.Name).Should().Contain("Speed");
+        subscribed.Select(v => v.Name).Should().Contain("Temp");
     }
 
     [Fact]
@@ -232,17 +296,41 @@ public class MemberTreeViewModelTests
         vm.BuildRootMembersFromActiveDbs();
 
         bool wasTrueInsideCallback = false;
+        int flatCountInsideCallback = -1;
         vm.RebuildFlatList(insideRefreshScope: () =>
         {
             wasTrueInsideCallback = vm.IsRefreshing;
+            flatCountInsideCallback = vm.FlatMembers.Count;
         });
 
         wasTrueInsideCallback.Should().BeTrue(
             "the callback runs after the flat list rebuild but before IsRefreshing " +
             "clears — host uses this scope to restore selection without re-entering " +
             "OnMemberSelected");
+        flatCountInsideCallback.Should().BeGreaterThan(0,
+            "the doc comment promises the flat list is *already* rebuilt when the " +
+            "callback fires, so selection-restore code can look up the new VM by " +
+            "path against FlatMembers");
         vm.IsRefreshing.Should().BeFalse(
             "the flag clears once the callback returns");
+    }
+
+    [Fact]
+    public void RebuildFlatList_CallbackThrows_StillClearsIsRefreshing()
+    {
+        var (db, _, _) = MakeFlatDb("DB_F");
+        var vm = Build(activeDbs: new[] { db });
+        vm.BuildRootMembersFromActiveDbs();
+
+        var act = () => vm.RebuildFlatList(insideRefreshScope: () =>
+            throw new InvalidOperationException("callback boom"));
+
+        // Whatever the callback does, the slice must not leak IsRefreshing=true —
+        // otherwise the SelectedFlatMember setter on the host stays permanently
+        // gated against re-entry.
+        act.Should().Throw<InvalidOperationException>();
+        vm.IsRefreshing.Should().BeFalse(
+            "try/finally must clear IsRefreshing even when the callback throws");
     }
 
     [Fact]
