@@ -208,14 +208,18 @@ public class PendingEditsViewModelTests
         return new MemberValidator(config, null);
     }
 
-    private static MemberNodeViewModel FindLeaf(MemberNodeViewModel node, string name)
+    private static MemberNodeViewModel FindLeaf(MemberNodeViewModel node, string name) =>
+        TryFindLeaf(node, name)
+            ?? throw new InvalidOperationException($"Leaf '{name}' not found");
+
+    private static MemberNodeViewModel? TryFindLeaf(MemberNodeViewModel node, string name)
     {
         if (node.Name == name && node.IsLeaf) return node;
         foreach (var c in node.Children)
         {
-            var found = FindLeaf(c, name);
+            var found = TryFindLeaf(c, name);
             if (found != null) return found;
         }
-        throw new InvalidOperationException($"Leaf '{name}' not found");
+        return null;
     }
 }
