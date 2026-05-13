@@ -278,25 +278,25 @@
                               Fill="#666" Width="14" Height="14" Stretch="Uniform"/>
                     </Button>
                     <CheckBox Content="{loc:Loc Dialog_ShowSetpointsOnly}"
-                              IsChecked="{Binding ShowSetpointsOnly}"
-                              IsEnabled="{Binding CanShowSetpointsOnly}"
-                              ToolTip="{Binding ShowSetpointsOnlyTooltip}"
+                              IsChecked="{Binding Filter.ShowSetpointsOnly}"
+                              IsEnabled="{Binding Filter.CanShowSetpointsOnly}"
+                              ToolTip="{Binding Filter.ShowSetpointsOnlyTooltip}"
                               VerticalAlignment="Center" Margin="0,0,0,0" DockPanel.Dock="Left"/>
                     <TextBox x:Name="SearchBox"
-                             Text="{Binding SearchQuery, UpdateSourceTrigger=PropertyChanged}"
+                             Text="{Binding Filter.SearchQuery, UpdateSourceTrigger=PropertyChanged}"
                              Width="200" Padding="4,2" VerticalAlignment="Center"
                              Margin="12,0,0,0" DockPanel.Dock="Left"/>
-                    <TextBlock Text="{Binding SearchHitCount, StringFormat='{}{0} hits'}"
+                    <TextBlock Text="{Binding Filter.SearchHitCount, StringFormat='{}{0} hits'}"
                                VerticalAlignment="Center" Foreground="#888"
                                HorizontalAlignment="Right" Margin="8,0,8,0"
-                               Visibility="{Binding HasSearchQuery, Converter={StaticResource BoolToVis}}"/>
+                               Visibility="{Binding Filter.HasSearchQuery, Converter={StaticResource BoolToVis}}"/>
                 </DockPanel>
 
                 <!-- Passive banner: rule filter hiding members (#23) -->
                 <Border DockPanel.Dock="Top"
                         Background="#FFF8E1" BorderBrush="#E0C97F" BorderThickness="1"
                         Padding="8,4" Margin="0,0,0,4"
-                        Visibility="{Binding ShowRuleFilterBanner, Converter={StaticResource BoolToVis}}">
+                        Visibility="{Binding Filter.ShowRuleFilterBanner, Converter={StaticResource BoolToVis}}">
                     <DockPanel>
                         <Button DockPanel.Dock="Right"
                                 Content="{loc:Loc Dialog_RuleFilterBanner_Link}"
@@ -304,7 +304,7 @@
                                 Background="Transparent" BorderThickness="0"
                                 Foreground="#0078D7" Cursor="Hand" Padding="4,0"
                                 VerticalAlignment="Center"/>
-                        <TextBlock Text="{Binding RuleFilterBannerText}"
+                        <TextBlock Text="{Binding Filter.RuleFilterBannerText}"
                                    Foreground="#6B5500" VerticalAlignment="Center"/>
                     </DockPanel>
                 </Border>

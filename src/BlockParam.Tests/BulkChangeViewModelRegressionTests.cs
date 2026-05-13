@@ -143,12 +143,12 @@ public class BulkChangeViewModelRegressionTests : IDisposable
     {
         var vm = CreateTwoDbVm();
 
-        vm.SearchQuery = "Speed";
+        vm.Filter.SearchQuery = "Speed";
         vm.FlushPendingSearch(); // cancels debounce, runs synchronously
 
         // FlatDB: "Speed" → 1 hit
         // NestedStructDB: "MaxSpeed" + "MinSpeed" → 2 hits
-        vm.SearchHitCount.Should().Be(3,
+        vm.Filter.SearchHitCount.Should().Be(3,
             "search hit count must sum across all active DBs: " +
             "FlatDB.Speed(1) + NestedStructDB.MaxSpeed+MinSpeed(2) = 3");
     }
@@ -178,7 +178,7 @@ public class BulkChangeViewModelRegressionTests : IDisposable
         var configRoot = vm.RootMembers.FirstOrDefault(r => r.Name == "Config");
         configRoot.Should().NotBeNull("fixture must have a Config struct");
 
-        vm.SearchQuery = "Timeout";
+        vm.Filter.SearchQuery = "Timeout";
         vm.FlushPendingSearch();
 
         // After search the ancestor chain Config → Config.Settings must be expanded
@@ -216,10 +216,89 @@ public class BulkChangeViewModelRegressionTests : IDisposable
         }");
         var vm = CreateFlatDbVm(configLoader: configLoader);
 
-        vm.HiddenByRuleCount.Should().Be(1,
+        vm.Filter.HiddenByRuleCount.Should().Be(1,
             "one rule hides Speed — count must be 1");
-        vm.ShowRuleFilterBanner.Should().BeTrue(
+        vm.Filter.ShowRuleFilterBanner.Should().BeTrue(
             "banner is shown whenever at least one member is hidden by a rule");
+    }
+
+    /// <summary>
+    /// Test 4 — When an active-set change swaps the anchor to a DB with a
+    /// different UDT-resolution outcome, <see cref="SearchFilterViewModel.CanShowSetpointsOnly"/>
+    /// and <see cref="SearchFilterViewModel.ShowSetpointsOnlyTooltip"/> must
+    /// refresh. Both derive from <c>_active.Info.UnresolvedUdts</c> via the
+    /// slice's <c>getAnchorInfo</c> closure, and the slice has no way to
+    /// observe the anchor change on its own — the host's
+    /// <c>RebuildAfterActiveSetChanged</c> cascade has to call
+    /// <see cref="SearchFilterViewModel.RaiseSetpointsCapabilityChanged"/>.
+    /// Before this fix the checkbox stayed enabled-or-disabled based on the
+    /// original anchor even after the user removed it.
+    /// </summary>
+    [Fact]
+    public void ActiveSetChange_AnchorSwap_RaisesSetpointsCapability()
+    {
+        // Anchor: clean (no UnresolvedUdts) → CanShowSetpointsOnly==true.
+        // Peer:   has UnresolvedUdts + no UDT-refresh path → would be FALSE.
+        var anchorInfo = new DataBlockInfo(
+            "DB_Anchor", 1, "Optimized", "GlobalDB",
+            Array.Empty<MemberNode>(),
+            unresolvedUdts: Array.Empty<string>());
+        var peerInfo = new DataBlockInfo(
+            "DB_Peer", 2, "Optimized", "GlobalDB",
+            Array.Empty<MemberNode>(),
+            unresolvedUdts: new[] { "messageConfig_UDT" });
+
+        var configLoader = new ConfigLoader(null);
+        var bulkService = new BulkChangeService(new ChangeLogger(), configLoader);
+        var tracker = Substitute.For<IUsageTracker>();
+        tracker.GetStatus().Returns(new UsageStatus(0, 1000));
+        tracker.RecordUsage(Arg.Any<int>()).Returns(true);
+
+        // No onRefreshUdtTypes wired → CanShowSetpointsOnly tracks
+        // UnresolvedUdts.Count directly.
+        var vm = new BulkChangeViewModel(
+            anchorInfo, currentXml: "<Block />",
+            new HierarchyAnalyzer(), bulkService, tracker, configLoader,
+            messageBox: new NopMessageBox(),
+            additionalActiveDbs: new[] { new ActiveDb(peerInfo, "<Block />") });
+
+        vm.Filter.CanShowSetpointsOnly.Should().BeTrue(
+            "starting anchor has 0 unresolved UDTs and no refresh path → enabled");
+        vm.Filter.ShowSetpointsOnlyTooltip.Should().NotContain("Disabled",
+            "clean anchor: tooltip describes the filter, not the disabled state");
+
+        // Subscribe AFTER construction so the seed cascade doesn't poison the list.
+        var capabilityRaises = 0;
+        var tooltipRaises = 0;
+        vm.Filter.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(SearchFilterViewModel.CanShowSetpointsOnly))
+                capabilityRaises++;
+            if (e.PropertyName == nameof(SearchFilterViewModel.ShowSetpointsOnlyTooltip))
+                tooltipRaises++;
+        };
+
+        // Remove the anchor → peer (with UnresolvedUdts) becomes the new anchor.
+        // RequestRemoveActiveDb runs the State setter, which fires
+        // RebuildAfterActiveSetChanged → Filter.RaiseSetpointsCapabilityChanged().
+        var anchorDb = vm.AllActiveDbs.First(d => d.Info.Name == "DB_Anchor");
+        vm.RequestRemoveActiveDb(anchorDb);
+
+        vm.AllActiveDbs.Should().HaveCount(1);
+        vm.AllActiveDbs[0].Info.Name.Should().Be("DB_Peer",
+            "after removing the original anchor the peer occupies index 0");
+
+        capabilityRaises.Should().BeGreaterOrEqualTo(1,
+            "anchor swap must raise PropertyChanged for CanShowSetpointsOnly so the " +
+            "checkbox state can refresh");
+        tooltipRaises.Should().BeGreaterOrEqualTo(1,
+            "anchor swap must raise PropertyChanged for ShowSetpointsOnlyTooltip so the " +
+            "tooltip text refreshes");
+
+        vm.Filter.CanShowSetpointsOnly.Should().BeFalse(
+            "new anchor has 1 UnresolvedUdt and no refresh path → disabled");
+        vm.Filter.ShowSetpointsOnlyTooltip.Should().Contain("messageConfig_UDT",
+            "tooltip must surface the now-current anchor's missing UDT name");
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -906,7 +985,7 @@ public class BulkChangeViewModelRegressionTests : IDisposable
         var vm = CreateFlatDbVm(licenseService: licenseService);
 
         // Kick both debounce timers
-        vm.SearchQuery = "Speed";    // schedules _searchDebounceTimer
+        vm.Filter.SearchQuery = "Speed";    // schedules Filter slice debounce timer
         vm.NewValue = "42";          // schedules _valueDebounceTimer
 
         var usageTextBefore = vm.Subscription.UsageStatusText;
