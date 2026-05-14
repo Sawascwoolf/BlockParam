@@ -210,6 +210,96 @@ public class BulkChangeViewModelMultiDbTests
         tracker.DidNotReceive().RecordUsage(Arg.Any<int>());
     }
 
+    /// <summary>
+    /// Regression for #108: in multi-DB mode the host's
+    /// <c>SubscribeStartValueEdited</c> used to be recursive AND
+    /// <see cref="MemberTreeViewModel.AddDbGroupRoot"/> also walked every
+    /// descendant — so non-leaf nodes ended up with depth-many
+    /// <c>StartValueEdited</c> and <c>SelectedChanged</c> handlers each.
+    /// Editing a leaf still produced the correct pending value (the store
+    /// is idempotent), but every inline edit fanned N
+    /// <c>OnNodeSelected</c> sweeps of the tree.
+    ///
+    /// <para>
+    /// The fix made the per-VM subscribe callback non-recursive by contract
+    /// (both sites iterate per node). This test fires
+    /// <c>StartValueEdited</c> on a deeply-nested leaf in a multi-DB session
+    /// and asserts the host's <c>OnSingleValueEdited</c> runs exactly once.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void InlineEdit_DeeplyNestedLeaf_MultiDb_FiresOnSingleValueEditedExactlyOnce()
+    {
+        // Pair two DBs so we land on the multi-DB code path that triggered
+        // the bug. deep-nesting-db.xml has 5 levels of struct nesting with
+        // one leaf at the bottom — exactly the shape #108 calls out (depth
+        // ≥ 3 below the synthetic group root).
+        var anchorXml = TestFixtures.LoadXml("flat-db.xml");
+        var deepXml = TestFixtures.LoadXml("deep-nesting-db.xml");
+        var parser = new SimaticMLParser();
+        var anchor = parser.Parse(anchorXml);
+        var deep = parser.Parse(deepXml);
+
+        var configLoader = new ConfigLoader(null);
+        var bulkService = new BulkChangeService(new ChangeLogger(), configLoader);
+        var tracker = Substitute.For<IUsageTracker>();
+        tracker.GetStatus().Returns(new UsageStatus(0, 100));
+        tracker.RecordUsage(Arg.Any<int>()).Returns(true);
+
+        var deepDb = new ActiveDb(deep, deepXml, onApply: null);
+
+        var vm = new BulkChangeViewModel(
+            anchor, anchorXml,
+            new HierarchyAnalyzer(), bulkService, tracker, configLoader,
+            additionalActiveDbs: new[] { deepDb });
+
+        // Locate the deep leaf (DeepValue) inside the synthetic group root
+        // for the deep DB. AllDescendants spans the whole subtree.
+        var deepRoot = vm.Tree.RootMembers.First(r => r.Name == deep.Name);
+        var deepLeaf = deepRoot.AllDescendants()
+            .First(n => n.IsLeaf && n.Name == "DeepValue");
+
+        // The leaf must sit deep enough below the synthetic root that a
+        // recursive subscribe would noticeably fan out. The synthetic root
+        // is depth 0; DeepValue lives at depth 5 (Level1 → Level2 → Level3
+        // → Level4 → DeepValue). The original bug bound depth-many handlers
+        // per ancestor — locking in the structural premise of the test.
+        deepLeaf.Depth.Should().BeGreaterOrEqualTo(3,
+            "the regression only manifests when the leaf is deeply nested " +
+            "below the synthetic group root");
+
+        // Observe the StartValueEdited and SelectedChanged events'
+        // invocation list lengths: exactly one host handler each must be
+        // wired (OnSingleValueEdited / Selection.OnNodeSelected, routed
+        // via SubscribeStartValueEdited). Before #108 these were
+        // (depth + 1) — one per ancestor that walked into this leaf
+        // through the recursive host AND the slice's per-descendant loop.
+        var startValueEditedField = typeof(MemberNodeViewModel).GetField(
+            "StartValueEdited",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+        var selectedChangedField = typeof(MemberNodeViewModel).GetField(
+            "SelectedChanged",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+        startValueEditedField.Should().NotBeNull(
+            "the test relies on the compiler-generated backing field for the event");
+        selectedChangedField.Should().NotBeNull(
+            "the test relies on the compiler-generated backing field for the event");
+
+        var editedDel = (Delegate?)startValueEditedField!.GetValue(deepLeaf);
+        var editedHandlerCount = editedDel?.GetInvocationList().Length ?? 0;
+        editedHandlerCount.Should().Be(1,
+            "non-recursive contract (#108): each minted VM gets exactly one " +
+            "OnSingleValueEdited handler — a recursive host plus the slice's " +
+            "per-descendant loop would produce depth-many subscriptions here");
+
+        var selectedDel = (Delegate?)selectedChangedField!.GetValue(deepLeaf);
+        var selectedHandlerCount = selectedDel?.GetInvocationList().Length ?? 0;
+        selectedHandlerCount.Should().Be(1,
+            "non-recursive contract (#108): each minted VM gets exactly one " +
+            "Selection.OnNodeSelected handler — depth-many handlers were the " +
+            "observable symptom of the bug (N sweeps of the tree per edit)");
+    }
+
     [Fact]
     public void FilteredDataBlockItems_FlagsActiveAndFocusedRows()
     {

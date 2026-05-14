@@ -178,9 +178,19 @@ public class MemberTreeViewModelTests
     /// Multi-DB rebuilds go through <c>AddDbGroupRoot</c>, which iterates
     /// every descendant of the synthetic group VM and invokes
     /// <c>_subscribeToVm</c> per node. Single-DB coverage (above) only
-    /// exercises the top-level loop; this test locks the multi-DB
-    /// descendant-walk so an accidental "subscribe roots only" regression
-    /// would leave nested members unwired for inline editing.
+    /// exercises the flat top-level + descendant walk on a fixture without
+    /// nested children; this test locks the multi-DB descendant-walk so an
+    /// accidental "subscribe roots only" regression would leave nested
+    /// members unwired for inline editing.
+    ///
+    /// <para>
+    /// Post-#108 the callback is non-recursive by contract — the slice
+    /// invokes it once per minted VM, including the synthetic group root
+    /// itself. The synthetic root's events never fire (it has no
+    /// <c>StartValue</c>), but subscribing it keeps the "one callback per
+    /// minted VM" contract uniform between the single-DB and multi-DB
+    /// paths.
+    /// </para>
     /// </summary>
     [Fact]
     public void BuildFromActiveDbs_MultiDb_InvokesSubscribeCallbackForEveryDescendant()
@@ -193,20 +203,58 @@ public class MemberTreeViewModelTests
         vm.BuildRootMembersFromActiveDbs();
 
         // MakeNestedDb produces one struct ("Group") with two leaves
-        // ("Speed", "Temp") per DB. AddDbGroupRoot iterates
-        // groupVm.AllDescendants() which excludes the synthetic root itself
-        // (AllDescendants returns child-and-below only), so per DB the slice
-        // subscribes Group + Speed + Temp = 3. Two DBs = 6 total. Asserting
-        // the exact contract count: an accidental "subscribe roots only" or
-        // "subscribe leaves only" regression would shift this number.
-        subscribed.Should().HaveCount(6,
-            "every descendant in every active DB's synthetic subtree must be wired");
+        // ("Speed", "Temp") per DB. Per #108's non-recursive contract,
+        // AddDbGroupRoot subscribes the synthetic root + every descendant:
+        // synthetic + Group + Speed + Temp = 4 per DB. Two DBs = 8 total.
+        // An accidental "subscribe roots only" or "subscribe leaves only"
+        // regression would shift this number.
+        subscribed.Should().HaveCount(8,
+            "every minted VM (synthetic root + every descendant) in every " +
+            "active DB's subtree must be wired");
         // Both DB subtrees must contribute — a single-DB regression would
-        // produce 3 entries from dbA only.
+        // produce 4 entries from dbA only.
         subscribed.Select(v => v.Name).Where(n => n == "Speed").Should().HaveCount(2,
             "the Speed leaf in each of the two active DBs must be wired");
         subscribed.Select(v => v.Name).Where(n => n == "Temp").Should().HaveCount(2,
             "the Temp leaf in each of the two active DBs must be wired");
+    }
+
+    /// <summary>
+    /// Regression for #108: the slice's <c>_subscribeToVm</c> callback is
+    /// non-recursive by contract — register on the passed node only, do
+    /// NOT walk <c>node.Children</c>. A previous host implementation was
+    /// itself recursive, and combined with <see cref="MemberTreeViewModel"/>'s
+    /// per-descendant loop in <c>AddDbGroupRoot</c> produced one
+    /// <c>StartValueEdited</c> / <c>SelectedChanged</c> handler per node
+    /// for every ancestor between the root and the leaf — so an inline
+    /// edit on a deeply-nested leaf fired N (= depth) sweeps of the tree.
+    ///
+    /// This test exercises the multi-DB shape with a nested subtree (the
+    /// shape that triggered the bug) and asserts each minted VM gets the
+    /// callback exactly once. The constructor doc on <see cref="_subscribeToVm"/>
+    /// (in production code) is the single source of truth for the contract.
+    /// </summary>
+    [Fact]
+    public void BuildFromActiveDbs_MultiDb_InvokesSubscribeCallbackExactlyOncePerNode()
+    {
+        var (dbA, _, _) = MakeNestedDb("DB_A");
+        var (dbB, _, _) = MakeNestedDb("DB_B");
+        var perNodeCount = new Dictionary<MemberNodeViewModel, int>();
+        var vm = Build(
+            activeDbs: new[] { dbA, dbB },
+            subscribeToVm: node =>
+            {
+                perNodeCount.TryGetValue(node, out var c);
+                perNodeCount[node] = c + 1;
+            });
+
+        vm.BuildRootMembersFromActiveDbs();
+
+        // No minted VM may receive the callback more than once — a
+        // recursive host (the pre-#108 shape) plus the slice's per-
+        // descendant loop would produce depth-many entries for non-leaves.
+        perNodeCount.Values.Should().AllSatisfy(c => c.Should().Be(1,
+            "non-recursive contract: each minted VM is subscribed exactly once"));
     }
 
     [Fact]
