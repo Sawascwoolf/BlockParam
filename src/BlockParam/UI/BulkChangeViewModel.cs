@@ -220,8 +220,12 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
                 currentPlcName ?? ""),
             messageBox: _messageBox,
             pendingEditStore: _pendingEditStore,
-            getModelToDb: () => Tree.ModelToDb,
-            getStartValueForNode: node => Tree.FindVmByModel(node)?.StartValue,
+            // Tree is assigned later in this constructor (~line 291); the
+            // closures are only invoked at user-gesture time, well after
+            // construction completes. Null-forgiving silences the build
+            // warning without changing runtime behaviour.
+            getModelToDb: () => Tree!.ModelToDb,
+            getStartValueForNode: node => Tree!.FindVmByModel(node)?.StartValue,
             buildActiveDbForSummary: BuildActiveDbFromSummaryWithFallback,
             enumerateDataBlocks: enumerateDataBlocks,
             switchToDataBlock: switchToDataBlock,
