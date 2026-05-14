@@ -5,12 +5,13 @@ namespace BlockParam.UI;
 /// <summary>
 /// Immutable snapshot of the dialog's active-DB set + interlocked state
 /// (#78). Every mutation that touches the active set, the per-DB stash
-/// dictionary, or the anchor PLC builds a new snapshot and assigns it
-/// to <see cref="BulkChangeViewModel.State"/>. The setter is the single
-/// source of cascade — <c>RebuildAfterActiveSetChanged</c> /
-/// <c>SyncStashedDbsCollection</c> / anchor-display refresh are only
-/// called from <c>OnActiveSetChanged</c>, so forgetting to refresh after
-/// a mutation is structurally impossible.
+/// dictionary, or the anchor PLC builds a new snapshot and installs it
+/// via <see cref="ActiveSetViewModel.SetState"/> (slice 8a). The slice
+/// re-mirrors <c>StashedDbs</c> internally and raises
+/// <see cref="ActiveSetViewModel.StateChanged"/>; the host's
+/// <c>HandleActiveSetStateChanged</c> runs the cross-slice cascade
+/// (<c>RebuildAfterActiveSetChanged</c> + anchor-display refresh), so
+/// forgetting to refresh after a mutation is structurally impossible.
 ///
 /// <para>
 /// Compound mutations (solo, reactivate-then-solo) build the new snapshot
