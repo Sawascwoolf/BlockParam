@@ -1333,7 +1333,7 @@
                                                     <Button Background="Transparent" BorderThickness="0"
                                                             Cursor="Hand" Padding="0"
                                                             HorizontalContentAlignment="Stretch"
-                                                            Command="{Binding DataContext.SwitchToStashedDbCommand,
+                                                            Command="{Binding DataContext.ActiveSet.SwitchToStashedDbCommand,
                                                                       RelativeSource={RelativeSource AncestorType=ItemsControl}}"
                                                             CommandParameter="{Binding}">
                                                         <DockPanel>

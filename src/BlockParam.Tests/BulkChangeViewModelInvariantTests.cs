@@ -61,12 +61,12 @@ public class BulkChangeViewModelInvariantTests
             .WithDropdownPeer("nested-struct-db.xml", plc: "PLC_B")
             .Build();
 
-        env.Vm.OpenDataBlocksDropdownCommand.Execute(null);
-        var peerRow = env.Vm.FilteredDataBlockItems.First(i => i.Name == "NestedStructDB");
+        env.Vm.ActiveSet.OpenDataBlocksDropdownCommand.Execute(null);
+        var peerRow = env.Vm.ActiveSet.FilteredDataBlockItems.First(i => i.Name == "NestedStructDB");
         peerRow.IsActive = true;
 
         env.Vm.AllActiveDbs.Should().HaveCount(2);
-        env.Vm.PlcPills.Select(p => p.PlcName).Should().BeEquivalentTo(
+        env.Vm.ActiveSet.PlcPills.Select(p => p.PlcName).Should().BeEquivalentTo(
             new[] { "PLC_A", "PLC_B" });
         env.Vm.Tree.RootMembers.Should().HaveCount(2);
         env.Vm.Tree.RootMembers.Should().AllSatisfy(r => r.Datatype.Should().Be("DB"));
@@ -88,29 +88,29 @@ public class BulkChangeViewModelInvariantTests
             .WithPromptResults(YesNoCancelResult.No)
             .Build();
 
-        env.Vm.OpenDataBlocksDropdownCommand.Execute(null);
-        var peerRow = env.Vm.FilteredDataBlockItems.First(i => i.Name == "NestedStructDB");
+        env.Vm.ActiveSet.OpenDataBlocksDropdownCommand.Execute(null);
+        var peerRow = env.Vm.ActiveSet.FilteredDataBlockItems.First(i => i.Name == "NestedStructDB");
         peerRow.IsActive = false;
 
         env.Vm.AllActiveDbs.Should().HaveCount(1);
         env.Vm.AllActiveDbs[0].Info.Name.Should().Be("FlatDB");
-        env.Vm.HasStashedDbs.Should().BeTrue();
-        env.Vm.StashedDbs.Should().ContainSingle(s => s.DbName == "NestedStructDB");
+        env.Vm.ActiveSet.HasStashedDbs.Should().BeTrue();
+        env.Vm.ActiveSet.StashedDbs.Should().ContainSingle(s => s.DbName == "NestedStructDB");
         env.Mbx.AskYesNoCancelCallCount.Should().Be(1);
         AssertInvariants(env.Vm);
     }
 
     [Fact]
-    public void HasStashedDbs_PropertyChanged_FiresOnHostWhenStashFlipsFromEmpty()
+    public void HasStashedDbs_PropertyChanged_FiresOnSliceWhenStashFlipsFromEmpty()
     {
-        // Slice 8a regression guard. The host's HasStashedDbs is a
-        // delegator over ActiveSet.HasStashedDbs; the slice raises its
-        // own PropertyChanged, and the host's constructor wires a
-        // forwarder lambda so external `vm.PropertyChanged` subscribers
-        // filtering on HasStashedDbs still see the notification. If a
-        // future slice-9 cleanup deletes the forwarder, vm.HasStashedDbs
-        // will still read correctly but bindings observing the host
-        // VM's PropertyChanged will silently stop repainting.
+        // Slice 8a regression guard, migrated in slice 9a. The host's
+        // HasStashedDbs delegator and the constructor's PropertyChanged
+        // forwarder were dropped in 9a; XAML now binds through
+        // {Binding ActiveSet.HasStashedDbs} directly, so the slice's own
+        // PropertyChanged is the single source of truth for repaints. The
+        // intent — "stash-from-empty must publish a HasStashedDbs notification
+        // that bindings can observe" — is preserved by listening on the
+        // slice's PropertyChanged channel instead of the host's.
         var env = new ActiveSetTestBuilder()
             .WithAnchor("flat-db.xml")
             .WithPeer("nested-struct-db.xml")
@@ -118,15 +118,16 @@ public class BulkChangeViewModelInvariantTests
             .WithPromptResults(YesNoCancelResult.No)
             .Build();
         var changedProps = new List<string?>();
-        ((INotifyPropertyChanged)env.Vm).PropertyChanged += (_, e) => changedProps.Add(e.PropertyName);
+        ((INotifyPropertyChanged)env.Vm.ActiveSet).PropertyChanged
+            += (_, e) => changedProps.Add(e.PropertyName);
 
-        env.Vm.OpenDataBlocksDropdownCommand.Execute(null);
-        var peerRow = env.Vm.FilteredDataBlockItems.First(i => i.Name == "NestedStructDB");
+        env.Vm.ActiveSet.OpenDataBlocksDropdownCommand.Execute(null);
+        var peerRow = env.Vm.ActiveSet.FilteredDataBlockItems.First(i => i.Name == "NestedStructDB");
         peerRow.IsActive = false;
 
-        env.Vm.HasStashedDbs.Should().BeTrue("setup: stash created");
-        changedProps.Should().Contain(nameof(BulkChangeViewModel.HasStashedDbs),
-            "the binding cannot repaint without this notification on the host VM");
+        env.Vm.ActiveSet.HasStashedDbs.Should().BeTrue("setup: stash created");
+        changedProps.Should().Contain(nameof(ActiveSetViewModel.HasStashedDbs),
+            "the binding cannot repaint without this notification on the slice VM");
     }
 
     [Fact]
@@ -142,7 +143,7 @@ public class BulkChangeViewModelInvariantTests
         // Verify the last-DB removal is refused at the VM level.
         var anchorDb = env.Vm.AllActiveDbs[0];
         var countBefore = env.Vm.AllActiveDbs.Count;
-        env.Vm.RequestRemoveActiveDb(anchorDb); // should be a no-op
+        env.Vm.ActiveSet.RequestRemoveActiveDb(anchorDb); // should be a no-op
         env.Vm.AllActiveDbs.Should().HaveCount(countBefore,
             "the dialog must always have at least one DB");
         env.Mbx.AskYesNoCancelCallCount.Should().Be(0);
@@ -166,10 +167,10 @@ public class BulkChangeViewModelInvariantTests
         var pendingValue = peerLeaf.PendingValue;
 
         var peerDb = env.Vm.AllActiveDbs.First(d => d.Info.Name == "NestedStructDB");
-        env.Vm.RequestRemoveActiveDb(peerDb);
+        env.Vm.ActiveSet.RequestRemoveActiveDb(peerDb);
 
         env.Vm.AllActiveDbs.Should().HaveCount(2, "Cancel keeps the peer in place");
-        env.Vm.HasStashedDbs.Should().BeFalse("Cancel does not stash");
+        env.Vm.ActiveSet.HasStashedDbs.Should().BeFalse("Cancel does not stash");
         peerLeaf.PendingValue.Should().Be(pendingValue, "edit was not lost");
         peerLeaf.IsPendingInlineEdit.Should().BeTrue();
         env.Mbx.AskYesNoCancelCallCount.Should().Be(1);
@@ -193,7 +194,7 @@ public class BulkChangeViewModelInvariantTests
             .Build();
 
         var targetDb = env.Vm.AllActiveDbs.First(d => d.Info.Name == "ArrayDB");
-        env.Vm.SoloActiveDbByReference(targetDb);
+        env.Vm.ActiveSet.SoloActiveDbByReference(targetDb);
 
         env.Vm.AllActiveDbs.Should().HaveCount(1);
         env.Vm.AllActiveDbs[0].Info.Name.Should().Be("ArrayDB");
@@ -202,7 +203,7 @@ public class BulkChangeViewModelInvariantTests
             o => o.WithoutStrictOrdering(),
             "every non-target DB with pending edits committed exactly once");
         env.Mbx.AskYesNoCancelCallCount.Should().Be(2);
-        env.Vm.HasStashedDbs.Should().BeFalse("Apply branch does not stash");
+        env.Vm.ActiveSet.HasStashedDbs.Should().BeFalse("Apply branch does not stash");
         AssertInvariants(env.Vm);
     }
 
@@ -222,12 +223,12 @@ public class BulkChangeViewModelInvariantTests
             .Build();
 
         var targetDb = env.Vm.AllActiveDbs.First(d => d.Info.Name == "ArrayDB");
-        env.Vm.SoloActiveDbByReference(targetDb);
+        env.Vm.ActiveSet.SoloActiveDbByReference(targetDb);
 
         env.Vm.AllActiveDbs.Select(d => d.Info.Name).Should().BeEquivalentTo(
             new[] { "NestedStructDB", "ArrayDB" },
             "Cancel on the middle DB aborts the rest of the solo loop");
-        env.Vm.HasStashedDbs.Should().BeFalse();
+        env.Vm.ActiveSet.HasStashedDbs.Should().BeFalse();
         env.Mbx.AskYesNoCancelCallCount.Should().Be(1);
         AssertInvariants(env.Vm);
     }
@@ -266,16 +267,16 @@ public class BulkChangeViewModelInvariantTests
 
         // Bootstrap: close NestedStructDB to create the stash entry.
         var nestedDb = env.Vm.AllActiveDbs.First(d => d.Info.Name == "NestedStructDB");
-        env.Vm.RequestRemoveActiveDb(nestedDb);
-        env.Vm.HasStashedDbs.Should().BeTrue("setup: stash created via chip-close");
+        env.Vm.ActiveSet.RequestRemoveActiveDb(nestedDb);
+        env.Vm.ActiveSet.HasStashedDbs.Should().BeTrue("setup: stash created via chip-close");
         env.Vm.AllActiveDbs.Should().HaveCount(2,
             "setup: FlatDB + ArrayDB active before reactivate, ≥2 → prompt fires");
 
         // Click the stash header. The new additive/replace prompt must fire
         // (count >= 2). User picks Yes = additive.
         var promptsBefore = env.Mbx.AskYesNoCancelCallCount;
-        var stash = env.Vm.StashedDbs.Single();
-        env.Vm.SwitchToStashedDbCommand.Execute(stash);
+        var stash = env.Vm.ActiveSet.StashedDbs.Single();
+        env.Vm.ActiveSet.SwitchToStashedDbCommand.Execute(stash);
 
         (env.Mbx.AskYesNoCancelCallCount - promptsBefore).Should().Be(1,
             "reactivate with ≥2 active DBs must fire the additive/replace prompt");
@@ -283,7 +284,7 @@ public class BulkChangeViewModelInvariantTests
             "Yes = Additive: the previously-active DBs stay, stashed DB added back");
         env.Vm.AllActiveDbs.Select(d => d.Info.Name)
             .Should().BeEquivalentTo(new[] { "FlatDB", "ArrayDB", "NestedStructDB" });
-        env.Vm.HasStashedDbs.Should().BeFalse(
+        env.Vm.ActiveSet.HasStashedDbs.Should().BeFalse(
             "NestedStructDB's stash entry pops on restore");
 
         // Stash edits replay onto the live tree.
@@ -322,12 +323,12 @@ public class BulkChangeViewModelInvariantTests
         var pendingValue = pendingLeaf.PendingValue!;
 
         var nestedDb2 = env.Vm.AllActiveDbs.First(d => d.Info.Name == "NestedStructDB");
-        env.Vm.RequestRemoveActiveDb(nestedDb2);
-        env.Vm.HasStashedDbs.Should().BeTrue("setup: stash created");
+        env.Vm.ActiveSet.RequestRemoveActiveDb(nestedDb2);
+        env.Vm.ActiveSet.HasStashedDbs.Should().BeTrue("setup: stash created");
 
         var promptsBefore = env.Mbx.AskYesNoCancelCallCount;
-        var stash = env.Vm.StashedDbs.Single();
-        env.Vm.SwitchToStashedDbCommand.Execute(stash);
+        var stash = env.Vm.ActiveSet.StashedDbs.Single();
+        env.Vm.ActiveSet.SwitchToStashedDbCommand.Execute(stash);
 
         (env.Mbx.AskYesNoCancelCallCount - promptsBefore).Should().Be(1,
             "reactivate with ≥2 active DBs must fire the additive/replace prompt " +
@@ -335,7 +336,7 @@ public class BulkChangeViewModelInvariantTests
         env.Vm.AllActiveDbs.Should().HaveCount(1,
             "No = Replace: others dropped (silently here, no edits)");
         env.Vm.AllActiveDbs[0].Info.Name.Should().Be("NestedStructDB");
-        env.Vm.HasStashedDbs.Should().BeFalse();
+        env.Vm.ActiveSet.HasStashedDbs.Should().BeFalse();
 
         var restored = env.Vm.Tree.RootMembers
             .SelectMany(r => new[] { r }.Concat(r.AllDescendants()))
@@ -370,9 +371,9 @@ public class BulkChangeViewModelInvariantTests
 
         // Setup: stash NestedStructDB.
         var nestedDb3 = env.Vm.AllActiveDbs.First(d => d.Info.Name == "NestedStructDB");
-        env.Vm.RequestRemoveActiveDb(nestedDb3);
-        env.Vm.HasStashedDbs.Should().BeTrue();
-        env.Vm.StashedDbs.Should().ContainSingle(s => s.DbName == "NestedStructDB");
+        env.Vm.ActiveSet.RequestRemoveActiveDb(nestedDb3);
+        env.Vm.ActiveSet.HasStashedDbs.Should().BeTrue();
+        env.Vm.ActiveSet.StashedDbs.Should().ContainSingle(s => s.DbName == "NestedStructDB");
 
         // Stage a pending edit on FlatDB (the still-active anchor) after the
         // peer drop, i.e. while we're in single-DB shape. Use EditableStartValue
@@ -384,13 +385,13 @@ public class BulkChangeViewModelInvariantTests
 
         // Reactivate the stashed peer via header click.
         var promptsBefore = env.Mbx.AskYesNoCancelCallCount;
-        var stash = env.Vm.StashedDbs.Single();
-        env.Vm.SwitchToStashedDbCommand.Execute(stash);
+        var stash = env.Vm.ActiveSet.StashedDbs.Single();
+        env.Vm.ActiveSet.SwitchToStashedDbCommand.Execute(stash);
 
         env.Vm.AllActiveDbs.Should().HaveCount(1);
         env.Vm.AllActiveDbs[0].Info.Name.Should().Be("NestedStructDB");
-        env.Vm.HasStashedDbs.Should().BeTrue("anchor's edits stashed during reactivate");
-        env.Vm.StashedDbs.Should().ContainSingle(s => s.DbName == "FlatDB",
+        env.Vm.ActiveSet.HasStashedDbs.Should().BeTrue("anchor's edits stashed during reactivate");
+        env.Vm.ActiveSet.StashedDbs.Should().ContainSingle(s => s.DbName == "FlatDB",
             "exactly one stash remains — NestedStructDB's popped on restore, FlatDB's was just created");
         (env.Mbx.AskYesNoCancelCallCount - promptsBefore).Should().Be(1,
             "reactivate's solo step must prompt for the anchor's pending edits");
@@ -424,8 +425,8 @@ public class BulkChangeViewModelInvariantTests
         var anchorLeafBefore = FindFirstPendingLeaf(env.Vm, "FlatDB");
         var pendingValue = anchorLeafBefore.PendingValue;
 
-        env.Vm.OpenDataBlocksDropdownCommand.Execute(null);
-        var peerRow = env.Vm.FilteredDataBlockItems.First(i => i.Name == "NestedStructDB");
+        env.Vm.ActiveSet.OpenDataBlocksDropdownCommand.Execute(null);
+        var peerRow = env.Vm.ActiveSet.FilteredDataBlockItems.First(i => i.Name == "NestedStructDB");
         peerRow.IsActive = true;
 
         env.Mbx.AskYesNoCancelCallCount.Should().Be(0,
@@ -481,12 +482,12 @@ public class BulkChangeViewModelInvariantTests
         var anchorLeaf = FindFirstPendingLeaf(env.Vm, "FlatDB");
         var pendingValue = anchorLeaf.PendingValue;
 
-        env.Vm.SoloActiveDb(new DataBlockSummary("NestedStructDB", ""));
+        env.Vm.ActiveSet.SoloActiveDb(new DataBlockSummary("NestedStructDB", ""));
 
         env.Vm.AllActiveDbs.Should().HaveCount(1,
             "Solo+Cancel on a newly-built target must revert — no peer added");
         env.Vm.AllActiveDbs[0].Info.Name.Should().Be("FlatDB");
-        env.Vm.HasStashedDbs.Should().BeFalse("Cancel does not stash");
+        env.Vm.ActiveSet.HasStashedDbs.Should().BeFalse("Cancel does not stash");
         anchorLeaf.PendingValue.Should().Be(pendingValue,
             "tree never rebuilt → anchor's pending VM is still the same instance");
         anchorLeaf.IsPendingInlineEdit.Should().BeTrue();
@@ -522,13 +523,13 @@ public class BulkChangeViewModelInvariantTests
         var pendingValue = anchorLeaf.PendingValue;
 
         var anchorDbToRemove = env.Vm.AllActiveDbs.First(d => d.Info.Name == "FlatDB");
-        env.Vm.RequestRemoveActiveDb(anchorDbToRemove);
+        env.Vm.ActiveSet.RequestRemoveActiveDb(anchorDbToRemove);
 
         env.Vm.AllActiveDbs.Should().ContainSingle()
             .Which.Info.Name.Should().Be("NestedStructDB",
                 "Keep on chip-close removes the anchor from the active set");
-        env.Vm.HasStashedDbs.Should().BeTrue("Keep moves pending edits into the stash");
-        env.Vm.StashedDbs.Should().ContainSingle(s => s.DbName == "FlatDB",
+        env.Vm.ActiveSet.HasStashedDbs.Should().BeTrue("Keep moves pending edits into the stash");
+        env.Vm.ActiveSet.StashedDbs.Should().ContainSingle(s => s.DbName == "FlatDB",
             "anchor's pending edit must land in the stash dictionary, not be silently dropped");
         env.Vm.Pending.PendingEdits.Should().BeEmpty(
             "removed DB's pending leaves must vacate the bound PendingEdits list");
@@ -557,7 +558,7 @@ public class BulkChangeViewModelInvariantTests
         env.Vm.CurrentPlcName.Should().Be("PLC_A", "setup: anchor PLC display is PLC_A");
 
         var anchorDb2 = env.Vm.AllActiveDbs.First(d => d.Info.Name == "FlatDB");
-        env.Vm.RequestRemoveActiveDb(anchorDb2); // 2-DB session — anchor is removable
+        env.Vm.ActiveSet.RequestRemoveActiveDb(anchorDb2); // 2-DB session — anchor is removable
 
         env.Vm.AllActiveDbs.Should().HaveCount(1);
         env.Vm.AllActiveDbs[0].Info.Name.Should().Be("NestedStructDB",
@@ -606,7 +607,7 @@ public class BulkChangeViewModelInvariantTests
         env.Vm.Selection.ManualSelectionCount.Should().Be(2);
 
         var anchorDbManual = env.Vm.AllActiveDbs.First(d => d.Info.Name == "FlatDB");
-        env.Vm.RequestRemoveActiveDb(anchorDbManual);
+        env.Vm.ActiveSet.RequestRemoveActiveDb(anchorDbManual);
 
         env.Vm.AllActiveDbs.Should().HaveCount(1);
         env.Vm.AllActiveDbs[0].Info.Name.Should().Be("NestedStructDB");
@@ -660,7 +661,7 @@ public class BulkChangeViewModelInvariantTests
 
         // Remove the peer (no pending edits on peer → no prompt).
         var peerDb4 = env.Vm.AllActiveDbs.First(d => d.Info.Name == "NestedStructDB");
-        env.Vm.RequestRemoveActiveDb(peerDb4);
+        env.Vm.ActiveSet.RequestRemoveActiveDb(peerDb4);
 
         // Tree rebuilt: multi-DB → single-DB (flat) shape, all VMs replaced.
         env.Vm.AllActiveDbs.Should().HaveCount(1, "peer was silently removed");
@@ -696,7 +697,7 @@ public class BulkChangeViewModelInvariantTests
 
         // Attempt to remove the peer — prompt fires, user cancels.
         var peerDb5 = env.Vm.AllActiveDbs.First(d => d.Info.Name == "NestedStructDB");
-        env.Vm.RequestRemoveActiveDb(peerDb5);
+        env.Vm.ActiveSet.RequestRemoveActiveDb(peerDb5);
 
         // After cancel: same VMs, same tree shape, store still has the edit.
         env.Vm.AllActiveDbs.Should().HaveCount(2, "Cancel leaves the peer active");
@@ -810,7 +811,7 @@ public class BulkChangeViewModelInvariantTests
 
         // Solo to NestedStructDB via SoloActiveDbByReference.
         var targetDbSolo = env.Vm.AllActiveDbs.First(d => d.Info.Name == "NestedStructDB");
-        env.Vm.SoloActiveDbByReference(targetDbSolo);
+        env.Vm.ActiveSet.SoloActiveDbByReference(targetDbSolo);
 
         env.Vm.AllActiveDbs.Should().HaveCount(1, "solo collapses to one DB");
         env.Vm.AllActiveDbs[0].Info.Name.Should().Be("NestedStructDB");
@@ -836,7 +837,7 @@ public class BulkChangeViewModelInvariantTests
         vm.AllActiveDbs.Should().NotBeEmpty("invariant 1: AllActiveDbs.Count >= 1");
 
         // (2) pill-row covers the same DB names as the active set
-        var pillDbNames = vm.PlcPills
+        var pillDbNames = vm.ActiveSet.PlcPills
             .SelectMany(p => p.SelectedDbs.OfType<DataBlockListItem>())
             .Select(i => i.Name)
             .ToList();
@@ -859,14 +860,14 @@ public class BulkChangeViewModelInvariantTests
         }
 
         // (4) stash-flag matches stash list
-        vm.HasStashedDbs.Should().Be(vm.StashedDbs.Count > 0,
+        vm.ActiveSet.HasStashedDbs.Should().Be(vm.ActiveSet.StashedDbs.Count > 0,
             "invariant 4: HasStashedDbs == (StashedDbs.Count > 0)");
 
         // (5) anchor PLC display matches the anchor pill's PlcName
-        if (vm.PlcPills.Count > 0)
+        if (vm.ActiveSet.PlcPills.Count > 0)
         {
             var anchorName = vm.AllActiveDbs[0].Info.Name;
-            var anchorPill = vm.PlcPills
+            var anchorPill = vm.ActiveSet.PlcPills
                 .FirstOrDefault(p => p.SelectedDbs.OfType<DataBlockListItem>()
                     .Any(i => i.Name == anchorName));
             anchorPill?.PlcName.Should().Be(vm.CurrentPlcName,

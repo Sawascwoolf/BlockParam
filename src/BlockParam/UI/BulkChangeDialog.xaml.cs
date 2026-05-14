@@ -894,14 +894,14 @@ public partial class BulkChangeDialog : Window
     // ---- "+ Add DB" trailing button (#pill-refactor) -----------------------
 
     /// <summary>
-    /// Toggles the "+ PLC" popup. The VM's <see cref="BulkChangeViewModel.InactiveProjectPlcs"/>
+    /// Toggles the "+ PLC" popup. The VM's <see cref="ActiveSetViewModel.InactiveProjectPlcs"/>
     /// reads the cached project DB list lazily; no separate eager load
     /// is needed for the flat-list popup.
     /// </summary>
     private void OnAddDbButtonClick(object sender, RoutedEventArgs e)
     {
         if (DataContext is not BulkChangeViewModel vm) return;
-        vm.IsAddDbPopupOpen = !vm.IsAddDbPopupOpen;
+        vm.ActiveSet.IsAddDbPopupOpen = !vm.ActiveSet.IsAddDbPopupOpen;
     }
 
     /// <summary>
@@ -917,8 +917,8 @@ public partial class BulkChangeDialog : Window
         if (sender is not System.Windows.Controls.ListBox lb) return;
         if (lb.SelectedItem is not string plc || string.IsNullOrEmpty(plc)) return;
 
-        vm.AddPlcToRow(plc);
-        vm.IsAddDbPopupOpen = false;
+        vm.ActiveSet.AddPlcToRow(plc);
+        vm.ActiveSet.IsAddDbPopupOpen = false;
         lb.SelectedItem = null;
     }
 
@@ -951,10 +951,10 @@ public partial class BulkChangeDialog : Window
         var active = vm.PendingInlineEditCount;
         var stashedCount = 0;
         string stashedDbList = "";
-        if (vm.StashedDbs.Count > 0)
+        if (vm.ActiveSet.StashedDbs.Count > 0)
         {
-            stashedCount = vm.StashedDbs.Sum(s => s.Count);
-            stashedDbList = string.Join(", ", vm.StashedDbs.Select(s => s.DbName));
+            stashedCount = vm.ActiveSet.StashedDbs.Sum(s => s.Count);
+            stashedDbList = string.Join(", ", vm.ActiveSet.StashedDbs.Select(s => s.DbName));
         }
 
         if (active > 0 && stashedCount > 0)

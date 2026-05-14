@@ -205,10 +205,10 @@ public class BulkChangeViewModelDbSwitcherTests
 
         // Remove anchor → Keep (stash).
         var anchorDbA1 = vm.AllActiveDbs.First(d => d.Info.Name == aInfo.Name);
-        vm.RequestRemoveActiveDb(anchorDbA1);
+        vm.ActiveSet.RequestRemoveActiveDb(anchorDbA1);
 
-        vm.StashedDbs.Should().HaveCount(1);
-        vm.StashedDbs[0].Summary.PlcName.Should().Be("PLC_Line1",
+        vm.ActiveSet.StashedDbs.Should().HaveCount(1);
+        vm.ActiveSet.StashedDbs[0].Summary.PlcName.Should().Be("PLC_Line1",
             "stash must record which PLC the edits came from — without the PlcName " +
             "in the StashKey, two DBs with identical (name, folder) on different PLCs " +
             "would collide.");
@@ -250,11 +250,11 @@ public class BulkChangeViewModelDbSwitcherTests
 
         // Remove anchor → Keep (stash).
         var anchorDbA2 = vm.AllActiveDbs.First(d => d.Info.Name == aInfo.Name);
-        vm.RequestRemoveActiveDb(anchorDbA2);
+        vm.ActiveSet.RequestRemoveActiveDb(anchorDbA2);
 
-        vm.StashedDbs.Should().HaveCount(1);
-        vm.StashedDbs[0].DbName.Should().Be(aInfo.Name);
-        vm.StashedDbs[0].FolderPath.Should().Be("",
+        vm.ActiveSet.StashedDbs.Should().HaveCount(1);
+        vm.ActiveSet.StashedDbs[0].DbName.Should().Be(aInfo.Name);
+        vm.ActiveSet.StashedDbs[0].FolderPath.Should().Be("",
             "FolderPath is part of the stash key — without it, same-named DBs in " +
             "different folders would collide.");
     }
@@ -300,11 +300,11 @@ public class BulkChangeViewModelDbSwitcherTests
 
         // 2. Remove A with Keep → A stashed, B becomes sole active anchor.
         var anchorDbA3 = vm.AllActiveDbs.First(d => d.Info.Name == aInfo.Name);
-        vm.RequestRemoveActiveDb(anchorDbA3);
+        vm.ActiveSet.RequestRemoveActiveDb(anchorDbA3);
         vm.AllActiveDbs.Should().ContainSingle()
             .Which.Info.Name.Should().Be(bInfo.Name);
-        vm.StashedDbs.Should().HaveCount(1);
-        vm.StashedDbs[0].DbName.Should().Be(aInfo.Name);
+        vm.ActiveSet.StashedDbs.Should().HaveCount(1);
+        vm.ActiveSet.StashedDbs[0].DbName.Should().Be(aInfo.Name);
 
         // 3. Stage on B (now anchor) and Apply.
         vm.Tree.RootMembers.First(m => m.IsLeaf).EditableStartValue = "222";
@@ -314,10 +314,10 @@ public class BulkChangeViewModelDbSwitcherTests
         applyCount.Should().Be(1, "only B is active — exactly one OnApply fires");
 
         // 4. A's stash must still be there.
-        vm.StashedDbs.Should().HaveCount(1);
-        vm.StashedDbs[0].DbName.Should().Be(aInfo.Name);
-        vm.StashedDbs[0].Edits.Should().HaveCount(1);
-        vm.StashedDbs[0].Edits[0].PendingValue.Should().Be("111",
+        vm.ActiveSet.StashedDbs.Should().HaveCount(1);
+        vm.ActiveSet.StashedDbs[0].DbName.Should().Be(aInfo.Name);
+        vm.ActiveSet.StashedDbs[0].Edits.Should().HaveCount(1);
+        vm.ActiveSet.StashedDbs[0].Edits[0].PendingValue.Should().Be("111",
             "Apply on B doesn't touch the stash dictionary");
     }
 
