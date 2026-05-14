@@ -248,15 +248,16 @@ folder) over enlarging the host:
 
 | Hotspot | Current LOC | Owning issue |
 |---|---:|---|
-| `UI/BulkChangeViewModel.cs` | 4,563 | #80 |
-| `AddIn/BulkChangeContextMenu.cs` | 981 | #81 |
-| `UI/BulkChangeDialog.xaml.cs` | 1,033 | (no issue yet) |
-| `Licensing/OnlineLicenseService.cs` | 565 | (no issue yet) |
+| `UI/BulkChangeViewModel.cs` | 3,073 | #80 closed (was 4,931 pre-split; composed of 9 slice VMs) |
+| `UI/BulkChangeDialog.xaml.cs` | 1,123 | #84 |
+| `Licensing/OnlineLicenseService.cs` | 595 | (no issue yet) |
 | `Services/TiaDataTypeValidator.cs` | 556 | (no issue yet) |
+| `AddIn/BulkChangeContextMenu.cs` | 384 | #81 (significantly reduced; check before deciding scope) |
 
-Adding 50 lines of new feature logic to a 4,500-line ViewModel is not
-"a small change" — it cements the god class. Add a sibling class, wire it
-from the constructor, and bind through it.
+Adding 50 lines of new feature logic to a 3,000-line ViewModel is not
+"a small change" — it re-cements what #80 just spent nine slices breaking
+apart. Add a sibling class, wire it from the constructor, and bind
+through it.
 
 ### DRY checklist before merging
 

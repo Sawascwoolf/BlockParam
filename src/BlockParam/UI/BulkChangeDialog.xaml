@@ -4,7 +4,7 @@
         xmlns:local="clr-namespace:BlockParam.UI"
         xmlns:loc="clr-namespace:BlockParam.Localization"
         xmlns:controls="clr-namespace:BlockParam.UI.Controls.PillMultiSelect"
-        Title="{Binding Title}"
+        Title="{Binding ActiveSet.Title}"
                 Width="1100" Height="700"
         MinWidth="800" MinHeight="500"
         WindowState="Maximized"
@@ -819,8 +819,8 @@
                                                            FontSize="9.5" FontWeight="Bold" Foreground="#5b6471"/>
                                                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal"
                                                             HorizontalAlignment="Right">
-                                                    <CheckBox Content="{loc:Loc Dialog_Constants}" IsChecked="{Binding ShowConstants}"
-                                                              IsEnabled="{Binding ConstantsForced, Converter={StaticResource InvertBool}}"
+                                                    <CheckBox Content="{loc:Loc Dialog_Constants}" IsChecked="{Binding Autocomplete.ShowConstants}"
+                                                              IsEnabled="{Binding Autocomplete.ConstantsForced, Converter={StaticResource InvertBool}}"
                                                               VerticalAlignment="Center" FontSize="10" Margin="0,0,4,0"/>
                                                     <TextBlock Text="{Binding TagTableAge}" Foreground="#999" FontSize="9"
                                                                VerticalAlignment="Center" Margin="0,0,3,0"/>
@@ -838,7 +838,7 @@
                                                 <Button HorizontalAlignment="Right" VerticalAlignment="Stretch"
                                                         Width="20" Background="Transparent" BorderThickness="0"
                                                         Click="OnDropdownArrowClick" Cursor="Hand"
-                                                        Visibility="{Binding ShowConstants, Converter={StaticResource BoolToVis}}">
+                                                        Visibility="{Binding Autocomplete.ShowConstants, Converter={StaticResource BoolToVis}}">
                                                     <Path Data="M 0,0 L 6,5 L 12,0 Z" Fill="#888"/>
                                                 </Button>
                                             </Grid>
@@ -1333,7 +1333,7 @@
                                                     <Button Background="Transparent" BorderThickness="0"
                                                             Cursor="Hand" Padding="0"
                                                             HorizontalContentAlignment="Stretch"
-                                                            Command="{Binding DataContext.SwitchToStashedDbCommand,
+                                                            Command="{Binding DataContext.ActiveSet.SwitchToStashedDbCommand,
                                                                       RelativeSource={RelativeSource AncestorType=ItemsControl}}"
                                                             CommandParameter="{Binding}">
                                                         <DockPanel>
