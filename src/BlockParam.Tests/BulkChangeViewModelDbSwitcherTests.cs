@@ -83,7 +83,7 @@ public class BulkChangeViewModelDbSwitcherTests
     public void HasDataBlockSwitcher_TrueWhenCallbacksWired()
     {
         var h = CreateVm();
-        h.Vm.HasDataBlockSwitcher.Should().BeTrue();
+        h.Vm.ActiveSet.HasDataBlockSwitcher.Should().BeTrue();
     }
 
     [Fact]
@@ -125,16 +125,16 @@ public class BulkChangeViewModelDbSwitcherTests
     {
         var h = CreateVm();
 
-        h.Vm.OpenDataBlocksDropdownCommand.Execute(null);
+        h.Vm.ActiveSet.OpenDataBlocksDropdownCommand.Execute(null);
         h.EnumerateCallCount().Should().Be(1);
-        h.Vm.IsDataBlocksDropdownOpen.Should().BeTrue();
-        h.Vm.FilteredDataBlocks.Should().HaveCount(2);
+        h.Vm.ActiveSet.IsDataBlocksDropdownOpen.Should().BeTrue();
+        h.Vm.ActiveSet.FilteredDataBlocks.Should().HaveCount(2);
 
         // Close and reopen: enumeration MUST NOT run again — cache hit.
-        h.Vm.IsDataBlocksDropdownOpen = false;
-        h.Vm.OpenDataBlocksDropdownCommand.Execute(null);
+        h.Vm.ActiveSet.IsDataBlocksDropdownOpen = false;
+        h.Vm.ActiveSet.OpenDataBlocksDropdownCommand.Execute(null);
         h.EnumerateCallCount().Should().Be(1);
-        h.Vm.IsDataBlocksDropdownOpen.Should().BeTrue();
+        h.Vm.ActiveSet.IsDataBlocksDropdownOpen.Should().BeTrue();
     }
 
     [Fact]
@@ -142,10 +142,10 @@ public class BulkChangeViewModelDbSwitcherTests
     {
         var h = CreateVm();
 
-        h.Vm.OpenDataBlocksDropdownCommand.Execute(null);
+        h.Vm.ActiveSet.OpenDataBlocksDropdownCommand.Execute(null);
         h.EnumerateCallCount().Should().Be(1);
 
-        h.Vm.RefreshDataBlocksCommand.Execute(null);
+        h.Vm.ActiveSet.RefreshDataBlocksCommand.Execute(null);
         h.EnumerateCallCount().Should().Be(2);
     }
 
@@ -159,11 +159,11 @@ public class BulkChangeViewModelDbSwitcherTests
             new DataBlockSummary("DB_Sensors", ""),
         });
 
-        h.Vm.OpenDataBlocksDropdownCommand.Execute(null);
-        h.Vm.DataBlockSearchText = "Sensors";
+        h.Vm.ActiveSet.OpenDataBlocksDropdownCommand.Execute(null);
+        h.Vm.ActiveSet.DataBlockSearchText = "Sensors";
 
-        h.Vm.FilteredDataBlocks.Should().HaveCount(1);
-        h.Vm.FilteredDataBlocks[0].Name.Should().Be("DB_Sensors");
+        h.Vm.ActiveSet.FilteredDataBlocks.Should().HaveCount(1);
+        h.Vm.ActiveSet.FilteredDataBlocks[0].Name.Should().Be("DB_Sensors");
     }
 
     [Fact]
