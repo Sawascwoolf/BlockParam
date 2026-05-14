@@ -90,3 +90,49 @@ jobs:
 
       - name: Build (Release)
         run: dotnet build src/BlockParam/BlockParam.csproj -c Release --no-restore -p:UseSiemensStubs=true -p:TiaVersion=21
+
+  screenshots:
+    name: Screenshots (DevLauncher --capture)
+    runs-on: windows-latest
+    # Marker-only: never on pull_request. Opt-in via "[run-ci]" or manual
+    # dispatch while we shake out headless WPF rendering on hosted runners.
+    # Goal is artifact-on-demand, not visual regression — failures should
+    # not block PRs.
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'push' && contains(github.event.head_commit.message, '[run-ci]'))
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-v20-${{ hashFiles('**/*.csproj') }}
+          restore-keys: ${{ runner.os }}-nuget-v20-
+
+      - name: Build DevLauncher
+        run: dotnet build src/BlockParam.DevLauncher/BlockParam.DevLauncher.csproj -c Release -p:UseSiemensStubs=true
+
+      - name: Capture rules-editor screenshot
+        run: |
+          $exe = "src/BlockParam.DevLauncher/bin/Release/net48/BlockParam.DevLauncher.exe"
+          New-Item -ItemType Directory -Force -Path ci-screenshots | Out-Null
+          & $exe --capture-rules ci-screenshots/rules.png
+          if (-not (Test-Path ci-screenshots/rules.png)) {
+            throw "Capture did not produce ci-screenshots/rules.png"
+          }
+          Get-Item ci-screenshots/rules.png | Format-List Name,Length
+
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshots
+          path: ci-screenshots/*.png
