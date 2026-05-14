@@ -200,7 +200,7 @@ public class BulkChangeViewModelDbSwitcherTests
         // Stage on the anchor (PLC_Line1). Use EditableStartValue (production
         // path) so the PendingEditStore is populated — CountPendingEditsForDb
         // reads from the store to decide whether to prompt before remove.
-        var anchorRoot = vm.RootMembers.First(r => r.Name == aInfo.Name);
+        var anchorRoot = vm.Tree.RootMembers.First(r => r.Name == aInfo.Name);
         anchorRoot.AllDescendants().First(n => n.IsLeaf).EditableStartValue = "111";
 
         // Remove anchor → Keep (stash).
@@ -245,7 +245,7 @@ public class BulkChangeViewModelDbSwitcherTests
         // Stage on the anchor. Use EditableStartValue (production path) so the
         // PendingEditStore is populated — CountPendingEditsForDb reads from the
         // store to decide whether to prompt before remove.
-        var anchorRoot = vm.RootMembers.First(r => r.Name == aInfo.Name);
+        var anchorRoot = vm.Tree.RootMembers.First(r => r.Name == aInfo.Name);
         anchorRoot.AllDescendants().First(n => n.IsLeaf).EditableStartValue = "777";
 
         // Remove anchor → Keep (stash).
@@ -295,7 +295,7 @@ public class BulkChangeViewModelDbSwitcherTests
         // 1. Stage on A (anchor). Use EditableStartValue (production path) so
         // the PendingEditStore is populated — CountPendingEditsForDb reads from
         // the store to decide whether to prompt before remove.
-        var anchorRoot = vm.RootMembers.First(r => r.Name == aInfo.Name);
+        var anchorRoot = vm.Tree.RootMembers.First(r => r.Name == aInfo.Name);
         anchorRoot.AllDescendants().First(n => n.IsLeaf).EditableStartValue = "111";
 
         // 2. Remove A with Keep → A stashed, B becomes sole active anchor.
@@ -307,7 +307,7 @@ public class BulkChangeViewModelDbSwitcherTests
         vm.StashedDbs[0].DbName.Should().Be(aInfo.Name);
 
         // 3. Stage on B (now anchor) and Apply.
-        vm.RootMembers.First(m => m.IsLeaf).EditableStartValue = "222";
+        vm.Tree.RootMembers.First(m => m.IsLeaf).EditableStartValue = "222";
         vm.HasPendingChanges = true;   // Apply path normally toggles this; set explicitly so CommitChanges fires.
         vm.CommitChanges().Should().BeTrue();
 

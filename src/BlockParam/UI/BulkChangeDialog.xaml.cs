@@ -141,7 +141,7 @@ public partial class BulkChangeDialog : Window
         var vmCheck = DataContext as BulkChangeViewModel;
         var addedList = e.AddedItems.OfType<MemberNodeViewModel>().ToList();
         var removedList = e.RemovedItems.OfType<MemberNodeViewModel>().ToList();
-        bool refreshing = vmCheck?.IsRefreshing == true;
+        bool refreshing = vmCheck?.Tree.IsRefreshing == true;
 
         // Ignore selection changes that are actually caused by the VM mutating
         // the FlatMembers ObservableCollection during a refresh — they are ghost
@@ -657,7 +657,7 @@ public partial class BulkChangeDialog : Window
 
     private static MemberNodeViewModel? FindFlatByPath(BulkChangeViewModel vm, string path)
     {
-        foreach (var m in vm.FlatMembers)
+        foreach (var m in vm.Tree.FlatMembers)
             if (m.Path == path) return m;
         return null;
     }
@@ -883,11 +883,11 @@ public partial class BulkChangeDialog : Window
         menu.Items.Clear();
 
         var expandItem = new MenuItem { Header = Res.Get("Context_ExpandAllChildren") };
-        expandItem.Click += (_, _) => vm.ExpandAllChildren(memberVm);
+        expandItem.Click += (_, _) => vm.Tree.ExpandAllChildren(memberVm);
         menu.Items.Add(expandItem);
 
         var collapseItem = new MenuItem { Header = Res.Get("Context_CollapseAllChildren") };
-        collapseItem.Click += (_, _) => vm.CollapseAllChildren(memberVm);
+        collapseItem.Click += (_, _) => vm.Tree.CollapseAllChildren(memberVm);
         menu.Items.Add(collapseItem);
     }
 

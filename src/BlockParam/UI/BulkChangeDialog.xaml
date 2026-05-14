@@ -311,13 +311,13 @@
 
                 <!-- Expand/Collapse All + Color legend -->
                 <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,4">
-                    <Button Command="{Binding ExpandAllCommand}"
+                    <Button Command="{Binding Tree.ExpandAllCommand}"
                             Width="20" Height="16"
                             Background="Transparent" BorderThickness="0"
                             ToolTip="{loc:Loc Dialog_ExpandAll}" Cursor="Hand" Margin="0,0,2,0">
                         <Path Data="M 0,0 L 8,0 L 4,6 Z" Fill="#666" Width="8" Height="6" Stretch="Uniform"/>
                     </Button>
-                    <Button Command="{Binding CollapseAllCommand}"
+                    <Button Command="{Binding Tree.CollapseAllCommand}"
                             Width="20" Height="16"
                             Background="Transparent" BorderThickness="0"
                             ToolTip="{loc:Loc Dialog_CollapseAll}" Cursor="Hand" Margin="0,0,8,0">
@@ -341,7 +341,7 @@
                 <!-- Member Table fills the rest of the column -->
                 <ListView
                       x:Name="MemberListView"
-                      ItemsSource="{Binding FlatMembers}"
+                      ItemsSource="{Binding Tree.FlatMembers}"
                       SelectedItem="{Binding SelectedFlatMember}"
                       SelectionMode="Extended"
                       BorderBrush="#CCCCCC" BorderThickness="1"

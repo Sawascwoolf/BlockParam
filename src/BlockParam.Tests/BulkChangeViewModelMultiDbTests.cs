@@ -95,12 +95,12 @@ public class BulkChangeViewModelMultiDbTests
         // This is the "extra layer of nesting depth" the user asked for.
         var (vm, _, _, _, _) = CreateMultiDbVm();
 
-        vm.RootMembers.Should().HaveCount(2,
+        vm.Tree.RootMembers.Should().HaveCount(2,
             "one synthetic group per active DB (focused + 1 peer)");
-        vm.RootMembers.Should().AllSatisfy(r =>
+        vm.Tree.RootMembers.Should().AllSatisfy(r =>
             r.Datatype.Should().Be("DB",
                 "synthetic groups carry Datatype='DB' so the tree template can render distinct chrome"));
-        vm.RootMembers[0].Children.Should().NotBeEmpty(
+        vm.Tree.RootMembers[0].Children.Should().NotBeEmpty(
             "synthetic root's children are the DB's real top-level members");
     }
 
@@ -123,8 +123,8 @@ public class BulkChangeViewModelMultiDbTests
 
         // Top-level members must NOT be Datatype="DB" — that's the
         // synthetic-marker reserved for multi-DB mode.
-        vm.RootMembers.Should().NotBeEmpty();
-        vm.RootMembers.Should().AllSatisfy(r =>
+        vm.Tree.RootMembers.Should().NotBeEmpty();
+        vm.Tree.RootMembers.Should().AllSatisfy(r =>
             r.Datatype.Should().NotBe("DB"));
     }
 
@@ -137,8 +137,8 @@ public class BulkChangeViewModelMultiDbTests
         var (vm, _, _, _, applyOrder) = CreateMultiDbVm();
 
         // Stage one inline edit on each DB so both have something to apply.
-        var focusedSyntheticRoot = vm.RootMembers[0];
-        var peerSyntheticRoot = vm.RootMembers[1];
+        var focusedSyntheticRoot = vm.Tree.RootMembers[0];
+        var peerSyntheticRoot = vm.Tree.RootMembers[1];
         var focusedLeaf = focusedSyntheticRoot.AllDescendants().First(n => n.IsLeaf);
         var peerLeaf = peerSyntheticRoot.AllDescendants().First(n => n.IsLeaf);
         focusedLeaf.EditableStartValue = focusedLeaf.StartValue == "0" ? "1" : "0";
@@ -158,8 +158,8 @@ public class BulkChangeViewModelMultiDbTests
         // is charged once for the SUM of changes across all active DBs.
         var (vm, tracker, _, _, _) = CreateMultiDbVm();
 
-        var focusedLeaf = vm.RootMembers[0].AllDescendants().First(n => n.IsLeaf);
-        var peerLeaf = vm.RootMembers[1].AllDescendants().First(n => n.IsLeaf);
+        var focusedLeaf = vm.Tree.RootMembers[0].AllDescendants().First(n => n.IsLeaf);
+        var peerLeaf = vm.Tree.RootMembers[1].AllDescendants().First(n => n.IsLeaf);
         focusedLeaf.EditableStartValue = focusedLeaf.StartValue == "0" ? "1" : "0";
         peerLeaf.EditableStartValue = peerLeaf.StartValue == "0" ? "1" : "0";
 
@@ -198,8 +198,8 @@ public class BulkChangeViewModelMultiDbTests
             onApply: _ => focusedApplied = true,
             additionalActiveDbs: new[] { peerDb });
 
-        var focusedLeaf = vm.RootMembers[0].AllDescendants().First(n => n.IsLeaf);
-        var peerLeaf = vm.RootMembers[1].AllDescendants().First(n => n.IsLeaf);
+        var focusedLeaf = vm.Tree.RootMembers[0].AllDescendants().First(n => n.IsLeaf);
+        var peerLeaf = vm.Tree.RootMembers[1].AllDescendants().First(n => n.IsLeaf);
         focusedLeaf.EditableStartValue = focusedLeaf.StartValue == "0" ? "1" : "0";
         peerLeaf.EditableStartValue = peerLeaf.StartValue == "0" ? "1" : "0";
 
@@ -296,12 +296,12 @@ public class BulkChangeViewModelMultiDbTests
             additionalActiveDbs: new[] { peerDb });
 
         // Stage one leaf edit in each DB.
-        var focusedLeaf = vm.RootMembers
+        var focusedLeaf = vm.Tree.RootMembers
             .First(r => r.Name == focused.Name)
             .AllDescendants().First(n => n.IsLeaf);
         focusedLeaf.EditableStartValue = focusedLeaf.StartValue == "0" ? "1" : "0";
 
-        var peerLeaf = vm.RootMembers
+        var peerLeaf = vm.Tree.RootMembers
             .First(r => r.Name == peer.Name)
             .AllDescendants().First(n => n.IsLeaf);
         peerLeaf.EditableStartValue = peerLeaf.StartValue == "0" ? "1" : "0";
@@ -373,7 +373,7 @@ public class BulkChangeViewModelMultiDbTests
             additionalActiveDbs: new[] { peerDb });
 
         // Stage one edit on the peer's tree.
-        var peerLeaf = vm.RootMembers
+        var peerLeaf = vm.Tree.RootMembers
             .First(r => r.Name == peer.Name)
             .AllDescendants().First(n => n.IsLeaf);
         peerLeaf.EditableStartValue = peerLeaf.StartValue == "0" ? "1" : "0";
@@ -428,8 +428,8 @@ public class BulkChangeViewModelMultiDbTests
         vm.HasMultipleActiveDbs.Should().BeTrue();
 
         // Find a leaf in each DB.
-        var focusedRoot = vm.RootMembers.First();
-        var peerRoot = vm.RootMembers.Last();
+        var focusedRoot = vm.Tree.RootMembers.First();
+        var peerRoot = vm.Tree.RootMembers.Last();
         var focusedLeaf = focusedRoot.AllDescendants().First(n => n.IsLeaf);
         var peerLeaf = peerRoot.AllDescendants().First(n => n.IsLeaf);
 
@@ -479,10 +479,10 @@ public class BulkChangeViewModelMultiDbTests
         // Single-DB shape pre-toggle: top-level members are flat, no synthetic
         // group node.
         vm.HasMultipleActiveDbs.Should().BeFalse();
-        vm.RootMembers.Should().AllSatisfy(r =>
+        vm.Tree.RootMembers.Should().AllSatisfy(r =>
             r.Datatype.Should().NotBe("DB",
                 "single-DB shape exposes leaves directly, not under a synthetic group"));
-        var preFlat = vm.FlatMembers.Count;
+        var preFlat = vm.Tree.FlatMembers.Count;
 
         // Open dropdown so FilteredDataBlockItems gets populated, then toggle
         // the peer row on.
@@ -494,12 +494,12 @@ public class BulkChangeViewModelMultiDbTests
         vm.AllActiveDbs.Should().HaveCount(2,
             "the dropdown toggle should add the peer DB to the active set");
         vm.HasMultipleActiveDbs.Should().BeTrue();
-        vm.RootMembers.Should().HaveCount(2,
+        vm.Tree.RootMembers.Should().HaveCount(2,
             "tree must rebuild as two synthetic per-DB group nodes");
-        vm.RootMembers.Should().AllSatisfy(r =>
+        vm.Tree.RootMembers.Should().AllSatisfy(r =>
             r.Datatype.Should().Be("DB",
                 "multi-DB shape wraps each DB's members in a synthetic group"));
-        vm.FlatMembers.Count.Should().BeGreaterThan(preFlat,
+        vm.Tree.FlatMembers.Count.Should().BeGreaterThan(preFlat,
             "the flat list must include nodes from the newly added peer");
     }
 
@@ -693,7 +693,7 @@ public class BulkChangeViewModelMultiDbTests
         // Stage a pending edit on the peer's tree. Use EditableStartValue
         // (production path) so the PendingEditStore is populated — CountPendingEditsForDb
         // reads from the store to decide whether to prompt before remove.
-        var peerLeaf = vm.RootMembers
+        var peerLeaf = vm.Tree.RootMembers
             .First(r => r.Name == peer.Name)
             .AllDescendants().First(n => n.IsLeaf);
         var original = peerLeaf.StartValue ?? "0";
@@ -727,7 +727,7 @@ public class BulkChangeViewModelMultiDbTests
         // The pending edit landed on the live tree. After solo, the active
         // set is single-DB so RootMembers is flat (no synthetic group root)
         // — search the leaves directly.
-        var restoredLeaf = vm.RootMembers
+        var restoredLeaf = vm.Tree.RootMembers
             .SelectMany(r => new[] { r }.Concat(r.AllDescendants()))
             .First(n => n.IsLeaf && n.PendingValue == pending);
         restoredLeaf.PendingValue.Should().Be(pending);

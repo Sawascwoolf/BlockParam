@@ -280,7 +280,7 @@ public static class SceneApplier
         {
             foreach (var path in scene.Expand)
             {
-                var node = FindByPath(vm.RootMembers, path);
+                var node = FindByPath(vm.Tree.RootMembers, path);
                 if (node == null)
                 {
                     Serilog.Log.Warning("Scene {Id}: expand path not found: {Path}", scene.Id, path);
@@ -293,7 +293,7 @@ public static class SceneApplier
 
         if (scene.Select != null)
         {
-            var node = FindByPath(vm.RootMembers, scene.Select);
+            var node = FindByPath(vm.Tree.RootMembers, scene.Select);
             if (node == null)
             {
                 Serilog.Log.Warning("Scene {Id}: select path not found: {Path}", scene.Id, scene.Select);
@@ -304,7 +304,7 @@ public static class SceneApplier
                 vm.RefreshFlatList();
                 // SelectedFlatMember requires the node to be in the flat list;
                 // RefreshFlatList above guarantees that.
-                var flat = vm.FlatMembers.FirstOrDefault(m => m.Path == node.Path);
+                var flat = vm.Tree.FlatMembers.FirstOrDefault(m => m.Path == node.Path);
                 vm.SelectedFlatMember = flat ?? node;
             }
         }
@@ -475,7 +475,7 @@ public static class SceneApplier
             return;
         }
 
-        var node = FindByPath(vm.RootMembers, ie.Path);
+        var node = FindByPath(vm.Tree.RootMembers, ie.Path);
         if (node == null)
         {
             Serilog.Log.Warning("Scene {Id}: inlineEdit path not found: {Path}", scene.Id, ie.Path);
@@ -509,7 +509,7 @@ public static class SceneApplier
         if (vm.Pending.HasPendingEdits)
             vm.DiscardPendingSilent();
         vm.Inspector.IsInspectorCollapsed = false;
-        foreach (var root in vm.RootMembers)
+        foreach (var root in vm.Tree.RootMembers)
             CollapseRecursive(root);
         vm.SelectedFlatMember = null;
         vm.SelectedScope = null;
