@@ -581,7 +581,7 @@ public class BulkChangeViewModelInvariantTests
         env.Vm.AllActiveDbs[0].Info.Name.Should().Be("NestedStructDB");
         env.Vm.Selection.ManualSelectedPaths.Should().BeEmpty(
             "removing the anchor must drop its manually-selected leaves " +
-            "(RebuildAfterActiveSetChanged line 1449 _manualSelectedPaths.Clear)");
+            "(RebuildAfterActiveSetChanged calls Selection.ClearManualPaths)");
         env.Vm.Selection.IsManualMode.Should().BeFalse("0 manual paths → not in manual mode");
 
         // Now the second half: select 2 leaves in the survivor (now flat tree).

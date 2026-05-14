@@ -141,6 +141,63 @@ public class SelectionScopeViewModelTests
         changedProps.Should().Contain(nameof(SelectionScopeViewModel.CanEdit));
     }
 
+    /// <summary>
+    /// SetSelectedScopeSilent uses SetProperty&lt;T&gt; which short-circuits when
+    /// the value is unchanged. Pre-PR the host raised PropertyChanged for
+    /// SelectedScope / HasScope / CanEdit unconditionally — this test locks
+    /// the new contract: a null→null silent set must raise NOTHING. If you
+    /// ever decide to revert to the unconditional pattern, flip this test's
+    /// expectations rather than letting it silently drift.
+    /// </summary>
+    [Fact]
+    public void SetSelectedScopeSilent_NullOnNull_IsCompletelyQuiet()
+    {
+        var (vm, _, _) = Build();
+        vm.SelectedScope.Should().BeNull("setup: starts null");
+
+        var scopeChangedFires = 0;
+        var changedProps = new List<string?>();
+        vm.ScopeChanged += () => scopeChangedFires++;
+        vm.PropertyChanged += (_, e) => changedProps.Add(e.PropertyName);
+
+        vm.SetSelectedScopeSilent(null);
+
+        scopeChangedFires.Should().Be(0);
+        changedProps.Should().BeEmpty(
+            "null→null is a no-op — SetProperty short-circuits on equality. " +
+            "If we ever decide bindings need an explicit nudge here, the " +
+            "fix is in the slice, not in callers paying twice for nothing.");
+    }
+
+    /// <summary>
+    /// <see cref="SelectedFlatMember"/> short-circuits while
+    /// <see cref="MemberTreeViewModel.IsRefreshing"/> is true — verified by
+    /// <see cref="SelectedFlatMember_SetterSuppressed_WhenTreeIsRefreshing"/>.
+    /// <see cref="SelectedScope"/> does NOT have the same guard. That's
+    /// intentional: <c>RefreshTree</c> assigns <c>SelectedScope</c> while
+    /// inside the flat-list rebuild scope (to restore the user's prior
+    /// scope after Apply), and gating it would silently drop the restore.
+    /// Negative test so an "unhelpful symmetry" fix doesn't ship.
+    /// </summary>
+    [Fact]
+    public void SelectedScope_Setter_NotGated_OnTreeIsRefreshing()
+    {
+        var (vm, tree, _) = BuildWithSingleDb();
+        var scope = new ScopeLevel("root", "Root", 1, Array.Empty<MemberNode>());
+        vm.AvailableScopes.Add(scope);
+
+        ScopeLevel? scopeInsideRefresh = null;
+        tree.RebuildFlatList(insideRefreshScope: () =>
+        {
+            vm.SelectedScope = scope;
+            scopeInsideRefresh = vm.SelectedScope;
+        });
+
+        scopeInsideRefresh.Should().BeSameAs(scope,
+            "assigning SelectedScope while Tree.IsRefreshing is true must take effect — " +
+            "RefreshTree depends on this for selection-restore");
+    }
+
     [Fact]
     public void HasScope_FalseWhenInManualMode_EvenIfSelectedScopeNonNull()
     {
@@ -301,13 +358,13 @@ public class SelectionScopeViewModelTests
     [Fact]
     public void OnNodeSelected_ReEntry_IsSilentlyIgnored()
     {
-        // Re-entrancy guard: a recursive call to OnNodeSelected mid-cascade
-        // must short-circuit instead of repeating the deselection walk.
-        //
-        // (Production wiring only fires `MemberNodeViewModel.SelectedChanged`
-        // on false→true transitions, so the cascade's `IsSelected = false`
-        // writes don't naturally re-route into OnNodeSelected. We simulate
-        // the re-entry directly to verify the guard.)
+        // Re-entrancy guard: while the cascade is walking the tree and
+        // deselecting peers, those nodes' PropertyChanged event fires
+        // (true→false transitions on IsSelected raise PropertyChanged via
+        // SetProperty, even though SelectedChanged stays gated to true→true).
+        // If a host wiring routes from PropertyChanged back into
+        // OnNodeSelected, the _inSelectionCascade flag must short-circuit
+        // the inner call.
         var (vm, tree, _) = BuildWithMultiDb();
         var leafA = tree.RootMembers[0].AllDescendants().First(n => n.IsLeaf);
         var leafB = tree.RootMembers[1].AllDescendants().First(n => n.IsLeaf);
@@ -315,26 +372,37 @@ public class SelectionScopeViewModelTests
         leafA.IsSelected = true;
         leafB.IsSelected = true;
 
-        // Outer cascade for leafB also calls OnNodeSelected with a different
-        // node from within. The guard must prevent the inner call from
-        // touching state again.
+        // Simulate a re-entry route: when leafA's IsSelected flips during
+        // the cascade, a listener calls OnNodeSelected again. The inner
+        // call must hit the guard and return immediately. The outer cascade
+        // must still complete and leafB must remain selected.
+        int reentrantCalls = 0;
+        bool reentrantSawCascadeFlag = false;
+        leafA.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName != nameof(MemberNodeViewModel.IsSelected)) return;
+            // Capture observable state *before* re-entering — the inner call
+            // must short-circuit on the cascade flag.
+            reentrantCalls++;
+            int leafBStateBefore = leafB.IsSelected ? 1 : 0;
+            vm.OnNodeSelected(leafA);
+            // If the guard didn't fire, the inner cascade would have walked
+            // the tree and deselected leafB. Capture the result.
+            reentrantSawCascadeFlag = leafB.IsSelected == (leafBStateBefore == 1);
+        };
+
         vm.OnNodeSelected(leafB);
 
-        // Verify the cascade itself worked even with the re-entry-ready setup.
-        leafA.IsSelected.Should().BeFalse(
-            "outer cascade deselected leafA — the guard didn't block the first walk");
+        leafA.IsSelected.Should().BeFalse("outer cascade deselected leafA");
         leafB.IsSelected.Should().BeTrue(
-            "leafB is the justSelected node — never touched by the cascade");
-
-        // Now force a re-entrant call after the first cascade completes.
-        // The flag is back to false here, so this is just a second outer
-        // cascade — confirms `_inSelectionCascade` resets in the finally block.
-        leafB.IsSelected = false; // setup: nothing selected
-        leafA.IsSelected = true;
-        var act = () => vm.OnNodeSelected(leafA);
-        act.Should().NotThrow(
-            "_inSelectionCascade must be reset by the finally block after the " +
-            "first cascade — a second outer call must not see a stale `true` flag");
+            "leafB is the outer call's justSelected — the guard prevented the " +
+            "inner re-entrant call from clearing it as a side effect");
+        reentrantCalls.Should().BeGreaterThan(0,
+            "PropertyChanged fires on true→false IsSelected transitions, so the " +
+            "re-entry path was actually exercised");
+        reentrantSawCascadeFlag.Should().BeTrue(
+            "the inner call must short-circuit on _inSelectionCascade==true " +
+            "(otherwise it would have walked the tree and deselected leafB)");
     }
 
     // ─────────────────────────────────────────────────────────────────────

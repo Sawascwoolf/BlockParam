@@ -1445,10 +1445,12 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         // PropertyChanged for SelectedFlatMember / HasSelection / SelectedScope /
         // HasScope / CanEdit / SelectedMemberDisplay. ClearManualPaths is
         // silent by design — bundle the manual-side notifications here.
+        // Selection.RaiseManualSelectionChanged fires the slice's events AND
+        // triggers Selection.ManualSelectionChanged → OnSelectionManualChanged,
+        // which re-raises SetButtonText / SetButtonTooltip on the host channel.
+        // No need to raise those a second time directly.
         Selection.RaiseManualSelectionChanged();
         OnPropertyChanged(nameof(HasMultipleActiveDbs));
-        OnPropertyChanged(nameof(SetButtonText));
-        OnPropertyChanged(nameof(SetButtonTooltip));
     }
 
     /// <summary>
