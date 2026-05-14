@@ -1296,8 +1296,8 @@
                                  Cancel prompt for the now-current DB first).
                                  ========================================================= -->
                             <ItemsControl x:Name="StashedDbsList"
-                                          ItemsSource="{Binding StashedDbs}"
-                                          Visibility="{Binding HasStashedDbs, Converter={StaticResource BoolToVis}}">
+                                          ItemsSource="{Binding ActiveSet.StashedDbs}"
+                                          Visibility="{Binding ActiveSet.HasStashedDbs, Converter={StaticResource BoolToVis}}">
                                 <ItemsControl.ItemTemplate>
                                     <DataTemplate>
                                         <StackPanel>

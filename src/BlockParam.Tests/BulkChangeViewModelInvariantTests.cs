@@ -1,3 +1,5 @@
+using System.Collections.Generic;
+using System.ComponentModel;
 using System.Linq;
 using BlockParam.Config;
 using BlockParam.Licensing;
@@ -96,6 +98,35 @@ public class BulkChangeViewModelInvariantTests
         env.Vm.StashedDbs.Should().ContainSingle(s => s.DbName == "NestedStructDB");
         env.Mbx.AskYesNoCancelCallCount.Should().Be(1);
         AssertInvariants(env.Vm);
+    }
+
+    [Fact]
+    public void HasStashedDbs_PropertyChanged_FiresOnHostWhenStashFlipsFromEmpty()
+    {
+        // Slice 8a regression guard. The host's HasStashedDbs is a
+        // delegator over ActiveSet.HasStashedDbs; the slice raises its
+        // own PropertyChanged, and the host's constructor wires a
+        // forwarder lambda so external `vm.PropertyChanged` subscribers
+        // filtering on HasStashedDbs still see the notification. If a
+        // future slice-9 cleanup deletes the forwarder, vm.HasStashedDbs
+        // will still read correctly but bindings observing the host
+        // VM's PropertyChanged will silently stop repainting.
+        var env = new ActiveSetTestBuilder()
+            .WithAnchor("flat-db.xml")
+            .WithPeer("nested-struct-db.xml")
+            .WithPendingEditsOn("NestedStructDB", count: 1)
+            .WithPromptResults(YesNoCancelResult.No)
+            .Build();
+        var changedProps = new List<string?>();
+        ((INotifyPropertyChanged)env.Vm).PropertyChanged += (_, e) => changedProps.Add(e.PropertyName);
+
+        env.Vm.OpenDataBlocksDropdownCommand.Execute(null);
+        var peerRow = env.Vm.FilteredDataBlockItems.First(i => i.Name == "NestedStructDB");
+        peerRow.IsActive = false;
+
+        env.Vm.HasStashedDbs.Should().BeTrue("setup: stash created");
+        changedProps.Should().Contain(nameof(BulkChangeViewModel.HasStashedDbs),
+            "the binding cannot repaint without this notification on the host VM");
     }
 
     [Fact]

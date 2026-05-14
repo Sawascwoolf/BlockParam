@@ -24,13 +24,18 @@ namespace BlockParam.UI;
 /// ListView/GridView.
 ///
 /// <para>
-/// <b>Active-set state model (#78).</b> The dialog's active DBs +
-/// per-DB pending-edit stashes + anchor PLC name are bundled into a
-/// single immutable <see cref="ActiveSetState"/> snapshot exposed via
-/// <see cref="State"/>. The setter is the one place that runs
-/// <c>RebuildAfterActiveSetChanged</c>, <c>SyncStashedDbsCollection</c>
-/// and the anchor-PLC display refresh — every mutation gesture funnels
-/// through it, so forgetting to refresh after a change is structurally
+/// <b>Active-set state model (#78, slice 8a).</b> The dialog's active
+/// DBs + per-DB pending-edit stashes + anchor PLC name are bundled
+/// into a single immutable <see cref="ActiveSetState"/> snapshot
+/// owned by the <see cref="ActiveSetViewModel"/> slice (exposed as
+/// <see cref="ActiveSet"/>). Mutators call
+/// <see cref="ActiveSetViewModel.SetState"/>; the slice raises
+/// <see cref="ActiveSetViewModel.StateChanged"/>, and the host's
+/// <see cref="HandleActiveSetStateChanged"/> runs the cross-slice
+/// cascade (<c>RebuildAfterActiveSetChanged</c> + anchor-PLC display
+/// refresh). <c>StashedDbs</c> sync now lives inside the slice, so
+/// every mutation gesture still funnels through a single point and
+/// forgetting to refresh after a change remains structurally
 /// impossible.
 /// </para>
 ///
@@ -119,17 +124,14 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     // keys dead) and on explicit DiscardAll.
     private readonly PendingEditStore _pendingEditStore = new();
 
-    // #78 snapshot: single immutable view of the active set + stashes +
-    // anchor PLC. The State setter is the one place that runs the cascade
-    // (RebuildAfterActiveSetChanged / SyncStashedDbsCollection / anchor
-    // PLC display) so every mutation gesture goes through one funnel.
-    // Single authoritative storage: every reader walks State.X directly
-    // (slice 8 PR 0 deleted the legacy backing fields).
-    private ActiveSetState _state =
-        new ActiveSetState(
-            new List<ActiveDb>(),
-            new Dictionary<string, StashedDbState>(),
-            "");
+    // Active-set state container (#80 slice 8a). Owns the ActiveSetState
+    // snapshot + the bound StashedDbs collection. Mutators (Add / Solo /
+    // Remove / Reactivate) still live on this VM in 8a — they call
+    // ActiveSet.SetState(...) to swap snapshots. Slice 8b moves them in.
+    // Host subscribes to ActiveSet.StateChanged (wired in constructor) to
+    // drive the cross-slice cascade (tree rebuild, selection clear,
+    // anchor display, title refresh).
+    public ActiveSetViewModel ActiveSet { get; }
     // Selection.SelectedFlatMember, Selection.SelectedScope, _manualSelectedPaths moved to
     // SelectionScopeViewModel slice (#80 slice 7b). Host accesses via
     // Selection.SelectedFlatMember / SelectedScope / ManualSelectedPaths.
@@ -186,19 +188,27 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         _projectLanguages = projectLanguages is { Count: > 0 } ? projectLanguages : new[] { "en-GB" };
         _commentLanguagePolicy = new CommentLanguagePolicy(editingLanguage, referenceLanguage, _projectLanguages);
 
-        // Seed the active-set snapshot first so everything below can read
-        // through State.X (slice 8 PR 0). Direct backing-field assignment —
-        // the State setter's cascade isn't safe to fire here because
-        // RootMembers / StashedDbs collections aren't constructed yet; the
-        // constructor's explicit BuildRootMembersFromActiveDbs /
-        // RebuildPlcPills calls below take its place for the initial build.
+        // Seed the active-set slice first so everything below can read
+        // through State.X / ActiveSet.X (slice 8a). Subscribe to
+        // StateChanged in the same step so any mutation that fires before
+        // the constructor's explicit BuildRootMembersFromActiveDbs /
+        // RebuildPlcPills calls below would still cascade correctly.
         var initialDbs = new List<ActiveDb> { new ActiveDb(dataBlockInfo, currentXml, onApply) };
         if (additionalActiveDbs != null)
             initialDbs.AddRange(additionalActiveDbs);
-        _state = new ActiveSetState(
+        ActiveSet = new ActiveSetViewModel(new ActiveSetState(
             initialDbs,
             new Dictionary<string, StashedDbState>(),
-            currentPlcName ?? "");
+            currentPlcName ?? ""));
+        ActiveSet.StateChanged += HandleActiveSetStateChanged;
+        ActiveSet.PropertyChanged += (_, e) =>
+        {
+            // Forward the slice's derived-property notifications to the
+            // host's delegating wrappers so XAML still bound to
+            // `{Binding HasStashedDbs}` repaints. Rebind in slice 9.
+            if (e.PropertyName == nameof(ActiveSetViewModel.HasStashedDbs))
+                OnPropertyChanged(nameof(HasStashedDbs));
+        };
 
         _analyzer = analyzer;
         _bulkChangeService = bulkChangeService;
@@ -267,7 +277,6 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         // call sites mutate it directly to make moving it worth the churn
         // in this PR. The slice owns only the visible collections + badges.
         Pending = new PendingEditsViewModel(() => _pendingEditStore.Count);
-        StashedDbs = new ObservableCollection<StashedDbState>();
 
         // Tree-shape + flat-list + expand/collapse slice (#80 slice 7a).
         // Multi-DB workflow (#58): when more than one DB is active, every
@@ -348,44 +357,36 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
 
     /// <summary>
     /// Current snapshot of the active-DB set + interlocked state (#78).
-    /// Every mutation goes through the setter, which is the single point
-    /// that runs <see cref="RebuildAfterActiveSetChanged"/> /
-    /// <see cref="SyncStashedDbsCollection"/> / anchor-display refresh.
+    /// Delegator for <see cref="ActiveSet"/>.<see cref="ActiveSetViewModel.State"/>;
+    /// mutators call <see cref="ActiveSetViewModel.SetState"/> directly.
+    /// The host runs the cross-slice cascade
+    /// (<see cref="RebuildAfterActiveSetChanged"/> + anchor-display
+    /// refresh) via <see cref="HandleActiveSetStateChanged"/>, which is
+    /// subscribed to <see cref="ActiveSetViewModel.StateChanged"/> in
+    /// the constructor.
     /// </summary>
-    public ActiveSetState State
-    {
-        get => _state;
-        private set
-        {
-            if (ReferenceEquals(_state, value)) return;
-            var old = _state;
-            _state = value;
-
-            // CurrentPlcName / HasCurrentPlcName are derived from
-            // State.AnchorPlcName; re-raise them only on actual change.
-            if (!string.Equals(old.AnchorPlcName, value.AnchorPlcName, StringComparison.Ordinal))
-            {
-                OnPropertyChanged(nameof(CurrentPlcName));
-                OnPropertyChanged(nameof(HasCurrentPlcName));
-            }
-
-            OnActiveSetChanged(old, value);
-        }
-    }
+    public ActiveSetState State => ActiveSet.State;
 
     /// <summary>
-    /// Diff old vs new snapshot and run only the cascade slices that
-    /// actually changed. Reference equality on Dbs / Stashes works because
-    /// every mutator constructs fresh List / Dictionary instances —
+    /// Handler for <see cref="ActiveSetViewModel.StateChanged"/>. Diffs old
+    /// vs new snapshot and runs only the cascade slices that actually
+    /// changed. Reference equality on <c>Dbs</c> / <c>Stashes</c> works
+    /// because every mutator constructs fresh List / Dictionary instances —
     /// "same instance" implies "no change."
     /// </summary>
-    private void OnActiveSetChanged(ActiveSetState old, ActiveSetState now)
+    private void HandleActiveSetStateChanged(ActiveSetState old, ActiveSetState now)
     {
+        // CurrentPlcName / HasCurrentPlcName are derived from
+        // State.AnchorPlcName; re-raise them only on actual change.
+        if (!string.Equals(old.AnchorPlcName, now.AnchorPlcName, StringComparison.Ordinal))
+        {
+            OnPropertyChanged(nameof(CurrentPlcName));
+            OnPropertyChanged(nameof(HasCurrentPlcName));
+        }
+
         bool dbsChanged = !ReferenceEquals(old.Dbs, now.Dbs);
-        bool stashesChanged = !ReferenceEquals(old.Stashes, now.Stashes);
 
         if (dbsChanged) RebuildAfterActiveSetChanged();
-        if (stashesChanged) SyncStashedDbsCollection();
         OnPropertyChanged(nameof(HasMultipleActiveDbs));
 
         // #91 — every cascade that changes the active set must refresh the
@@ -460,10 +461,22 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     /// pending edits (#59). Each entry renders as its own inspector section
     /// so the staged work stays visible across switches; clicking the section
     /// header switches back to that DB (running the same prompt again).
+    ///
+    /// <para>
+    /// Delegator for <see cref="ActiveSetViewModel.StashedDbs"/> (slice 8a).
+    /// XAML rebound to <c>{Binding ActiveSet.StashedDbs}</c> in the same
+    /// PR; the host delegator stays for non-XAML readers
+    /// (<see cref="BulkChangeDialog"/> code-behind, tests, DevLauncher)
+    /// and is dropped in slice 9. The underlying collection instance is
+    /// stable — the slice mutates it in place via <c>Clear()</c> +
+    /// <c>Add()</c> — so any subscriber observing
+    /// <c>INotifyCollectionChanged</c> sees the same source across
+    /// snapshots.
+    /// </para>
     /// </summary>
-    public ObservableCollection<StashedDbState> StashedDbs { get; }
+    public ObservableCollection<StashedDbState> StashedDbs => ActiveSet.StashedDbs;
 
-    public bool HasStashedDbs => StashedDbs.Count > 0;
+    public bool HasStashedDbs => ActiveSet.HasStashedDbs;
 
     public event Action? RequestClose;
 
@@ -1140,7 +1153,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             RefreshFilteredDataBlockItemsActiveState();
             return;
         }
-        State = State.With(dbs: State.Dbs.Concat(new[] { built }).ToList());
+        ActiveSet.SetState(State.With(dbs: State.Dbs.Concat(new[] { built }).ToList()));
         Log.Information("DB enabled via dropdown: {Name}", built.Info.Name);
     }
 
@@ -1201,7 +1214,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             return;
         }
 
-        State = next;
+        ActiveSet.SetState(next);
         IsDataBlocksDropdownOpen = false;
     }
 
@@ -1224,7 +1237,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             return;
         }
 
-        State = ComposeRemoveOthers(State, target);
+        ActiveSet.SetState(ComposeRemoveOthers(State, target));
     }
 
     /// <summary>
@@ -1329,7 +1342,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             next = next.With(stashes: stashesNew);
         }
 
-        State = next;
+        ActiveSet.SetState(next);
 
         // Replay the stash edits onto the now-final live tree. Runs after
         // State assignment so the cascade has already rebuilt RootMembers
@@ -1358,9 +1371,9 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
 
         var stashesNew = State.Stashes.ToDictionary(kv => kv.Key, kv => kv.Value);
         stashesNew.Remove(StashKey(summary));
-        State = State.With(
+        ActiveSet.SetState(State.With(
             dbs: State.Dbs.Concat(new[] { built }).ToList(),
-            stashes: stashesNew);
+            stashes: stashesNew));
 
         // Multi-DB shape after additive add — scope the path lookup to the
         // just-added DB's subtree so peer DBs with colliding member paths
@@ -1508,7 +1521,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     {
         var built = BuildActiveDbFromSummary(summary);
         if (built == null) return;
-        State = State.With(dbs: State.Dbs.Concat(new[] { built }).ToList());
+        ActiveSet.SetState(State.With(dbs: State.Dbs.Concat(new[] { built }).ToList()));
         Log.Information("DB enabled via dropdown: {Name}", built.Info.Name);
     }
 
@@ -1693,7 +1706,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     {
         var next = TryComputeRemove(State, db);
         if (next == null) return false;
-        State = next;
+        ActiveSet.SetState(next);
         return true;
     }
 
@@ -1932,18 +1945,9 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         return (restored, dropped);
     }
 
-    /// <summary>Mirrors the dictionary into the bound <see cref="StashedDbs"/> collection.</summary>
-    private void SyncStashedDbsCollection()
-    {
-        StashedDbs.Clear();
-        foreach (var state in State.Stashes.Values
-            .OrderBy(s => s.FolderPath, StringComparer.OrdinalIgnoreCase)
-            .ThenBy(s => s.DbName, StringComparer.OrdinalIgnoreCase))
-        {
-            StashedDbs.Add(state);
-        }
-        OnPropertyChanged(nameof(HasStashedDbs));
-    }
+    // SyncStashedDbsCollection moved to ActiveSetViewModel (#80 slice 8a);
+    // ActiveSet.SetState mirrors State.Stashes into the bound collection
+    // automatically on every snapshot change.
 
     /// <summary>
     /// Inspector-panel expand/collapse state (#80 slice 1).
