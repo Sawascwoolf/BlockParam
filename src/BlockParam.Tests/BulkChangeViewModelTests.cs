@@ -167,10 +167,10 @@ public class BulkChangeViewModelTests : IDisposable
 
         // Fixture has 4 ModuleId leaves, all already at "42".
         var moduleId = vm.Tree.FlatMembers.First(m => m.Name == "ModuleId" && m.IsLeaf);
-        vm.SelectedFlatMember = moduleId;
+        vm.Selection.SelectedFlatMember = moduleId;
 
-        var dbScope = vm.AvailableScopes.First(s => s.MatchCount == 4);
-        vm.SelectedScope = dbScope;
+        var dbScope = vm.Selection.AvailableScopes.First(s => s.MatchCount == 4);
+        vm.Selection.SelectedScope = dbScope;
 
         vm.NewValue = "42"; // matches every selected member — 0 would change
         vm.SetButtonText.Should().Be("Set 0 in 'UdtInstancesDB'",
@@ -202,7 +202,7 @@ public class BulkChangeViewModelTests : IDisposable
         var picks = moduleIds.Concat(new[] { messageId }).ToList();
 
         vm.UpdateManualSelection(picks, Array.Empty<MemberNodeViewModel>(), false);
-        vm.IsManualMode.Should().BeTrue();
+        vm.Selection.IsManualMode.Should().BeTrue();
 
         // Type "42": three ModuleIds already match, the MessageId ("101") doesn't.
         // Only 1 member would actually change.

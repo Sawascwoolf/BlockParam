@@ -122,7 +122,7 @@ public partial class BulkChangeDialog : Window
     {
         if (DataContext is not BulkChangeViewModel vm) return;
         target.EnsureVisible();
-        vm.SelectedFlatMember = target;
+        vm.Selection.SelectedFlatMember = target;
         MemberListView.ScrollIntoView(target);
     }
 
@@ -186,7 +186,7 @@ public partial class BulkChangeDialog : Window
     {
         if (DataContext is not BulkChangeViewModel vm) return;
 
-        if (vm.ManualSelectedPaths.Count == 0)
+        if (vm.Selection.ManualSelectedPaths.Count == 0)
         {
             if (MemberListView.SelectedItems.Count > 1)
             {
@@ -206,7 +206,7 @@ public partial class BulkChangeDialog : Window
                 // ManualSelectedPaths is keyed by VM reference now (#58),
                 // so a same-path leaf in another active DB is a different
                 // entry — Contains(m) picks the right one without alias.
-                if (vm.ManualSelectedPaths.Contains(m))
+                if (vm.Selection.ManualSelectedPaths.Contains(m))
                 {
                     MemberListView.SelectedItems.Add(m);
                 }
@@ -424,16 +424,16 @@ public partial class BulkChangeDialog : Window
     internal void ShowScopeDropdownForScripted(string? hoverPath = null)
     {
         if (DataContext is not BulkChangeViewModel vm) return;
-        if (vm.AvailableScopes.Count == 0) return;
+        if (vm.Selection.AvailableScopes.Count == 0) return;
 
         // Force a layout pass so the ComboBox has a real ActualWidth/Height.
         UpdateLayout();
 
-        ScopeOverlayList.ItemsSource = vm.AvailableScopes;
+        ScopeOverlayList.ItemsSource = vm.Selection.AvailableScopes;
         ScopeOverlayList.SelectedItem = null;
         if (hoverPath != null)
         {
-            foreach (var s in vm.AvailableScopes)
+            foreach (var s in vm.Selection.AvailableScopes)
             {
                 if (s.AncestorPath == hoverPath)
                 {
@@ -740,7 +740,7 @@ public partial class BulkChangeDialog : Window
                 && memberVm.IsLeaf
                 && DataContext is BulkChangeViewModel vm)
             {
-                vm.SelectedFlatMember = memberVm;
+                vm.Selection.SelectedFlatMember = memberVm;
                 ShowInlineHintOverlay(tb, memberVm);
             }
         }

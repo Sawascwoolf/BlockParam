@@ -138,14 +138,10 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             new List<ActiveDb>(),
             new Dictionary<string, StashedDbState>(),
             "");
-    private MemberNodeViewModel? _selectedFlatMember;
-    private ScopeLevel? _selectedScope;
+    // Selection.SelectedFlatMember, Selection.SelectedScope, _manualSelectedPaths moved to
+    // SelectionScopeViewModel slice (#80 slice 7b). Host accesses via
+    // Selection.SelectedFlatMember / SelectedScope / ManualSelectedPaths.
     private string _newValue = "";
-    // Multi-DB safe (#58): keyed by MemberNodeViewModel reference, not path
-    // string. Two leaves in different DBs that happen to share a Path would
-    // alias under string keying — Ctrl+click selection on a leaf in one
-    // active DB would silently target a same-path leaf in another.
-    private readonly HashSet<MemberNodeViewModel> _manualSelectedPaths = new();
     private readonly HashSet<string> _bulkErrorPaths = new(StringComparer.Ordinal);
     // True once the user has typed in the NewValue textbox. Prefills from the
     // current selection are skipped while this is true, so user-entered input
@@ -292,11 +288,22 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             commentLanguagePolicy: _commentLanguagePolicy,
             subscribeToVm: SubscribeStartValueEdited);
         Tree.RootsRebuilt += OnTreeRootsRebuilt;
+
+        // Selection / scope / manual-selection slice (#80 slice 7b). Must be
+        // constructed BEFORE Tree.BuildRootMembersFromActiveDbs because
+        // SubscribeStartValueEdited (called per minted VM during the build)
+        // wires `MemberNodeViewModel.SelectedChanged += Selection.OnNodeSelected`.
+        // The slice owns the four state items + derived properties; the host
+        // keeps the OnMemberSelected / UpdateManualSelection orchestrators
+        // and runs them from the slice's events.
+        Selection = new SelectionScopeViewModel(Tree);
+        Selection.MemberChanged += OnMemberSelected;
+        Selection.ScopeChanged += OnSelectionScopeChanged;
+        Selection.ManualSelectionChanged += OnSelectionManualChanged;
+
         Tree.BuildRootMembersFromActiveDbs();
         RefreshRuleHints();
         RebuildPlcPills();
-
-        AvailableScopes = new ObservableCollection<ScopeLevel>();
 
         SetPendingCommand = new RelayCommand(ExecuteSetPending, CanExecuteSetPending);
         ApplyCommand = new RelayCommand(ExecuteApply, CanExecuteApply);
@@ -312,7 +319,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         // animation — no host-side relay needed.
         Inspector = new InspectorPanelsViewModel();
         ClearManualSelectionCommand = new RelayCommand(ExecuteClearManualSelection,
-            () => _manualSelectedPaths.Count > 0);
+            () => Selection.ManualSelectionCount > 0);
 
         OpenDataBlocksDropdownCommand = new RelayCommand(ExecuteOpenDataBlocksDropdown,
             () => _enumerateDataBlocks != null && _switchToDataBlock != null);
@@ -416,7 +423,15 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         get => _title;
         private set => SetProperty(ref _title, value);
     }
-    public ObservableCollection<ScopeLevel> AvailableScopes { get; }
+    /// <summary>
+    /// Selection / scope / manual-selection slice (#80 slice 7b). Owns
+    /// <c>SelectedFlatMember</c>, <c>SelectedScope</c>,
+    /// <c>AvailableScopes</c>, the manual-selection set, plus the
+    /// single-focus invariant guard. XAML binds via
+    /// <c>{Binding Selection.SelectedFlatMember}</c>,
+    /// <c>{Binding Selection.AvailableScopes}</c>, etc.
+    /// </summary>
+    public SelectionScopeViewModel Selection { get; }
 
     /// <summary>
     /// Tree-shape + flat-list + expand/collapse slice (#80 slice 7a). Owns
@@ -526,37 +541,12 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         }
     }
 
-    /// <summary>Selected item in the flat ListView.</summary>
-    public MemberNodeViewModel? SelectedFlatMember
-    {
-        get => _selectedFlatMember;
-        set
-        {
-            if (Tree.IsRefreshing) return; // Don't re-trigger during flat list rebuild
-            if (SetProperty(ref _selectedFlatMember, value))
-            {
-                OnMemberSelected(value);
-                OnPropertyChanged(nameof(HasSelection));
-                OnPropertyChanged(nameof(SelectedMemberDisplay));
-            }
-        }
-    }
-
-    public ScopeLevel? SelectedScope
-    {
-        get => _selectedScope;
-        set
-        {
-            if (SetProperty(ref _selectedScope, value))
-            {
-                UpdateHighlighting();
-                OnPropertyChanged(nameof(HasScope));
-                OnPropertyChanged(nameof(CanEdit));
-                OnPropertyChanged(nameof(SetButtonText));
-                OnPropertyChanged(nameof(SetButtonTooltip));
-            }
-        }
-    }
+    // SelectedFlatMember / SelectedScope moved to SelectionScopeViewModel
+    // (slice 7b). The host subscribes to Selection.MemberChanged and
+    // Selection.ScopeChanged from the constructor and runs OnMemberSelected
+    // / UpdateHighlighting in the handler. SetButtonText / SetButtonTooltip
+    // are composed properties on the host; the host re-raises them when
+    // Selection raises HasScope / IsManualMode.
 
     public string NewValue
     {
@@ -608,17 +598,23 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         set => SetProperty(ref _constraintInfo, value);
     }
 
-    public bool HasSelection => _selectedFlatMember is { IsLeaf: true };
-    public bool HasScope => _selectedScope != null && !IsManualMode;
+    // HasSelection / HasScope moved to SelectionScopeViewModel (slice 7b).
     public bool HasValidationError => !string.IsNullOrEmpty(_validationError);
+    /// <summary>
+    /// Set-button label. Composes <c>Selection.SelectedScope</c> /
+    /// <c>Selection.IsManualMode</c> with host-side member-count
+    /// readouts, so it stays on the host. The host's
+    /// <c>Selection.ScopeChanged</c> / <c>Selection.ManualSelectionChanged</c>
+    /// subscriptions re-raise this when the slice's state moves.
+    /// </summary>
     public string SetButtonText
     {
         get
         {
-            if (IsManualMode)
+            if (Selection.IsManualMode)
                 return Res.Format("Dialog_SetManualCount", CountWouldChangeMembers());
-            return _selectedScope != null
-                ? $"Set {CountWouldChangeMembers()} in '{_selectedScope.AncestorName}'"
+            return Selection.SelectedScope != null
+                ? $"Set {CountWouldChangeMembers()} in '{Selection.SelectedScope.AncestorName}'"
                 : "Set";
         }
     }
@@ -633,7 +629,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         get
         {
             var action = Res.Get("Dialog_SetTooltip");
-            if (!CanEdit) return action;
+            if (!Selection.CanEdit) return action;
 
             int total = TotalCandidateMembers();
             int willChange = CountWouldChangeMembers();
@@ -642,74 +638,24 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             string breakdown;
             if (string.IsNullOrEmpty(_newValue))
             {
-                breakdown = IsManualMode
+                breakdown = Selection.IsManualMode
                     ? Res.Format("Dialog_SetTooltip_ManualIdle", total)
-                    : Res.Format("Dialog_SetTooltip_ScopeIdle", total, _selectedScope?.AncestorName ?? "");
+                    : Res.Format("Dialog_SetTooltip_ScopeIdle", total, Selection.SelectedScope?.AncestorName ?? "");
             }
             else
             {
-                breakdown = IsManualMode
+                breakdown = Selection.IsManualMode
                     ? Res.Format("Dialog_SetTooltip_ManualBreakdown", willChange, total, alreadyMatch)
                     : Res.Format("Dialog_SetTooltip_ScopeBreakdown",
-                        willChange, total, _selectedScope?.AncestorName ?? "", alreadyMatch);
+                        willChange, total, Selection.SelectedScope?.AncestorName ?? "", alreadyMatch);
             }
             return action + "\n" + breakdown;
         }
     }
 
-    /// <summary>True when 2+ leaf members are manually selected (Ctrl+Click).</summary>
-    public bool IsManualMode => _manualSelectedPaths.Count >= 2;
-
-    /// <summary>Number of manually selected leaf members (includes ones hidden by filter).</summary>
-    public int ManualSelectionCount => _manualSelectedPaths.Count;
-
-    /// <summary>
-    /// Read-only view of manually selected member VMs (for code-behind
-    /// rehydration). Multi-DB safe (#58): keyed by reference, so the
-    /// dialog's ListView rehydration test (Contains(m)) picks the right
-    /// VM in whichever DB it lives.
-    /// </summary>
-    public IReadOnlyCollection<MemberNodeViewModel> ManualSelectedPaths => _manualSelectedPaths;
-
-    /// <summary>
-    /// Bulk panel is visible when the user can edit — either scope mode (single selection)
-    /// or manual mode (2+ selected).
-    /// </summary>
-    public bool CanEdit => HasScope || IsManualMode;
-
-    /// <summary>Summary text shown instead of the scope dropdown when in manual mode.</summary>
-    public string ManualSelectionSummary
-    {
-        get
-        {
-            if (!IsManualMode) return "";
-            var types = GetSelectedDatatypes();
-            if (types.Count == 1)
-                return Res.Format("Dialog_ManualSelectionSummary", _manualSelectedPaths.Count, types.First());
-            return Res.Format("Dialog_ManualSelectionMixed", _manualSelectedPaths.Count, types.Count);
-        }
-    }
-
-    /// <summary>True when all manually selected members share the same datatype.</summary>
-    public bool IsSelectionTypeHomogeneous
-    {
-        get
-        {
-            if (!IsManualMode) return true;
-            return GetSelectedDatatypes().Count == 1;
-        }
-    }
-
-    public string SelectedMemberDisplay
-    {
-        get
-        {
-            if (IsManualMode) return ManualSelectionSummary;
-            return _selectedFlatMember is { IsLeaf: true }
-                ? Res.Format("Selection_MemberDisplay", _selectedFlatMember.Name, _selectedFlatMember.Datatype)
-                : Res.Get("Selection_ClickToSelect");
-        }
-    }
+    // IsManualMode / ManualSelectionCount / ManualSelectedPaths / CanEdit /
+    // ManualSelectionSummary / IsSelectionTypeHomogeneous / SelectedMemberDisplay
+    // moved to SelectionScopeViewModel (slice 7b).
 
     public ICommand SetPendingCommand { get; }
     public ICommand ApplyCommand { get; }
@@ -1461,9 +1407,9 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         // the previous tree. Clear them before the rebuild — same pattern
         // SwitchToDataBlock uses — so the count machinery doesn't accumulate
         // phantom entries from a deactivated DB.
-        _selectedFlatMember = null;
-        _selectedScope = null;
-        _manualSelectedPaths.Clear();
+        Selection.SetSelectedFlatMemberSilent(null);
+        Selection.SetSelectedScopeSilent(null);
+        Selection.ClearManualPaths();
         // Tree.BuildRootMembersFromActiveDbs clears RootMembers + the lookup
         // dicts internally — no separate RootMembers.Clear() needed.
         Tree.BuildRootMembersFromActiveDbs();
@@ -1494,14 +1440,17 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         // and tooltip have to refresh — the slice has no way to observe the
         // anchor change on its own.
         Filter.RaiseSetpointsCapabilityChanged();
+        // SelectedFlatMember / SelectedScope / manual-set were cleared via
+        // Selection.SetXxxSilent above; the slice raised its own
+        // PropertyChanged for SelectedFlatMember / HasSelection / SelectedScope /
+        // HasScope / CanEdit / SelectedMemberDisplay. ClearManualPaths is
+        // silent by design — bundle the manual-side notifications here.
+        // Selection.RaiseManualSelectionChanged fires the slice's events AND
+        // triggers Selection.ManualSelectionChanged → OnSelectionManualChanged,
+        // which re-raises SetButtonText / SetButtonTooltip on the host channel.
+        // No need to raise those a second time directly.
+        Selection.RaiseManualSelectionChanged();
         OnPropertyChanged(nameof(HasMultipleActiveDbs));
-        OnPropertyChanged(nameof(SelectedFlatMember));
-        OnPropertyChanged(nameof(SelectedScope));
-        OnPropertyChanged(nameof(HasSelection));
-        OnPropertyChanged(nameof(HasScope));
-        OnPropertyChanged(nameof(IsManualMode));
-        OnPropertyChanged(nameof(ManualSelectionCount));
-        OnPropertyChanged(nameof(SelectedMemberDisplay));
     }
 
     /// <summary>
@@ -2210,35 +2159,68 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         // Tree.RebuildFlatList's insideRefreshScope callback — both still run
         // while Tree.IsRefreshing is true, so SelectedFlatMember setter +
         // code-behind SelectionChanged stay suppressed during the rebuild.
-        var selectedPath = _selectedFlatMember?.Path;
+        var selectedPath = Selection.SelectedFlatMember?.Path;
         Tree.RebuildFlatList(insideRefreshScope: () =>
         {
             if (selectedPath != null)
             {
                 var restored = Tree.FlatMembers.FirstOrDefault(m => m.Path == selectedPath);
-                // Set backing field directly to avoid re-triggering OnMemberSelected
-                _selectedFlatMember = restored;
-                OnPropertyChanged(nameof(SelectedFlatMember));
-                OnPropertyChanged(nameof(HasSelection));
-                OnPropertyChanged(nameof(SelectedMemberDisplay));
+                // Silent setter so we don't re-trigger OnMemberSelected during
+                // the rebuild — the slice raises SelectedFlatMember /
+                // HasSelection / SelectedMemberDisplay PropertyChanged for us.
+                Selection.SetSelectedFlatMemberSilent(restored);
             }
             FlatListRefreshed?.Invoke();
         });
     }
 
+    /// <summary>
+    /// Host-side handler for <see cref="SelectionScopeViewModel.ScopeChanged"/>.
+    /// The slice raises this once per <c>SelectedScope</c> setter call; the
+    /// host runs highlighting + re-raises the composed
+    /// <see cref="SetButtonText"/> / <see cref="SetButtonTooltip"/>
+    /// notifications that compose with scope state.
+    ///
+    /// <para>
+    /// Set Pending / Clear Manual <c>CanExecute</c> picks up changes via
+    /// WPF's <c>CommandManager.RequerySuggested</c> on the next render
+    /// cycle — pre-slice code did not call <c>RaiseCanExecuteChanged</c>
+    /// from this seam either.
+    /// </para>
+    /// </summary>
+    private void OnSelectionScopeChanged()
+    {
+        UpdateHighlighting();
+        OnPropertyChanged(nameof(SetButtonText));
+        OnPropertyChanged(nameof(SetButtonTooltip));
+    }
+
+    /// <summary>
+    /// Host-side handler for <see cref="SelectionScopeViewModel.ManualSelectionChanged"/>.
+    /// Re-raises the host-composed properties that depend on the manual-set
+    /// count. The slice already re-raised its own properties
+    /// (IsManualMode, ManualSelectionCount, SelectedMemberDisplay, …);
+    /// host only re-raises what it owns.
+    /// </summary>
+    private void OnSelectionManualChanged()
+    {
+        OnPropertyChanged(nameof(SetButtonText));
+        OnPropertyChanged(nameof(SetButtonTooltip));
+    }
+
     private void OnMemberSelected(MemberNodeViewModel? memberVm)
     {
-        AvailableScopes.Clear();
-        _selectedScope = null; // Set backing field to avoid triggering UpdateHighlighting twice
-        OnPropertyChanged(nameof(SelectedScope));
-        OnPropertyChanged(nameof(HasScope));
-        OnPropertyChanged(nameof(CanEdit));
+        Selection.AvailableScopes.Clear();
+        // Silent setter — the same method re-populates and re-selects below;
+        // routing through the public setter would cascade UpdateHighlighting
+        // twice (once here, once when the auto-selected scope assigns).
+        Selection.SetSelectedScopeSilent(null);
         ValidationError = "";
         ConstraintInfo = "";
         Autocomplete.ClearCandidates();
 
         // In manual multi-select mode, scope analysis does not apply.
-        if (IsManualMode)
+        if (Selection.IsManualMode)
         {
             // Scope highlighting is already cleared by UpdateManualSelection when
             // we entered manual mode. Do NOT call UpdateHighlighting/RefreshFlatList
@@ -2307,10 +2289,10 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         }
 
         foreach (var scope in result.Scopes.Reverse())
-            AvailableScopes.Add(scope);
+            Selection.AvailableScopes.Add(scope);
 
-        if (AvailableScopes.Count > 0)
-            SelectedScope = AvailableScopes[0];
+        if (Selection.AvailableScopes.Count > 0)
+            Selection.SelectedScope = Selection.AvailableScopes[0];
 
         // Proactive hint (#7) — single source of truth with the inline-edit tooltip.
         ConstraintInfo = memberVm.RuleHint ?? "";
@@ -2320,11 +2302,8 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         // Re-sync selection after flat list rebuilds during click processing
         _dispatcher.BeginInvoke(new Action(() =>
         {
-            if (memberVm != null && _selectedFlatMember != memberVm)
-            {
-                _selectedFlatMember = memberVm;
-                OnPropertyChanged(nameof(SelectedFlatMember));
-            }
+            if (memberVm != null && Selection.SelectedFlatMember != memberVm)
+                Selection.SetSelectedFlatMemberSilent(memberVm);
         }), System.Windows.Threading.DispatcherPriority.Input);
     }
 
@@ -2341,9 +2320,9 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         ReExpandNonAffected();
 
         // Keep the selected member visible after ClearAffected collapsed smart-expands
-        _selectedFlatMember?.EnsureVisible();
+        Selection.SelectedFlatMember?.EnsureVisible();
 
-        if (_selectedScope == null && !IsManualMode)
+        if (Selection.SelectedScope == null && !Selection.IsManualMode)
         {
             ComputeBulkPreview();
             RebuildPendingEdits();
@@ -2351,14 +2330,14 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             return;
         }
 
-        if (_selectedScope != null)
+        if (Selection.SelectedScope != null)
         {
             // Multi-DB safe (#58 review must-fix #2): resolve scope members
             // to their owning DB's tree VMs by reference, not by path string.
             // The previous HashSet<string>+full-tree-walk would mark same-named
             // paths in other active DBs as Affected even when the user picked
             // a within-DB scope on a single DB.
-            var affectedVms = ResolveScopeVms(_selectedScope.MatchingMembers);
+            var affectedVms = ResolveScopeVms(Selection.SelectedScope.MatchingMembers);
 
             foreach (var vm in affectedVms)
                 MarkAffected(vm, _newValue);
@@ -2399,20 +2378,20 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         // No input → nothing to compute. Avoid walking scope members on every
         // inline keystroke when the inspector isn't being driven at all.
         bool hasInput = !string.IsNullOrEmpty(_newValue)
-                        && (IsManualMode || _selectedScope != null);
+                        && (Selection.IsManualMode || Selection.SelectedScope != null);
         if (hasInput)
         {
-            if (IsManualMode)
+            if (Selection.IsManualMode)
             {
-                foreach (var node in _manualSelectedPaths)
+                foreach (var node in Selection.ManualSelectedPaths)
                 {
                     if (!node.IsLeaf) continue;
                     TryAddPreviewEntry(node);
                 }
             }
-            else if (_selectedScope != null)
+            else if (Selection.SelectedScope != null)
             {
-                foreach (var m in _selectedScope.MatchingMembers)
+                foreach (var m in Selection.SelectedScope.MatchingMembers)
                 {
                     // Multi-DB safe: route by model reference, not path string.
                     // Same path can exist in multiple DBs; FindVmByModel is
@@ -2507,13 +2486,13 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     private void UpdateCommentPreviews()
     {
         var config = _configLoader.GetConfig();
-        if (config == null || _selectedScope == null) return;
+        if (config == null || Selection.SelectedScope == null) return;
         if (!config.Rules.Any(r => !string.IsNullOrEmpty(r.CommentTemplate))) return;
 
         EnsureTagTableCache();
         var generator = new TemplateCommentGenerator(config, _tagTableCache);
         var previews = generator.GenerateForScope(
-            _active.Info, _selectedScope.MatchingMembers.ToList(),
+            _active.Info, Selection.SelectedScope.MatchingMembers.ToList(),
             valueResolver: ResolvePendingValue);
 
         foreach (var (target, comment) in previews)
@@ -2751,9 +2730,9 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         // Manual mode: block on mixed types, otherwise validate each selected
         // member against its own rule (different members may reference different
         // tag tables / constraints).
-        if (IsManualMode)
+        if (Selection.IsManualMode)
         {
-            if (!IsSelectionTypeHomogeneous)
+            if (!Selection.IsSelectionTypeHomogeneous)
             {
                 ValidationError = Res.Get("Validation_MixedDatatypes");
                 return;
@@ -2767,7 +2746,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
 
             string? firstError = null;
             string? firstErrorName = null;
-            foreach (var node in _manualSelectedPaths)
+            foreach (var node in Selection.ManualSelectedPaths)
             {
                 if (!node.IsLeaf) continue;
                 var memberError = ValidateValueForMember(node, _newValue);
@@ -2793,13 +2772,13 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             return;
         }
 
-        if (string.IsNullOrEmpty(_newValue) || _selectedFlatMember == null)
+        if (string.IsNullOrEmpty(_newValue) || Selection.SelectedFlatMember == null)
         {
             ValidationError = "";
             return;
         }
 
-        ValidationError = ValidateValueForMember(_selectedFlatMember, _newValue) ?? "";
+        ValidationError = ValidateValueForMember(Selection.SelectedFlatMember, _newValue) ?? "";
     }
 
     /// <summary>
@@ -2905,20 +2884,20 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     {
         Autocomplete.ClearCandidates();
 
-        if (_selectedFlatMember == null || !_selectedFlatMember.IsLeaf) return;
+        if (Selection.SelectedFlatMember == null || !Selection.SelectedFlatMember.IsLeaf) return;
         if (!_showConstants) return;
 
         EnsureTagTableCache();
         if (_tagTableCache == null) return;
 
         var config = _configLoader.GetConfig();
-        var rule = config?.GetRule(_selectedFlatMember.Model);
+        var rule = config?.GetRule(Selection.SelectedFlatMember.Model);
 
         IReadOnlyList<AutocompleteSuggestion> suggestions;
         if (rule?.TagTableReference != null)
         {
             // Rule-based: only matching tables
-            suggestions = _autocompleteProvider?.GetSuggestions(_selectedFlatMember.Model, "")
+            suggestions = _autocompleteProvider?.GetSuggestions(Selection.SelectedFlatMember.Model, "")
                 ?? Array.Empty<AutocompleteSuggestion>();
         }
         else
@@ -3019,13 +2998,13 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         if (string.IsNullOrWhiteSpace(_newValue) || HasValidationError)
             return false;
 
-        if (IsManualMode)
+        if (Selection.IsManualMode)
         {
-            if (!IsSelectionTypeHomogeneous) return false;
+            if (!Selection.IsSelectionTypeHomogeneous) return false;
             return CountWouldChangeMembers() > 0;
         }
 
-        if (!HasSelection || !HasScope) return false;
+        if (!Selection.HasSelection || !Selection.HasScope) return false;
 
         return CountWouldChangeMembers() > 0;
     }
@@ -3038,14 +3017,14 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     /// </summary>
     private int CountWouldChangeMembers()
     {
-        if (IsManualMode)
+        if (Selection.IsManualMode)
         {
-            return _manualSelectedPaths.Count(node => node.IsLeaf && WouldChange(node));
+            return Selection.ManualSelectedPaths.Count(node => node.IsLeaf && WouldChange(node));
         }
 
-        if (_selectedScope == null) return 0;
+        if (Selection.SelectedScope == null) return 0;
 
-        return _selectedScope.MatchingMembers.Count(m =>
+        return Selection.SelectedScope.MatchingMembers.Count(m =>
         {
             var node = Tree.FindNodeByPath(m.Path);
             // Unresolved paths can't be staged by SetPendingOnNodes, so don't
@@ -3069,11 +3048,11 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     /// </summary>
     private int TotalCandidateMembers()
     {
-        if (IsManualMode)
+        if (Selection.IsManualMode)
         {
-            return _manualSelectedPaths.Count(node => node.IsLeaf);
+            return Selection.ManualSelectedPaths.Count(node => node.IsLeaf);
         }
-        return _selectedScope?.MatchCount ?? 0;
+        return Selection.SelectedScope?.MatchCount ?? 0;
     }
 
     /// <summary>
@@ -3082,13 +3061,13 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     /// </summary>
     private void ExecuteSetPending()
     {
-        if (IsManualMode)
+        if (Selection.IsManualMode)
         {
             ExecuteSetPendingManual();
             return;
         }
 
-        if (_selectedScope == null) return;
+        if (Selection.SelectedScope == null) return;
 
         Subscription.MaybeWarnLimitReachedOnce();
 
@@ -3097,7 +3076,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         // to bleed pending values into other active DBs that happened to
         // have the same path; this routes each scope member to exactly its
         // own tree node.
-        var affectedVms = ResolveScopeVms(_selectedScope.MatchingMembers);
+        var affectedVms = ResolveScopeVms(Selection.SelectedScope.MatchingMembers);
         int count = 0;
 
         foreach (var vm in affectedVms)
@@ -3127,7 +3106,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         Subscription.MaybeWarnLimitReachedOnce();
 
         int count = 0;
-        foreach (var node in _manualSelectedPaths)
+        foreach (var node in Selection.ManualSelectedPaths)
         {
             if (!node.IsLeaf) continue;
             var startsEqualsNew = string.Equals(node.StartValue, _newValue, StringComparison.OrdinalIgnoreCase);
@@ -3617,7 +3596,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     private void ExecuteUpdateComments()
     {
         var config = _configLoader.GetConfig();
-        if (config == null || _selectedScope == null) return;
+        if (config == null || Selection.SelectedScope == null) return;
         if (!config.Rules.Any(r => !string.IsNullOrEmpty(r.CommentTemplate))) return;
 
         try
@@ -3631,7 +3610,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             // each match to its own ActiveDb.Xml. Single-DB sessions
             // collapse to a one-DB group, behaviour unchanged.
             var byDb = new Dictionary<ActiveDb, List<MemberNode>>();
-            foreach (var member in _selectedScope.MatchingMembers)
+            foreach (var member in Selection.SelectedScope.MatchingMembers)
             {
                 var owningDb = Tree.FindActiveDbForModel(member);
                 if (owningDb == null) continue;
@@ -3684,7 +3663,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
 
     private bool CanExecuteUpdateComments()
     {
-        return HasScope && HasCommentConfig;
+        return Selection.HasScope && HasCommentConfig;
     }
 
     /// <summary>
@@ -3753,42 +3732,14 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     private void SubscribeStartValueEdited(MemberNodeViewModel node)
     {
         node.StartValueEdited += OnSingleValueEdited;
-        node.SelectedChanged += OnNodeSelected;
+        node.SelectedChanged += Selection.OnNodeSelected;
         foreach (var child in node.Children)
             SubscribeStartValueEdited(child);
     }
 
-    private bool _inSelectionCascade;
-
-    /// <summary>
-    /// Global single-focus invariant (#95): when one node's
-    /// <see cref="MemberNodeViewModel.IsSelected"/> becomes true, every
-    /// other node in <see cref="RootMembers"/> drops its selection — so the
-    /// dialog never sees a leaf selected in DB A *and* a leaf selected in
-    /// DB B at the same time.
-    /// </summary>
-    private void OnNodeSelected(MemberNodeViewModel justSelected)
-    {
-        if (_inSelectionCascade) return;
-        _inSelectionCascade = true;
-        try
-        {
-            foreach (var root in RootMembers)
-            {
-                if (!ReferenceEquals(root, justSelected) && root.IsSelected)
-                    root.IsSelected = false;
-                foreach (var descendant in root.AllDescendants())
-                {
-                    if (!ReferenceEquals(descendant, justSelected) && descendant.IsSelected)
-                        descendant.IsSelected = false;
-                }
-            }
-        }
-        finally
-        {
-            _inSelectionCascade = false;
-        }
-    }
+    // _inSelectionCascade + OnNodeSelected moved to SelectionScopeViewModel
+    // (slice 7b). Host's SubscribeStartValueEdited routes `SelectedChanged`
+    // through Selection.OnNodeSelected directly.
 
     /// <summary>
     /// Handles direct inline editing of a single start value in the table.
@@ -3935,9 +3886,9 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         // Preserve selection + scope by stable identity (#8). Index-based lookup
         // broke because OnMemberSelected adds scopes reversed while RefreshTree
         // used plain order — indices didn't line up after Apply.
-        var selectedPath = _selectedFlatMember?.Path;
-        var selectedScopeAncestorPath = _selectedScope?.AncestorPath;
-        var selectedScopeDepth = _selectedScope?.Depth;
+        var selectedPath = Selection.SelectedFlatMember?.Path;
+        var selectedScopeAncestorPath = Selection.SelectedScope?.AncestorPath;
+        var selectedScopeDepth = Selection.SelectedScope?.Depth;
 
         // Keep the most recent UDT resolvers so later RefreshTree calls (from Apply) don't drop them.
         if (udtResolver != null) _udtResolver = udtResolver;
@@ -3974,10 +3925,12 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             var restored = Tree.FlatMembers.FirstOrDefault(m => m.Path == selectedPath);
             if (restored != null)
             {
-                _selectedFlatMember = restored;
-                OnPropertyChanged(nameof(SelectedFlatMember));
-                OnPropertyChanged(nameof(HasSelection));
-                OnPropertyChanged(nameof(SelectedMemberDisplay));
+                // Silent setter — RefreshTree re-populates scopes manually
+                // below (the slice would otherwise re-fire OnMemberSelected
+                // which already ran once for this leaf during the restore
+                // flow). The slice raises SelectedFlatMember / HasSelection /
+                // SelectedMemberDisplay PropertyChanged itself.
+                Selection.SetSelectedFlatMemberSilent(restored);
 
                 // Re-populate scopes for the restored selection using the same
                 // ordering as OnMemberSelected so index/position stay stable.
@@ -3997,18 +3950,18 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
                 {
                     result = _analyzer.Analyze(_active.Info, restored.Model);
                 }
-                AvailableScopes.Clear();
+                Selection.AvailableScopes.Clear();
                 foreach (var scope in result.Scopes.Reverse())
-                    AvailableScopes.Add(scope);
+                    Selection.AvailableScopes.Add(scope);
 
                 // #8: Match the previously selected scope by ancestor path, not
                 // by index. Keeps the dropdown sticky through Apply even when
                 // the scope count/order drifts.
-                var restoredScope = AvailableScopes.FirstOrDefault(s =>
+                var restoredScope = Selection.AvailableScopes.FirstOrDefault(s =>
                     string.Equals(s.AncestorPath, selectedScopeAncestorPath, StringComparison.Ordinal)
                     && s.Depth == selectedScopeDepth);
                 if (restoredScope != null)
-                    SelectedScope = restoredScope;
+                    Selection.SelectedScope = restoredScope;
 
                 // Value is reset after Apply: the just-committed value would
                 // misrepresent the current state (#8). Clear touched so the
@@ -4054,36 +4007,33 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     {
         var addedList = added.ToList();
         var removedList = removed.ToList();
-        bool wasManual = IsManualMode;
+        bool wasManual = Selection.IsManualMode;
         bool changed = false;
 
         foreach (var m in addedList)
         {
             if (!m.IsLeaf) continue;
-            if (_manualSelectedPaths.Add(m)) changed = true;
+            if (Selection.AddManualPath(m)) changed = true;
         }
 
         if (!isFilterRehydration)
         {
             foreach (var m in removedList)
             {
-                if (_manualSelectedPaths.Remove(m)) changed = true;
+                if (Selection.RemoveManualPath(m)) changed = true;
             }
         }
 
         if (!changed) return;
 
-        bool isNowManual = IsManualMode;
+        bool isNowManual = Selection.IsManualMode;
 
-        OnPropertyChanged(nameof(IsManualMode));
-        OnPropertyChanged(nameof(ManualSelectionCount));
-        OnPropertyChanged(nameof(ManualSelectionSummary));
-        OnPropertyChanged(nameof(IsSelectionTypeHomogeneous));
-        OnPropertyChanged(nameof(HasScope));
-        OnPropertyChanged(nameof(CanEdit));
-        OnPropertyChanged(nameof(SetButtonText));
-        OnPropertyChanged(nameof(SetButtonTooltip));
-        OnPropertyChanged(nameof(SelectedMemberDisplay));
+        // The slice raises IsManualMode / ManualSelectionCount /
+        // ManualSelectionSummary / IsSelectionTypeHomogeneous / HasScope /
+        // CanEdit / SelectedMemberDisplay PropertyChanged; the
+        // OnSelectionManualChanged handler bundles the host-composed
+        // SetButtonText / SetButtonTooltip + RaiseCanExecuteChanged.
+        Selection.RaiseManualSelectionChanged();
 
         // Entering manual mode: the scope-based highlighting from the single
         // selection no longer applies. Clear the scope state and wipe affected
@@ -4091,10 +4041,11 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         // run before SelectionChanged fired, so we handle this here too.)
         if (!wasManual && isNowManual)
         {
-            AvailableScopes.Clear();
-            _selectedScope = null;
-            OnPropertyChanged(nameof(SelectedScope));
-            OnPropertyChanged(nameof(HasScope));
+            Selection.AvailableScopes.Clear();
+            // Silent setter — UpdateHighlighting runs below; routing through
+            // the public setter would fire ScopeChanged → UpdateHighlighting
+            // twice.
+            Selection.SetSelectedScopeSilent(null);
             // Pin ancestors of manually selected leaves as user-expanded so that
             // UpdateHighlighting's ClearAffected doesn't collapse them and hide
             // the first-selected row from the flat list (which would deselect it).
@@ -4113,7 +4064,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             // Transitioning back to scope mode. OnMemberSelected already ran
             // before this method (with IsManualMode still true) and skipped scope
             // setup. Re-run it now that the mode has flipped.
-            OnMemberSelected(_selectedFlatMember);
+            OnMemberSelected(Selection.SelectedFlatMember);
         }
 
         ValidateValue();
@@ -4143,7 +4094,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
 
     private void PinManuallySelectedVisibility()
     {
-        foreach (var node in _manualSelectedPaths)
+        foreach (var node in Selection.ManualSelectedPaths)
         {
             var p = node.Parent;
             while (p != null)
@@ -4160,41 +4111,23 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
 
     private void ExecuteClearManualSelection()
     {
-        if (_manualSelectedPaths.Count == 0) return;
-        _manualSelectedPaths.Clear();
+        if (Selection.ManualSelectionCount == 0) return;
+        Selection.ClearManualPaths();
         ClearBulkRowHighlights();
         _newValueTouched = false;
         _newValue = "";
         OnPropertyChanged(nameof(NewValue));
 
-        OnPropertyChanged(nameof(IsManualMode));
-        OnPropertyChanged(nameof(ManualSelectionCount));
-        OnPropertyChanged(nameof(ManualSelectionSummary));
-        OnPropertyChanged(nameof(IsSelectionTypeHomogeneous));
-        OnPropertyChanged(nameof(HasScope));
-        OnPropertyChanged(nameof(CanEdit));
-        OnPropertyChanged(nameof(SetButtonText));
-        OnPropertyChanged(nameof(SetButtonTooltip));
-        OnPropertyChanged(nameof(SelectedMemberDisplay));
+        // Slice raises the manual-set + scope-mode-related notifications;
+        // OnSelectionManualChanged bundles SetButtonText / SetButtonTooltip /
+        // RaiseCanExecuteChanged.
+        Selection.RaiseManualSelectionChanged();
 
         ValidateValue();
         FlatListRefreshed?.Invoke();
     }
 
-    /// <summary>
-    /// Returns the distinct datatypes (case-insensitive) of currently selected members.
-    /// Ignores paths that no longer resolve to a leaf node.
-    /// </summary>
-    private IReadOnlyCollection<string> GetSelectedDatatypes()
-    {
-        var types = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var node in _manualSelectedPaths)
-        {
-            if (node.IsLeaf)
-                types.Add(node.Datatype);
-        }
-        return types;
-    }
+    // GetSelectedDatatypes() moved to SelectionScopeViewModel (slice 7b).
 
     public void Dispose()
     {

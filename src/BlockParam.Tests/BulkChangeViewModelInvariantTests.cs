@@ -571,18 +571,18 @@ public class BulkChangeViewModelInvariantTests
             added: anchorLeaves,
             removed: System.Array.Empty<MemberNodeViewModel>(),
             isFilterRehydration: false);
-        env.Vm.IsManualMode.Should().BeTrue("setup: 2 leaves selected → manual mode");
-        env.Vm.ManualSelectionCount.Should().Be(2);
+        env.Vm.Selection.IsManualMode.Should().BeTrue("setup: 2 leaves selected → manual mode");
+        env.Vm.Selection.ManualSelectionCount.Should().Be(2);
 
         var anchorDbManual = env.Vm.AllActiveDbs.First(d => d.Info.Name == "FlatDB");
         env.Vm.RequestRemoveActiveDb(anchorDbManual);
 
         env.Vm.AllActiveDbs.Should().HaveCount(1);
         env.Vm.AllActiveDbs[0].Info.Name.Should().Be("NestedStructDB");
-        env.Vm.ManualSelectedPaths.Should().BeEmpty(
+        env.Vm.Selection.ManualSelectedPaths.Should().BeEmpty(
             "removing the anchor must drop its manually-selected leaves " +
-            "(RebuildAfterActiveSetChanged line 1449 _manualSelectedPaths.Clear)");
-        env.Vm.IsManualMode.Should().BeFalse("0 manual paths → not in manual mode");
+            "(RebuildAfterActiveSetChanged calls Selection.ClearManualPaths)");
+        env.Vm.Selection.IsManualMode.Should().BeFalse("0 manual paths → not in manual mode");
 
         // Now the second half: select 2 leaves in the survivor (now flat tree).
         var peerLeaves = env.Vm.Tree.RootMembers
@@ -596,10 +596,10 @@ public class BulkChangeViewModelInvariantTests
             removed: System.Array.Empty<MemberNodeViewModel>(),
             isFilterRehydration: false);
 
-        env.Vm.IsManualMode.Should().BeTrue("now 2 leaves selected in B");
-        env.Vm.ManualSelectionCount.Should().Be(2,
+        env.Vm.Selection.IsManualMode.Should().BeTrue("now 2 leaves selected in B");
+        env.Vm.Selection.ManualSelectionCount.Should().Be(2,
             "B's count is 2, not 4 — A's old selections did not bleed back in");
-        env.Vm.ManualSelectedPaths.Should().BeEquivalentTo(peerLeaves,
+        env.Vm.Selection.ManualSelectedPaths.Should().BeEquivalentTo(peerLeaves,
             "ManualSelectedPaths holds B's nodes only — none of A's nodes survived");
         env.Mbx.AskYesNoCancelCallCount.Should().Be(0, "no pending edits → no prompt");
         AssertInvariants(env.Vm);
@@ -860,7 +860,7 @@ public class BulkChangeViewModelInvariantTests
         // selection's preview lingered after the 3-way Cancel cleared the
         // selection. ComputeBulkPreview's hasInput check enforces this; if
         // a transition path forgets to call it, the stale rows survive.
-        if (!vm.HasScope && !vm.IsManualMode)
+        if (!vm.Selection.HasScope && !vm.Selection.IsManualMode)
         {
             vm.BulkPreview.Entries.Should().BeEmpty(
                 "invariant 7: BulkPreview must be empty when no scope is " +
@@ -877,7 +877,7 @@ public class BulkChangeViewModelInvariantTests
             .ToList();
         orphanedPreview.Should().BeEmpty(
             "invariant 8a: BulkPreview drops nodes whose DB left the active set");
-        var orphanedManual = vm.ManualSelectedPaths
+        var orphanedManual = vm.Selection.ManualSelectedPaths
             .Where(n => !reachableNodes.Contains(n))
             .Select(n => n.Path)
             .ToList();
@@ -896,7 +896,7 @@ public class BulkChangeViewModelInvariantTests
         // reports NewValue=="", the bug is downstream (XAML binding /
         // dialog code-behind), not VM state — needs a manual / WPF-level
         // walkthrough to catch.
-        if (!vm.HasSelection && !vm.IsManualMode)
+        if (!vm.Selection.HasSelection && !vm.Selection.IsManualMode)
         {
             vm.NewValue.Should().BeEmpty(
                 "invariant 9: NewValue must be empty when nothing is " +

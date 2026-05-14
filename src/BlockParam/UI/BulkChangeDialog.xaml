@@ -342,7 +342,7 @@
                 <ListView
                       x:Name="MemberListView"
                       ItemsSource="{Binding Tree.FlatMembers}"
-                      SelectedItem="{Binding SelectedFlatMember}"
+                      SelectedItem="{Binding Selection.SelectedFlatMember}"
                       SelectionMode="Extended"
                       BorderBrush="#CCCCCC" BorderThickness="1"
                       VirtualizingStackPanel.IsVirtualizing="True"
@@ -767,7 +767,7 @@
                                                        Foreground="#5b6471" Margin="0,0,0,3"/>
                                             <Border Background="White" BorderBrush="#D6D9DE" BorderThickness="1"
                                                     Padding="8,3" MinHeight="24">
-                                                <TextBlock Text="{Binding SelectedMemberDisplay}"
+                                                <TextBlock Text="{Binding Selection.SelectedMemberDisplay}"
                                                            FontFamily="Consolas,Courier New" FontSize="11"
                                                            VerticalAlignment="Center"
                                                            TextTrimming="CharacterEllipsis"/>
@@ -776,14 +776,14 @@
 
                                         <!-- Scope / Manual-selection -->
                                         <StackPanel Margin="12,8,12,0"
-                                                    Visibility="{Binding CanEdit, Converter={StaticResource BoolToVis}}">
+                                                    Visibility="{Binding Selection.CanEdit, Converter={StaticResource BoolToVis}}">
                                             <TextBlock Text="SCOPE" FontSize="9.5" FontWeight="Bold"
                                                        Foreground="#5b6471" Margin="0,0,0,3"/>
                                             <!-- Scope mode -->
-                                            <StackPanel Visibility="{Binding HasScope, Converter={StaticResource BoolToVis}}">
+                                            <StackPanel Visibility="{Binding Selection.HasScope, Converter={StaticResource BoolToVis}}">
                                                 <ComboBox x:Name="ScopeCombo"
-                                                          ItemsSource="{Binding AvailableScopes}"
-                                                          SelectedItem="{Binding SelectedScope}"
+                                                          ItemsSource="{Binding Selection.AvailableScopes}"
+                                                          SelectedItem="{Binding Selection.SelectedScope}"
                                                           HorizontalAlignment="Stretch">
                                                     <ComboBox.ItemTemplate>
                                                         <DataTemplate>
@@ -800,8 +800,8 @@
                                             </StackPanel>
                                             <!-- Manual-selection mode -->
                                             <StackPanel Orientation="Horizontal"
-                                                        Visibility="{Binding IsManualMode, Converter={StaticResource BoolToVis}}">
-                                                <TextBlock Text="{Binding ManualSelectionSummary}"
+                                                        Visibility="{Binding Selection.IsManualMode, Converter={StaticResource BoolToVis}}">
+                                                <TextBlock Text="{Binding Selection.ManualSelectionSummary}"
                                                            VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
                                                            Margin="0,0,6,0"/>
                                                 <Button Content="{loc:Loc Dialog_ClearSelection}"
@@ -813,7 +813,7 @@
 
                                         <!-- New value -->
                                         <StackPanel Margin="12,8,12,0"
-                                                    Visibility="{Binding CanEdit, Converter={StaticResource BoolToVis}}">
+                                                    Visibility="{Binding Selection.CanEdit, Converter={StaticResource BoolToVis}}">
                                             <DockPanel Margin="0,0,0,3">
                                                 <TextBlock DockPanel.Dock="Left" Text="NEW VALUE"
                                                            FontSize="9.5" FontWeight="Bold" Foreground="#5b6471"/>
@@ -903,7 +903,7 @@
                                                 Background="#1f6feb" Foreground="White"
                                                 BorderThickness="0" FontWeight="SemiBold"
                                                 ToolTip="{Binding SetButtonTooltip}"
-                                                Visibility="{Binding CanEdit, Converter={StaticResource BoolToVis}}"/>
+                                                Visibility="{Binding Selection.CanEdit, Converter={StaticResource BoolToVis}}"/>
 
                                         <!-- Overlap warning: bulk will overwrite existing pending edits -->
                                         <Border Margin="12,0,12,12" Padding="6,4"

@@ -440,9 +440,9 @@ public class BulkChangeViewModelMultiDbTests
             removed: System.Array.Empty<MemberNodeViewModel>(),
             isFilterRehydration: false);
 
-        vm.ManualSelectedPaths.Should().Contain(focusedLeaf,
+        vm.Selection.ManualSelectedPaths.Should().Contain(focusedLeaf,
             "focused-DB selection routes to its own VM reference");
-        vm.ManualSelectedPaths.Should().Contain(peerLeaf,
+        vm.Selection.ManualSelectedPaths.Should().Contain(peerLeaf,
             "peer-DB selection is a distinct entry, not aliased on path");
     }
 
