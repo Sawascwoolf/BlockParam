@@ -185,6 +185,19 @@ jobs:
             throw "Failed captures: $($failed -join ', ')"
           }
 
+      - name: Build masonry overview composites
+        if: success()
+        shell: pwsh
+        run: |
+          python -m pip install --quiet Pillow
+          if ($LASTEXITCODE -ne 0) { throw "pip install Pillow failed" }
+          python assets/screenshots/scripts/build_masonry.py `
+            --input-dir   ci-output `
+            --desktop-out ci-output/overview-desktop.png `
+            --mobile-out  ci-output/overview-mobile.png
+          if ($LASTEXITCODE -ne 0) { throw "build_masonry.py failed" }
+          Get-Item ci-output/overview-*.png | Format-Table Name, Length
+
       - name: Upload screenshots
         if: always()
         uses: actions/upload-artifact@v4
@@ -231,7 +244,18 @@ jobs:
           on every successful run. **Do not commit by hand — your changes will be
           erased on the next run.**
 
-          Each PNG here is the headless DevLauncher render of a UI surface.
+          ## Single-image overviews
+
+          | Layout | Image |
+          |---|---|
+          | Desktop (3-col masonry) | [``overview-desktop.png``](overview-desktop.png) |
+          | Mobile (2-col masonry)  | [``overview-mobile.png``](overview-mobile.png) |
+
+          ![desktop overview](overview-desktop.png)
+
+          ## Individual files
+
+          Each PNG below is the headless DevLauncher render of a UI surface.
           Reference any file via raw URL:
 
           ````
