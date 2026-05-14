@@ -555,7 +555,7 @@ public class BulkChangeViewModelInvariantTests
             .Build();
 
         env.Vm.AllActiveDbs[0].Info.Name.Should().Be("FlatDB", "setup: anchor is FlatDB");
-        env.Vm.CurrentPlcName.Should().Be("PLC_A", "setup: anchor PLC display is PLC_A");
+        env.Vm.ActiveSet.CurrentPlcName.Should().Be("PLC_A", "setup: anchor PLC display is PLC_A");
 
         var anchorDb2 = env.Vm.AllActiveDbs.First(d => d.Info.Name == "FlatDB");
         env.Vm.ActiveSet.RequestRemoveActiveDb(anchorDb2); // 2-DB session — anchor is removable
@@ -563,9 +563,9 @@ public class BulkChangeViewModelInvariantTests
         env.Vm.AllActiveDbs.Should().HaveCount(1);
         env.Vm.AllActiveDbs[0].Info.Name.Should().Be("NestedStructDB",
             "the surviving peer rotates into the anchor slot");
-        env.Vm.CurrentDataBlockName.Should().Be("NestedStructDB",
+        env.Vm.ActiveSet.CurrentDataBlockName.Should().Be("NestedStructDB",
             "CurrentDataBlockName tracks State.Dbs[0]");
-        env.Vm.CurrentPlcName.Should().Be("PLC_B",
+        env.Vm.ActiveSet.CurrentPlcName.Should().Be("PLC_B",
             "anchor PLC display follows the new anchor (TryComputeRemove " +
             "rewrites AnchorPlcName; CurrentPlcName reads State.AnchorPlcName)");
         env.Mbx.AskYesNoCancelCallCount.Should().Be(0, "no edits → no prompt");
@@ -780,9 +780,9 @@ public class BulkChangeViewModelInvariantTests
             .Build();
 
         env.Vm.AllActiveDbs.Should().HaveCount(2, "setup: multi-DB session");
-        env.Vm.Title.Should().NotContain("FlatDB",
+        env.Vm.ActiveSet.Title.Should().NotContain("FlatDB",
             "multi-DB title must not surface the anchor DB's name");
-        env.Vm.Title.Should().NotContain("NestedStructDB",
+        env.Vm.ActiveSet.Title.Should().NotContain("NestedStructDB",
             "multi-DB title must not surface any single DB's name");
         AssertInvariants(env.Vm);
     }
@@ -805,7 +805,7 @@ public class BulkChangeViewModelInvariantTests
             .WithPeer("array-db.xml")
             .Build();
 
-        var titleBefore = env.Vm.Title;
+        var titleBefore = env.Vm.ActiveSet.Title;
         titleBefore.Should().NotContain("NestedStructDB",
             "setup: 3-DB title doesn't already include the soloed name");
 
@@ -815,10 +815,10 @@ public class BulkChangeViewModelInvariantTests
 
         env.Vm.AllActiveDbs.Should().HaveCount(1, "solo collapses to one DB");
         env.Vm.AllActiveDbs[0].Info.Name.Should().Be("NestedStructDB");
-        env.Vm.Title.Should().Contain("NestedStructDB",
+        env.Vm.ActiveSet.Title.Should().Contain("NestedStructDB",
             "single-DB shape after solo must surface the new lone DB's name " +
             "(or, post-fix, the chip-only header must consistently re-render)");
-        env.Vm.Title.Should().NotContain("FlatDB",
+        env.Vm.ActiveSet.Title.Should().NotContain("FlatDB",
             "previous anchor's name must NOT linger after solo");
         AssertInvariants(env.Vm);
     }
@@ -870,7 +870,7 @@ public class BulkChangeViewModelInvariantTests
             var anchorPill = vm.ActiveSet.PlcPills
                 .FirstOrDefault(p => p.SelectedDbs.OfType<DataBlockListItem>()
                     .Any(i => i.Name == anchorName));
-            anchorPill?.PlcName.Should().Be(vm.CurrentPlcName,
+            anchorPill?.PlcName.Should().Be(vm.ActiveSet.CurrentPlcName,
                 "invariant 5: anchor pill's PlcName == CurrentPlcName");
         }
 

@@ -41,6 +41,7 @@ namespace BlockParam.UI;
 public sealed class ActiveSetViewModel : ViewModelBase
 {
     private ActiveSetState _state;
+    private string _title = "";
 
     // --- Optional dependencies (8b). All-null defaults keep the legacy
     // ActiveSetViewModel(initial) ctor (used by slice-8a tests) working
@@ -121,6 +122,10 @@ public sealed class ActiveSetViewModel : ViewModelBase
         _state = initial ?? throw new ArgumentNullException(nameof(initial));
         StashedDbs = new ObservableCollection<StashedDbState>();
         SyncStashedDbsCollection();
+        // Seed the dialog window title from the initial snapshot so the
+        // host's XAML binding has a non-empty value before the first
+        // active-set change. SetState recomputes on every snapshot swap.
+        _title = ComputeTitleFromState();
 
         _messageBox = messageBox;
         _pendingEditStore = pendingEditStore;
@@ -197,10 +202,81 @@ public sealed class ActiveSetViewModel : ViewModelBase
         if (!ReferenceEquals(old.Stashes, next.Stashes))
             SyncStashedDbsCollection();
 
-        if (!ReferenceEquals(old.Dbs, next.Dbs))
+        bool dbsChanged = !ReferenceEquals(old.Dbs, next.Dbs);
+        bool anchorPlcChanged = !string.Equals(
+            old.AnchorPlcName, next.AnchorPlcName, StringComparison.Ordinal);
+
+        if (dbsChanged)
             OnPropertyChanged(nameof(HasMultipleActiveDbs));
 
+        // Anchor display: Title + CurrentDataBlockName + CurrentPlcName all
+        // derive from State.Dbs[0] / State.AnchorPlcName. Recompute the
+        // title once per snapshot install (#91) — every gesture that swaps
+        // the active set funnels through SetState, so the chip-only/single-DB
+        // title shape stays in sync without each mutator owning its own
+        // refresh call.
+        if (dbsChanged || anchorPlcChanged)
+        {
+            Title = ComputeTitleFromState();
+            OnPropertyChanged(nameof(CurrentDataBlockName));
+        }
+
+        if (anchorPlcChanged)
+        {
+            OnPropertyChanged(nameof(CurrentPlcName));
+            OnPropertyChanged(nameof(HasCurrentPlcName));
+        }
+
         StateChanged?.Invoke(old, next);
+    }
+
+    /// <summary>
+    /// Dialog window title. Single-DB sessions render
+    /// <c>"BlockParam v{version}: {PLC} / {DB}"</c>; multi-DB sessions
+    /// drop the DB/PLC suffix entirely (#91). XAML binds via
+    /// <c>{Binding ActiveSet.Title}</c>.
+    /// </summary>
+    public string Title
+    {
+        get => _title;
+        private set => SetProperty(ref _title, value);
+    }
+
+    /// <summary>Header label — the DB name part of the title combo.</summary>
+    public string CurrentDataBlockName =>
+        _state.Dbs.Count > 0 ? _state.Dbs[0].Info.Name : "";
+
+    /// <summary>
+    /// Anchor PLC display, derived from <see cref="ActiveSetState.AnchorPlcName"/>.
+    /// Multi-PLC sessions render the chip prefix from this; single-PLC
+    /// hosts (DevLauncher) leave it empty and the prefix is omitted.
+    /// </summary>
+    public string CurrentPlcName => _state.AnchorPlcName;
+
+    /// <summary>True when <see cref="CurrentPlcName"/> is non-empty.</summary>
+    public bool HasCurrentPlcName => !string.IsNullOrEmpty(_state.AnchorPlcName);
+
+    private string ComputeTitleFromState()
+    {
+        var version = typeof(ActiveSetViewModel).Assembly.GetName().Version;
+        var anchorName = _state.Dbs.Count > 0 ? _state.Dbs[0].Info.Name : "";
+        return BuildTitle(version, _state.AnchorPlcName, anchorName, _state.Dbs.Count);
+    }
+
+    /// <summary>
+    /// Builds the dialog window title. Single-DB sessions render
+    /// <c>"BlockParam v{version}: {PLC} / {DB}"</c>. Multi-DB sessions
+    /// drop the DB/PLC suffix entirely (#91): the chip strip is the
+    /// single source of truth for which DBs are in scope, so surfacing
+    /// one specific DB's name in the title contradicts the peer-DB
+    /// model. Single-PLC hosts (DevLauncher) pass an empty PLC name and
+    /// the prefix is dropped.
+    /// </summary>
+    private static string BuildTitle(System.Version? version, string plcName, string dbName, int activeDbCount)
+    {
+        if (activeDbCount > 1) return $"BlockParam v{version}";
+        var location = string.IsNullOrEmpty(plcName) ? dbName : $"{plcName} / {dbName}";
+        return $"BlockParam v{version}: {location}";
     }
 
     private void SyncStashedDbsCollection()

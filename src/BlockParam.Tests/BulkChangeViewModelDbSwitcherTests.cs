@@ -105,9 +105,9 @@ public class BulkChangeViewModelDbSwitcherTests
             new HierarchyAnalyzer(), bulkService, usageTracker, configLoader,
             currentPlcName: "PLC_Line1");
 
-        vm.HasCurrentPlcName.Should().BeTrue();
-        vm.CurrentPlcName.Should().Be("PLC_Line1");
-        vm.Title.Should().Contain("PLC_Line1 / " + primaryInfo.Name);
+        vm.ActiveSet.HasCurrentPlcName.Should().BeTrue();
+        vm.ActiveSet.CurrentPlcName.Should().Be("PLC_Line1");
+        vm.ActiveSet.Title.Should().Contain("PLC_Line1 / " + primaryInfo.Name);
     }
 
     [Fact]
@@ -115,9 +115,9 @@ public class BulkChangeViewModelDbSwitcherTests
     {
         // Single-PLC / DevLauncher: no PlcName → no prefix, no badge.
         var h = CreateVm();
-        h.Vm.HasCurrentPlcName.Should().BeFalse();
-        h.Vm.CurrentPlcName.Should().Be("");
-        h.Vm.Title.Should().NotContain(" / ");
+        h.Vm.ActiveSet.HasCurrentPlcName.Should().BeFalse();
+        h.Vm.ActiveSet.CurrentPlcName.Should().Be("");
+        h.Vm.ActiveSet.Title.Should().NotContain(" / ");
     }
 
     [Fact]

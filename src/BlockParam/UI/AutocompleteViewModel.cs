@@ -30,6 +30,18 @@ public class AutocompleteViewModel : ViewModelBase
     private IReadOnlyList<AutocompleteSuggestion> _suggestions = Array.Empty<AutocompleteSuggestion>();
     private IReadOnlyList<AutocompleteSuggestion> _filteredSuggestions = Array.Empty<AutocompleteSuggestion>();
     private bool _suppressSuggestions;
+    private bool _showConstants;
+    private bool _constantsForced;
+
+    /// <summary>
+    /// Raised after <see cref="ShowConstants"/> changes via the public
+    /// setter. The host VM subscribes and calls its <c>ReloadSuggestions</c>
+    /// — the slice doesn't own the reload pipeline (it composes
+    /// SelectedFlatMember, config rules, and the tag-table cache, all of
+    /// which live on the host), so a fire-and-forget event is the
+    /// minimal cross-slice coupling.
+    /// </summary>
+    public event Action? ShowConstantsChanged;
 
     /// <summary>Suggestion provider for glob-based per-row matching (null = no suggestions).</summary>
     public GlobSuggestionProvider? SuggestionProvider
@@ -67,6 +79,44 @@ public class AutocompleteViewModel : ViewModelBase
     {
         get => _suppressSuggestions;
         set => _suppressSuggestions = value;
+    }
+
+    /// <summary>
+    /// Whether to show constant suggestions. Forced on when a rule with
+    /// <c>tagTableReference</c> matches the current member; the setter
+    /// no-ops when <see cref="ConstantsForced"/> is true and the caller
+    /// tries to uncheck. Raises <see cref="ShowConstantsChanged"/> on
+    /// actual flip so the host can reload its suggestion pool.
+    /// </summary>
+    public bool ShowConstants
+    {
+        get => _showConstants;
+        set
+        {
+            if (_constantsForced && !value) return; // Can't uncheck when forced
+            if (SetProperty(ref _showConstants, value))
+                ShowConstantsChanged?.Invoke();
+        }
+    }
+
+    /// <summary>True when a config rule forces constants on (checkbox disabled).</summary>
+    public bool ConstantsForced
+    {
+        get => _constantsForced;
+        set => SetProperty(ref _constantsForced, value);
+    }
+
+    /// <summary>
+    /// Update <see cref="ShowConstants"/> without firing
+    /// <see cref="ShowConstantsChanged"/>. Used by the host's
+    /// <c>OnMemberSelected</c> rule-forced visibility path so a single
+    /// member-selection gesture doesn't run <c>ReloadSuggestions</c>
+    /// twice (once for the forced flip, once for the explicit reload
+    /// call that follows). Raises <c>PropertyChanged</c> for XAML.
+    /// </summary>
+    public void SetShowConstantsSilent(bool value)
+    {
+        SetProperty(ref _showConstants, value, nameof(ShowConstants));
     }
 
     /// <summary>

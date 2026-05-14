@@ -723,11 +723,11 @@ public class BulkChangeViewModelRegressionTests : IDisposable
         vm.Selection.SelectedFlatMember = leaf;
 
         // Confirm starting state: ShowConstants=false → Suggestions empty
-        vm.ShowConstants.Should().BeFalse("no rule forces ShowConstants on");
+        vm.Autocomplete.ShowConstants.Should().BeFalse("no rule forces ShowConstants on");
         vm.Autocomplete.Suggestions.Should().BeEmpty("ShowConstants is off — no suggestions loaded yet");
 
         // Toggle on → Suggestions must populate from the tag-table cache
-        vm.ShowConstants = true;
+        vm.Autocomplete.ShowConstants = true;
 
         vm.Autocomplete.Suggestions.Should().NotBeEmpty(
             "ShowConstants=true must load suggestions from the tag-table cache");
@@ -778,7 +778,7 @@ public class BulkChangeViewModelRegressionTests : IDisposable
         vm.Selection.SelectedFlatMember = vm.Tree.FlatMembers.First(m => m.IsLeaf);
 
         // Force ShowConstants on to populate _suggestions
-        vm.ShowConstants = true;
+        vm.Autocomplete.ShowConstants = true;
         vm.Autocomplete.Suggestions.Should().HaveCount(10, "all 10 entries loaded");
         vm.Autocomplete.FilteredSuggestions.Should().BeEmpty("not yet toggled open");
 
