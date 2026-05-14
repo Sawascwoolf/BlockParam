@@ -2656,18 +2656,18 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
-    /// Subscribes to <c>StartValueEdited</c> + <c>SelectedChanged</c> on a
-    /// single node. <b>Non-recursive by contract</b> (#108): callers are
-    /// responsible for invoking this per node when subscribing a subtree.
+    /// Wires inline-edit + selection-change handlers on a single node.
+    ///
     /// <para>
-    /// Wired into <see cref="MemberTreeViewModel"/> via the
-    /// <c>subscribeToVm</c> callback whose contract is "register on the
-    /// passed node only". Previously this method walked
-    /// <c>node.Children</c> too, and the multi-DB build path also iterated
-    /// descendants — net effect: every non-leaf got handlers registered
-    /// N times (N = depth), so each inline edit fanned out N
-    /// <see cref="OnSingleValueEdited"/> / <c>OnNodeSelected</c>
-    /// invocations.
+    /// <b>Non-recursive by contract (#108).</b> Callers passing this as the
+    /// <c>subscribeToVm</c> callback to <see cref="MemberTreeViewModel"/> are
+    /// responsible for iterating per node — the slice's <c>AddDbGroupRoot</c>
+    /// already walks every descendant of the synthetic group VM, and a
+    /// previous recursive implementation here doubled (then N-tupled, by
+    /// depth) the handler registrations on every non-leaf descendant in
+    /// multi-DB mode. The pending-edit store is idempotent so values were
+    /// still correct, but each inline edit fanned out N <c>SelectedChanged</c>
+    /// invocations across the tree.
     /// </para>
     /// </summary>
     private void SubscribeStartValueEdited(MemberNodeViewModel node)

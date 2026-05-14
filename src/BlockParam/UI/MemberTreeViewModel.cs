@@ -49,12 +49,20 @@ public class MemberTreeViewModel : ViewModelBase
     private readonly Func<IReadOnlyList<ActiveDb>> _getActiveDbs;
     private readonly Func<string> _getCurrentPlcName;
     private readonly CommentLanguagePolicy _commentLanguagePolicy;
-    // Non-recursive by contract (#108): invoked once per VM the slice mints,
-    // including the synthetic group VM in multi-DB mode. The slice is
-    // responsible for the per-descendant walk so callbacks like
-    // BulkChangeViewModel.SubscribeStartValueEdited register on exactly the
-    // node passed — no internal recursion, no duplicate registrations on
-    // non-leaf descendants.
+    /// <summary>
+    /// Per-node subscription callback the host wires for inline-edit
+    /// (<c>StartValueEdited</c>) and selection (<c>SelectedChanged</c>) events.
+    ///
+    /// <para>
+    /// <b>Non-recursive by contract (#108).</b> The slice invokes this callback
+    /// once per <see cref="MemberNodeViewModel"/> it mints — both for top-level
+    /// roots and every descendant — and the host implementation must register
+    /// handlers on the passed node only, never recurse into <c>node.Children</c>.
+    /// A previous recursive host doubled (then N-tupled, by depth) the
+    /// handler registrations on every non-leaf descendant in multi-DB mode
+    /// because <see cref="AddDbGroupRoot"/> already walks every descendant.
+    /// </para>
+    /// </summary>
     private readonly Action<MemberNodeViewModel> _subscribeToVm;
 
     private readonly Dictionary<MemberNode, MemberNodeViewModel> _modelToVm = new();
@@ -161,13 +169,14 @@ public class MemberTreeViewModel : ViewModelBase
         if (activeDbs.Count == 1)
         {
             // Single-DB: flat list of top-level members, identical to legacy.
-            // _subscribeToVm is non-recursive by contract (#108), so the
-            // slice walks the subtree per node — the host callback registers
-            // only on the passed node.
             var only = activeDbs[0];
             foreach (var member in only.Info.Members)
             {
                 var vm = new MemberNodeViewModel(member, null, _commentLanguagePolicy);
+                // #108: _subscribeToVm is non-recursive by contract, so the
+                // slice walks the subtree itself. Subscribe the root, then
+                // every descendant — same per-node fan-out as the multi-DB
+                // path in AddDbGroupRoot.
                 _subscribeToVm(vm);
                 foreach (var descendant in vm.AllDescendants())
                     _subscribeToVm(descendant);
@@ -214,9 +223,13 @@ public class MemberTreeViewModel : ViewModelBase
             parent: null,
             children: info.Members);
         var groupVm = new MemberNodeViewModel(synthetic, null, _commentLanguagePolicy);
-        // Subscribe edited-value events on every leaf descendant so inline
-        // edits in any active DB bubble up to the VM the same way
-        // single-DB edits do.
+        // Subscribe edited-value events on every minted VM (the synthetic
+        // group root + every real descendant) so inline edits in any active
+        // DB bubble up to the VM the same way single-DB edits do. The
+        // synthetic group's StartValue is null and never raises the event,
+        // but subscribing it keeps the "one callback per minted VM" contract
+        // simple — see #108.
+        _subscribeToVm(groupVm);
         foreach (var descendant in groupVm.AllDescendants())
             _subscribeToVm(descendant);
         groupVm.IsExpanded = true;
