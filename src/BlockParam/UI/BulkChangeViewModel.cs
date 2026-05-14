@@ -2656,14 +2656,24 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
-    /// Subscribes to StartValueEdited on a node and all its descendants.
+    /// Subscribes to <c>StartValueEdited</c> + <c>SelectedChanged</c> on a
+    /// single node. <b>Non-recursive by contract</b> (#108): callers are
+    /// responsible for invoking this per node when subscribing a subtree.
+    /// <para>
+    /// Wired into <see cref="MemberTreeViewModel"/> via the
+    /// <c>subscribeToVm</c> callback whose contract is "register on the
+    /// passed node only". Previously this method walked
+    /// <c>node.Children</c> too, and the multi-DB build path also iterated
+    /// descendants — net effect: every non-leaf got handlers registered
+    /// N times (N = depth), so each inline edit fanned out N
+    /// <see cref="OnSingleValueEdited"/> / <c>OnNodeSelected</c>
+    /// invocations.
+    /// </para>
     /// </summary>
     private void SubscribeStartValueEdited(MemberNodeViewModel node)
     {
         node.StartValueEdited += OnSingleValueEdited;
         node.SelectedChanged += Selection.OnNodeSelected;
-        foreach (var child in node.Children)
-            SubscribeStartValueEdited(child);
     }
 
     // _inSelectionCascade + OnNodeSelected moved to SelectionScopeViewModel

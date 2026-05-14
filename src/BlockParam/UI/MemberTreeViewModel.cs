@@ -49,6 +49,12 @@ public class MemberTreeViewModel : ViewModelBase
     private readonly Func<IReadOnlyList<ActiveDb>> _getActiveDbs;
     private readonly Func<string> _getCurrentPlcName;
     private readonly CommentLanguagePolicy _commentLanguagePolicy;
+    // Non-recursive by contract (#108): invoked once per VM the slice mints,
+    // including the synthetic group VM in multi-DB mode. The slice is
+    // responsible for the per-descendant walk so callbacks like
+    // BulkChangeViewModel.SubscribeStartValueEdited register on exactly the
+    // node passed — no internal recursion, no duplicate registrations on
+    // non-leaf descendants.
     private readonly Action<MemberNodeViewModel> _subscribeToVm;
 
     private readonly Dictionary<MemberNode, MemberNodeViewModel> _modelToVm = new();
@@ -155,11 +161,16 @@ public class MemberTreeViewModel : ViewModelBase
         if (activeDbs.Count == 1)
         {
             // Single-DB: flat list of top-level members, identical to legacy.
+            // _subscribeToVm is non-recursive by contract (#108), so the
+            // slice walks the subtree per node — the host callback registers
+            // only on the passed node.
             var only = activeDbs[0];
             foreach (var member in only.Info.Members)
             {
                 var vm = new MemberNodeViewModel(member, null, _commentLanguagePolicy);
                 _subscribeToVm(vm);
+                foreach (var descendant in vm.AllDescendants())
+                    _subscribeToVm(descendant);
                 IndexSubtree(vm, only);
                 RootMembers.Add(vm);
             }
