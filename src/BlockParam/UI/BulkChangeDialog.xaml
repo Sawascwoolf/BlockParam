@@ -194,9 +194,9 @@
                      picking a DB from a PLC that isn't in the active set yet.
                      Visible on the same condition as the legacy chip row. -->
                 <DockPanel DockPanel.Dock="Top" Margin="0,0,0,6"
-                           Visibility="{Binding HasDataBlockSwitcher, Converter={StaticResource BoolToVis}}">
+                           Visibility="{Binding ActiveSet.HasDataBlockSwitcher, Converter={StaticResource BoolToVis}}">
                     <StackPanel Orientation="Horizontal">
-                        <ItemsControl ItemsSource="{Binding PlcPills}">
+                        <ItemsControl ItemsSource="{Binding ActiveSet.PlcPills}">
                             <ItemsControl.ItemsPanel>
                                 <ItemsPanelTemplate>
                                     <WrapPanel Orientation="Horizontal"/>
@@ -224,10 +224,10 @@
                         <Button x:Name="AddDbButton"
                                 Content="{loc:Loc PillRow_AddDb}"
                                 Click="OnAddDbButtonClick"
-                                Visibility="{Binding CanAddPlc, Converter={StaticResource BoolToVis}}"
+                                Visibility="{Binding ActiveSet.CanAddPlc, Converter={StaticResource BoolToVis}}"
                                 Background="White" BorderBrush="#CCC" BorderThickness="1"
                                 Padding="6,2" VerticalAlignment="Center" Cursor="Hand"/>
-                        <Popup IsOpen="{Binding IsAddDbPopupOpen, Mode=TwoWay}"
+                        <Popup IsOpen="{Binding ActiveSet.IsAddDbPopupOpen, Mode=TwoWay}"
                                PlacementTarget="{Binding ElementName=AddDbButton}"
                                Placement="Bottom"
                                StaysOpen="False"
@@ -243,7 +243,7 @@
                                                       BlurRadius="12" ShadowDepth="2"/>
                                 </Border.Effect>
                                 <ListBox x:Name="AddPlcListBox"
-                                         ItemsSource="{Binding InactiveProjectPlcs}"
+                                         ItemsSource="{Binding ActiveSet.InactiveProjectPlcs}"
                                          SelectionChanged="OnAddPlcListSelectionChanged"
                                          BorderThickness="0"
                                          Background="Transparent"
