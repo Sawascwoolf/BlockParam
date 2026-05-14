@@ -461,14 +461,18 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     /// pending edits (#59). Each entry renders as its own inspector section
     /// so the staged work stays visible across switches; clicking the section
     /// header switches back to that DB (running the same prompt again).
-    /// </summary>
-    /// <summary>
+    ///
+    /// <para>
     /// Delegator for <see cref="ActiveSetViewModel.StashedDbs"/> (slice 8a).
-    /// XAML still binds to <c>{Binding StashedDbs}</c> on the host; the
-    /// rebind to <c>ActiveSet.StashedDbs</c> ships in slice 9. The
-    /// underlying collection instance is stable — the slice mutates it
-    /// in place via <c>Clear()</c> + <c>Add()</c> — so the binding's
-    /// ItemsControl observes the same `INotifyCollectionChanged` source.
+    /// XAML rebound to <c>{Binding ActiveSet.StashedDbs}</c> in the same
+    /// PR; the host delegator stays for non-XAML readers
+    /// (<see cref="BulkChangeDialog"/> code-behind, tests, DevLauncher)
+    /// and is dropped in slice 9. The underlying collection instance is
+    /// stable — the slice mutates it in place via <c>Clear()</c> +
+    /// <c>Add()</c> — so any subscriber observing
+    /// <c>INotifyCollectionChanged</c> sees the same source across
+    /// snapshots.
+    /// </para>
     /// </summary>
     public ObservableCollection<StashedDbState> StashedDbs => ActiveSet.StashedDbs;
 

@@ -14,10 +14,12 @@ namespace BlockParam.UI;
 /// forgetting to refresh after a mutation is structurally impossible.
 ///
 /// <para>
-/// Compound mutations (solo, reactivate-then-solo) build the new snapshot
-/// in locals and assign once → exactly one cascade per user gesture,
-/// regardless of how many DBs were swapped in or out. Cancellation =
-/// don't assign; the dialog stays on the previous snapshot.
+/// Compound mutations (solo, reactivate-then-solo) build the new
+/// snapshot in locals and install once via
+/// <see cref="ActiveSetViewModel.SetState"/> → exactly one cascade
+/// per user gesture, regardless of how many DBs were swapped in or
+/// out. Cancellation = don't call SetState; the dialog stays on the
+/// previous snapshot.
 /// </para>
 ///
 /// <para>
