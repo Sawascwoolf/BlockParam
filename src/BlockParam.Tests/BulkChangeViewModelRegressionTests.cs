@@ -282,7 +282,7 @@ public class BulkChangeViewModelRegressionTests : IDisposable
         // RequestRemoveActiveDb runs the State setter, which fires
         // RebuildAfterActiveSetChanged → Filter.RaiseSetpointsCapabilityChanged().
         var anchorDb = vm.AllActiveDbs.First(d => d.Info.Name == "DB_Anchor");
-        vm.RequestRemoveActiveDb(anchorDb);
+        vm.ActiveSet.RequestRemoveActiveDb(anchorDb);
 
         vm.AllActiveDbs.Should().HaveCount(1);
         vm.AllActiveDbs[0].Info.Name.Should().Be("DB_Peer",
