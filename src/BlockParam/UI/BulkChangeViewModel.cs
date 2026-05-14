@@ -2317,7 +2317,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         // Keep the selected member visible after ClearAffected collapsed smart-expands
         Selection.SelectedFlatMember?.EnsureVisible();
 
-        if (Selection.SelectedScope == null && !IsManualMode)
+        if (Selection.SelectedScope == null && !Selection.IsManualMode)
         {
             ComputeBulkPreview();
             RebuildPendingEdits();
@@ -2373,7 +2373,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         // No input → nothing to compute. Avoid walking scope members on every
         // inline keystroke when the inspector isn't being driven at all.
         bool hasInput = !string.IsNullOrEmpty(_newValue)
-                        && (IsManualMode || Selection.SelectedScope != null);
+                        && (Selection.IsManualMode || Selection.SelectedScope != null);
         if (hasInput)
         {
             if (Selection.IsManualMode)
@@ -3956,7 +3956,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
                     string.Equals(s.AncestorPath, selectedScopeAncestorPath, StringComparison.Ordinal)
                     && s.Depth == selectedScopeDepth);
                 if (restoredScope != null)
-                    SelectedScope = restoredScope;
+                    Selection.SelectedScope = restoredScope;
 
                 // Value is reset after Apply: the just-committed value would
                 // misrepresent the current state (#8). Clear touched so the
