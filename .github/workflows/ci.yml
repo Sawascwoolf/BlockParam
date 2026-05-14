@@ -94,13 +94,14 @@ jobs:
   screenshots:
     name: Screenshots (DevLauncher --capture)
     runs-on: windows-latest
-    # Marker-only: never on pull_request. Opt-in via "[run-ci]" or manual
+    # Marker-only: never on pull_request. Opt-in via "[image-ci]" or manual
     # dispatch while we shake out headless WPF rendering on hosted runners.
     # Goal is artifact-on-demand, not visual regression — failures should
-    # not block PRs.
+    # not block PRs. Separate marker from "[run-ci]" so routine UI work
+    # can rebuild visuals without re-running v20/v21, and vice versa.
     if: |
       github.event_name == 'workflow_dispatch' ||
-      (github.event_name == 'push' && contains(github.event.head_commit.message, '[run-ci]'))
+      (github.event_name == 'push' && contains(github.event.head_commit.message, '[image-ci]'))
 
     steps:
       - uses: actions/checkout@v4
