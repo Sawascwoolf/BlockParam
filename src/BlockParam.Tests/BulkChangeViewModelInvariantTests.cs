@@ -510,7 +510,7 @@ public class BulkChangeViewModelInvariantTests
         // Row 14 — §H2 + §I: chip-× the anchor in a 2-DB cross-PLC session
         // with no edits. Three things must rotate atomically:
         //   - AllActiveDbs[0] becomes the surviving peer
-        //   - CurrentDataBlockName tracks _activeDbs[0]
+        //   - CurrentDataBlockName tracks State.Dbs[0]
         //   - CurrentPlcName flips PLC_A → PLC_B (the §I checklist item)
         //
         // The cross-PLC angle matters because TryComputeRemove (~line 1665)
@@ -532,10 +532,10 @@ public class BulkChangeViewModelInvariantTests
         env.Vm.AllActiveDbs[0].Info.Name.Should().Be("NestedStructDB",
             "the surviving peer rotates into the anchor slot");
         env.Vm.CurrentDataBlockName.Should().Be("NestedStructDB",
-            "CurrentDataBlockName tracks _activeDbs[0]");
+            "CurrentDataBlockName tracks State.Dbs[0]");
         env.Vm.CurrentPlcName.Should().Be("PLC_B",
             "anchor PLC display follows the new anchor (TryComputeRemove " +
-            "rewrites AnchorPlcName; State setter propagates to _currentPlcName)");
+            "rewrites AnchorPlcName; CurrentPlcName reads State.AnchorPlcName)");
         env.Mbx.AskYesNoCancelCallCount.Should().Be(0, "no edits → no prompt");
         AssertInvariants(env.Vm);
     }
@@ -740,7 +740,7 @@ public class BulkChangeViewModelInvariantTests
         // keep the current title shape.
         //
         // Today: BuildTitle(version, plcName, dbName) is called with
-        // _activeDbs[0].Info.Name even when count > 1 → the anchor name
+        // State.Dbs[0].Info.Name even when count > 1 → the anchor name
         // bleeds through.
         var env = new ActiveSetTestBuilder()
             .WithAnchor("flat-db.xml", plc: "PLC_A")
