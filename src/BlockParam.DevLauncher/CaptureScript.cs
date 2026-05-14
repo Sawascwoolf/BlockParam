@@ -305,23 +305,23 @@ public static class SceneApplier
                 // SelectedFlatMember requires the node to be in the flat list;
                 // RefreshFlatList above guarantees that.
                 var flat = vm.Tree.FlatMembers.FirstOrDefault(m => m.Path == node.Path);
-                vm.SelectedFlatMember = flat ?? node;
+                vm.Selection.SelectedFlatMember = flat ?? node;
             }
         }
 
         if (scene.Scope != null)
         {
-            var scope = vm.AvailableScopes.FirstOrDefault(s => s.AncestorPath == scene.Scope);
+            var scope = vm.Selection.AvailableScopes.FirstOrDefault(s => s.AncestorPath == scene.Scope);
             if (scope == null)
             {
                 Serilog.Log.Warning(
                     "Scene {Id}: scope path not found: '{Path}'. Available: {Avail}",
                     scene.Id, scene.Scope,
-                    string.Join(", ", vm.AvailableScopes.Select(s => $"'{s.AncestorPath}'")));
+                    string.Join(", ", vm.Selection.AvailableScopes.Select(s => $"'{s.AncestorPath}'")));
             }
             else
             {
-                vm.SelectedScope = scope;
+                vm.Selection.SelectedScope = scope;
             }
         }
 
@@ -511,8 +511,8 @@ public static class SceneApplier
         vm.Inspector.IsInspectorCollapsed = false;
         foreach (var root in vm.Tree.RootMembers)
             CollapseRecursive(root);
-        vm.SelectedFlatMember = null;
-        vm.SelectedScope = null;
+        vm.Selection.SelectedFlatMember = null;
+        vm.Selection.SelectedScope = null;
         vm.Filter.SearchQuery = "";
         // Reset NewValue without tripping the user-touched flag so the next
         // scene's member selection can still drive the normal prefill path.

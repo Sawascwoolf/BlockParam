@@ -320,11 +320,11 @@ public class BulkChangeViewModelRegressionTests : IDisposable
         vm.RefreshFlatList();
 
         var leaf = vm.Tree.FlatMembers.First(m => m.Name == "ModuleId" && m.IsLeaf);
-        vm.SelectedFlatMember = leaf;
+        vm.Selection.SelectedFlatMember = leaf;
 
         // Pick the broadest scope (all 4 ModuleId instances)
-        var scope = vm.AvailableScopes.OrderByDescending(s => s.MatchCount).First();
-        vm.SelectedScope = scope;
+        var scope = vm.Selection.AvailableScopes.OrderByDescending(s => s.MatchCount).First();
+        vm.Selection.SelectedScope = scope;
 
         // NewValue is empty — no input → no preview
         vm.NewValue = "";
@@ -350,11 +350,11 @@ public class BulkChangeViewModelRegressionTests : IDisposable
         vm.RefreshFlatList();
 
         var leaf = vm.Tree.FlatMembers.First(m => m.Name == "ModuleId" && m.IsLeaf);
-        vm.SelectedFlatMember = leaf;
+        vm.Selection.SelectedFlatMember = leaf;
 
-        var scope = vm.AvailableScopes.OrderByDescending(s => s.MatchCount).First();
+        var scope = vm.Selection.AvailableScopes.OrderByDescending(s => s.MatchCount).First();
         scope.MatchCount.Should().Be(4, "fixture has 4 ModuleId leaves");
-        vm.SelectedScope = scope;
+        vm.Selection.SelectedScope = scope;
 
         // All 4 already hold "42" — none would change
         vm.NewValue = "42";
@@ -396,9 +396,9 @@ public class BulkChangeViewModelRegressionTests : IDisposable
 
         // Now set up bulk scope
         var leaf = moduleLeaves[1]; // pick a different leaf so SelectedFlatMember isn't the pending one
-        vm.SelectedFlatMember = moduleLeaves[0]; // need to select one to populate scopes
-        var scope = vm.AvailableScopes.OrderByDescending(s => s.MatchCount).First();
-        vm.SelectedScope = scope;
+        vm.Selection.SelectedFlatMember = moduleLeaves[0]; // need to select one to populate scopes
+        var scope = vm.Selection.AvailableScopes.OrderByDescending(s => s.MatchCount).First();
+        vm.Selection.SelectedScope = scope;
 
         vm.NewValue = "99";
         vm.FlushPendingHighlighting();
@@ -425,9 +425,9 @@ public class BulkChangeViewModelRegressionTests : IDisposable
         FlatTreeManager.ExpandAll(vm.Tree.RootMembers);
         vm.RefreshFlatList();
 
-        vm.SelectedFlatMember = vm.Tree.FlatMembers.First(m => m.Name == "ModuleId" && m.IsLeaf);
-        var scope = vm.AvailableScopes.OrderByDescending(s => s.MatchCount).First();
-        vm.SelectedScope = scope;
+        vm.Selection.SelectedFlatMember = vm.Tree.FlatMembers.First(m => m.Name == "ModuleId" && m.IsLeaf);
+        var scope = vm.Selection.AvailableScopes.OrderByDescending(s => s.MatchCount).First();
+        vm.Selection.SelectedScope = scope;
 
         // Homogeneous: all ModuleId start at "42"
         vm.NewValue = "85";
@@ -463,7 +463,7 @@ public class BulkChangeViewModelRegressionTests : IDisposable
             added: new[] { speed, enable },
             removed: System.Array.Empty<MemberNodeViewModel>(),
             isFilterRehydration: false);
-        vm2.IsManualMode.Should().BeTrue();
+        vm2.Selection.IsManualMode.Should().BeTrue();
 
         vm2.NewValue = "ON";
         vm2.FlushPendingHighlighting();
@@ -500,10 +500,10 @@ public class BulkChangeViewModelRegressionTests : IDisposable
             removed: System.Array.Empty<MemberNodeViewModel>(),
             isFilterRehydration: false);
 
-        vm.IsManualMode.Should().BeTrue("2 leaves selected → manual mode");
-        vm.ManualSelectionCount.Should().Be(2);
-        vm.SelectedScope.Should().BeNull("manual mode clears the scope dropdown");
-        vm.AvailableScopes.Should().BeEmpty("manual mode clears available scopes");
+        vm.Selection.IsManualMode.Should().BeTrue("2 leaves selected → manual mode");
+        vm.Selection.ManualSelectionCount.Should().Be(2);
+        vm.Selection.SelectedScope.Should().BeNull("manual mode clears the scope dropdown");
+        vm.Selection.AvailableScopes.Should().BeEmpty("manual mode clears available scopes");
     }
 
     /// <summary>
@@ -549,7 +549,7 @@ public class BulkChangeViewModelRegressionTests : IDisposable
             removed: System.Array.Empty<MemberNodeViewModel>(),
             isFilterRehydration: false);
 
-        vm2.IsManualMode.Should().BeTrue();
+        vm2.Selection.IsManualMode.Should().BeTrue();
         vm2.IsSelectionTypeHomogeneous.Should().BeTrue(
             "2 Int leaves → all same datatype → homogeneous");
 
@@ -564,13 +564,13 @@ public class BulkChangeViewModelRegressionTests : IDisposable
 
         vm2.IsSelectionTypeHomogeneous.Should().BeFalse(
             "Int + Bool → mixed datatypes → not homogeneous");
-        vm2.ManualSelectionSummary.Should().Contain("2",
+        vm2.Selection.ManualSelectionSummary.Should().Contain("2",
             "ManualSelectionSummary (Dialog_ManualSelectionMixed) must contain the distinct datatype count (2)");
         // Dialog_ManualSelectionMixed = "{0} selected — {1} datatypes" (en) / "{0} ausgewählt — {1} Datentypen" (de)
         // SPEC AMBIGUITY: The exact phrase "datatypes" vs "Datentypen" depends on the OS culture.
         // We assert the format key is used by checking the count "2" appears (which is culture-neutral)
         // and that ManualSelectionSummary is distinct from the homogeneous format (which contains a datatype name).
-        vm2.ManualSelectionSummary.Should().NotContain("Int",
+        vm2.Selection.ManualSelectionSummary.Should().NotContain("Int",
             "ManualSelectionSummary in mixed mode must use Dialog_ManualSelectionMixed, " +
             "not Dialog_ManualSelectionSummary which names the single datatype");
 
@@ -595,13 +595,13 @@ public class BulkChangeViewModelRegressionTests : IDisposable
             removed: System.Array.Empty<MemberNodeViewModel>(),
             isFilterRehydration: false);
 
-        vm.IsManualMode.Should().BeTrue("setup: manual mode");
+        vm.Selection.IsManualMode.Should().BeTrue("setup: manual mode");
         vm.NewValue = "ON";
 
         vm.ClearManualSelectionCommand.Execute(null);
 
-        vm.ManualSelectionCount.Should().Be(0, "Clear wipes all selected leaves");
-        vm.IsManualMode.Should().BeFalse("0 selected → not in manual mode");
+        vm.Selection.ManualSelectionCount.Should().Be(0, "Clear wipes all selected leaves");
+        vm.Selection.IsManualMode.Should().BeFalse("0 selected → not in manual mode");
         vm.NewValue.Should().BeEmpty("Clear resets NewValue to empty");
     }
 
@@ -720,7 +720,7 @@ public class BulkChangeViewModelRegressionTests : IDisposable
         FlatTreeManager.ExpandAll(vm.Tree.RootMembers);
         vm.RefreshFlatList();
         var leaf = vm.Tree.FlatMembers.First(m => m.IsLeaf);
-        vm.SelectedFlatMember = leaf;
+        vm.Selection.SelectedFlatMember = leaf;
 
         // Confirm starting state: ShowConstants=false → Suggestions empty
         vm.ShowConstants.Should().BeFalse("no rule forces ShowConstants on");
@@ -775,7 +775,7 @@ public class BulkChangeViewModelRegressionTests : IDisposable
 
         FlatTreeManager.ExpandAll(vm.Tree.RootMembers);
         vm.RefreshFlatList();
-        vm.SelectedFlatMember = vm.Tree.FlatMembers.First(m => m.IsLeaf);
+        vm.Selection.SelectedFlatMember = vm.Tree.FlatMembers.First(m => m.IsLeaf);
 
         // Force ShowConstants on to populate _suggestions
         vm.ShowConstants = true;
@@ -854,9 +854,9 @@ public class BulkChangeViewModelRegressionTests : IDisposable
 
         // Select a ModuleId leaf (child of Msg_CommError) and pick the broadest scope
         var leaf = vm.Tree.FlatMembers.First(m => m.Name == "ModuleId" && m.IsLeaf);
-        vm.SelectedFlatMember = leaf;
-        vm.AvailableScopes.Should().NotBeEmpty("ModuleId has repeated occurrences → scope available");
-        vm.SelectedScope = vm.AvailableScopes.OrderByDescending(s => s.MatchCount).First();
+        vm.Selection.SelectedFlatMember = leaf;
+        vm.Selection.AvailableScopes.Should().NotBeEmpty("ModuleId has repeated occurrences → scope available");
+        vm.Selection.SelectedScope = vm.Selection.AvailableScopes.OrderByDescending(s => s.MatchCount).First();
 
         vm.NewValue = "99"; // a different value triggers ComputeBulkPreview
         vm.FlushPendingHighlighting(); // runs UpdateHighlighting → UpdateCommentPreviews
@@ -876,10 +876,10 @@ public class BulkChangeViewModelRegressionTests : IDisposable
         var vm2 = CreateUdtVm(); // no rules
         FlatTreeManager.ExpandAll(vm2.Tree.RootMembers);
         vm2.RefreshFlatList();
-        vm2.SelectedFlatMember = vm2.Tree.FlatMembers.First(m => m.Name == "ModuleId" && m.IsLeaf);
-        if (vm2.AvailableScopes.Count > 0)
+        vm2.Selection.SelectedFlatMember = vm2.Tree.FlatMembers.First(m => m.Name == "ModuleId" && m.IsLeaf);
+        if (vm2.Selection.AvailableScopes.Count > 0)
         {
-            vm2.SelectedScope = vm2.AvailableScopes.First();
+            vm2.Selection.SelectedScope = vm2.Selection.AvailableScopes.First();
             vm2.NewValue = "99";
             vm2.FlushPendingHighlighting();
         }
@@ -937,8 +937,8 @@ public class BulkChangeViewModelRegressionTests : IDisposable
         // test 14. The scope cascade populates PreviewComment on the
         // Msg_CommError parents.
         var leaf = vm.Tree.FlatMembers.First(m => m.Name == "ModuleId" && m.IsLeaf);
-        vm.SelectedFlatMember = leaf;
-        vm.SelectedScope = vm.AvailableScopes.OrderByDescending(s => s.MatchCount).First();
+        vm.Selection.SelectedFlatMember = leaf;
+        vm.Selection.SelectedScope = vm.Selection.AvailableScopes.OrderByDescending(s => s.MatchCount).First();
         vm.NewValue = "99";
         vm.FlushPendingHighlighting();
 
