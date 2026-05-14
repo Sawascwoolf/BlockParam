@@ -225,27 +225,26 @@ jobs:
           Copy-Item ci-output/*.png $wt/
 
           $readme = @"
-# CI-rendered screenshots
+          # CI-rendered screenshots
 
-This branch is force-pushed by ``.github/workflows/ci.yml`` (screenshots job)
-on every successful run. **Do not commit by hand — your changes will be
-erased on the next run.**
+          This branch is force-pushed by ``.github/workflows/ci.yml`` (screenshots job)
+          on every successful run. **Do not commit by hand — your changes will be
+          erased on the next run.**
 
-Each PNG here is the headless DevLauncher render of a UI surface. Filenames
-match the canonical asset names under ``assets/screenshots/`` in the source
-branch, so the raw URL of any file here is a stable reference for docs:
+          Each PNG here is the headless DevLauncher render of a UI surface.
+          Reference any file via raw URL:
 
-````
-https://github.com/${{ github.repository }}/raw/ci-screenshots/<name>.png
-````
+          ````
+          https://github.com/${{ github.repository }}/raw/ci-screenshots/<name>.png
+          ````
 
-## This refresh
+          ## This refresh
 
-- Source branch: ``$srcBranch``
-- Source commit: ``$sha``
-- Run: $runUrl
-- Timestamp (UTC): $((Get-Date).ToUniversalTime().ToString("o"))
-"@
+          - Source branch: ``$srcBranch``
+          - Source commit: ``$sha``
+          - Run: $runUrl
+          - Timestamp (UTC): $((Get-Date).ToUniversalTime().ToString("o"))
+          "@
           Set-Content -Path "$wt/README.md" -Value $readme -Encoding UTF8
 
           Push-Location $wt
