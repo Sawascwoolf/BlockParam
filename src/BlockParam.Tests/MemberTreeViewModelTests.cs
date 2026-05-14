@@ -293,17 +293,20 @@ public class MemberTreeViewModelTests
     }
 
     [Fact]
-    public void FindNodeByPath_LocatesByPathString()
+    public void FindNodeByPathInDb_SingleDb_LocatesByPathString()
     {
+        // Single-DB shape (no synthetic root): the in-db lookup still
+        // works because the slice falls back to walking RootMembers when
+        // owner is the sole active DB (#82).
         var (db, _, _) = MakeFlatDb("DB_F");
         var vm = Build(activeDbs: new[] { db });
         vm.BuildRootMembersFromActiveDbs();
 
-        var found = vm.FindNodeByPath("Speed");
+        var found = vm.FindNodeByPathInDb("Speed", db);
         found.Should().NotBeNull();
         found!.Name.Should().Be("Speed");
 
-        vm.FindNodeByPath("DoesNotExist").Should().BeNull();
+        vm.FindNodeByPathInDb("DoesNotExist", db).Should().BeNull();
     }
 
     [Fact]
@@ -324,6 +327,22 @@ public class MemberTreeViewModelTests
         vm.FindActiveDbForModel(foundInB!.Model).Should().BeSameAs(dbB);
         foundInB.Should().NotBeSameAs(foundInA,
             "same path string in two DBs must resolve to distinct VMs");
+    }
+
+    [Fact]
+    public void FindNodeByPathInDb_NotInActiveSet_ReturnsNull()
+    {
+        // The single-DB fallback only resolves when owner IS the sole
+        // active DB. An owner from a different fixture must NOT silently
+        // fall through to the first root in RootMembers (#82).
+        var (dbA, _, _) = MakeFlatDb("DB_A");
+        var (dbStranger, _, _) = MakeFlatDb("DB_Stranger");
+        var vm = Build(activeDbs: new[] { dbA });
+        vm.BuildRootMembersFromActiveDbs();
+
+        vm.FindNodeByPathInDb("Speed", dbStranger).Should().BeNull(
+            "stranger DB is not in the active set — fall-through would " +
+            "be exactly the cross-DB aliasing the in-db variant exists to prevent");
     }
 
     [Fact]

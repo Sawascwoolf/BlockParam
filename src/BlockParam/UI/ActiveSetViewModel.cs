@@ -435,14 +435,14 @@ public sealed class ActiveSetViewModel : ViewModelBase
     {
         // Match on (Name, PlcName) — multi-PLC projects can host two DBs
         // with the same name on different PLCs (#58 review must-fix #4).
-        // For index 0 the PLC name comes from State.AnchorPlcName (display
-        // state); for the rest we read each ActiveDb.PlcName directly.
+        // Every ActiveDb (including index 0) carries its own PlcName now,
+        // so identity matching is uniform across the set (#82). Anchor is
+        // still position-based — that's display state, not identity.
         for (int i = 0; i < _state.Dbs.Count; i++)
         {
             var db = _state.Dbs[i];
-            var plc = i == 0 ? _state.AnchorPlcName : db.PlcName;
             if (string.Equals(db.Info.Name, summary.Name, StringComparison.Ordinal)
-                && string.Equals(plc, summary.PlcName, StringComparison.Ordinal))
+                && string.Equals(db.PlcName, summary.PlcName, StringComparison.Ordinal))
                 return (true, i == 0);
         }
         return (false, false);
@@ -670,10 +670,13 @@ public sealed class ActiveSetViewModel : ViewModelBase
     private IReadOnlyList<DataBlockListItem> GetActiveItemsForPlc(PlcPillViewModel pill)
     {
         var result = new List<DataBlockListItem>();
+        // Identity is by ActiveDb.PlcName uniformly across indices (#82) —
+        // the anchor is no longer special. isAnchor stays position-based:
+        // it's display state, not identity.
         for (int i = 0; i < _state.Dbs.Count; i++)
         {
             var db = _state.Dbs[i];
-            var plc = (i == 0 ? _state.AnchorPlcName : db.PlcName) ?? "";
+            var plc = db.PlcName ?? "";
             if (!string.Equals(plc, pill.PlcName, StringComparison.Ordinal)) continue;
             result.Add(new DataBlockListItem(
                 new DataBlockSummary(db.Info.Name, "", plcName: plc, number: db.Info.Number),
@@ -934,9 +937,15 @@ public sealed class ActiveSetViewModel : ViewModelBase
         // State assignment so the cascade has already rebuilt RootMembers
         // — otherwise the new PendingValue assignments would land on VMs
         // the rebuild is about to discard.
+        //
+        // Pass `target` as the owner so the restore resolves paths within
+        // its subtree only (#82). After ComposeRemoveOthers the active set
+        // is usually solo'd to `target`, but a partial cancel can leave
+        // peers — without scoping, a stashed edit would silently land on
+        // whichever DB happens to share the path string first.
         if (_restoreStashOntoLive != null)
         {
-            var (restored, dropped) = _restoreStashOntoLive(stash, null);
+            var (restored, dropped) = _restoreStashOntoLive(stash, target);
             if (restored > 0 || dropped > 0)
             {
                 _setStatus?.Invoke(dropped == 0
@@ -1028,18 +1037,16 @@ public sealed class ActiveSetViewModel : ViewModelBase
     /// <summary>
     /// Looks up an active DB by (Name, PlcName) so dropdown rows resolve to
     /// the right ActiveDb instance even in multi-PLC projects where two
-    /// PLCs share a DB name (#58 review must-fix #4).
+    /// PLCs share a DB name (#58 review must-fix #4). Every ActiveDb —
+    /// including index 0 — now carries its own PlcName (#82), so identity
+    /// resolution no longer special-cases the anchor.
     /// </summary>
     private ActiveDb? FindActiveDb(DataBlockSummary summary)
     {
-        for (int i = 0; i < _state.Dbs.Count; i++)
+        foreach (var db in _state.Dbs)
         {
-            var db = _state.Dbs[i];
-            // Index 0 reads its display PLC from State.AnchorPlcName; the
-            // rest read it from each ActiveDb directly.
-            var plc = i == 0 ? _state.AnchorPlcName : db.PlcName;
             if (string.Equals(db.Info.Name, summary.Name, StringComparison.Ordinal)
-                && string.Equals(plc, summary.PlcName, StringComparison.Ordinal))
+                && string.Equals(db.PlcName, summary.PlcName, StringComparison.Ordinal))
                 return db;
         }
         return null;
@@ -1121,12 +1128,15 @@ public sealed class ActiveSetViewModel : ViewModelBase
             entries.Add(new StashedEditEntry(node.Path, startValue, pendingValue));
         }
         if (entries.Count == 0) return null;
+        // #82: stash the captured DB under its own PlcName, not the anchor's
+        // — a peer DB on a different PLC must match its own dropdown summary
+        // when reactivated, otherwise the stash key won't line up.
         var summary = new DataBlockSummary(
             db.Info.Name,
             "",
             blockType: db.Info.BlockType,
             isInstanceDb: string.Equals(db.Info.BlockType, "InstanceDB", StringComparison.Ordinal),
-            plcName: _state.AnchorPlcName);
+            plcName: db.PlcName ?? "");
         return new StashedDbState(summary, entries);
     }
 

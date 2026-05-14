@@ -823,6 +823,192 @@ public class BulkChangeViewModelMultiDbTests
         restoredLeaf.PendingValue.Should().Be(pending);
     }
 
+    // ── #82 path-identity tests ──────────────────────────────────────────────
+
+    /// <summary>
+    /// Helper: builds two distinct <see cref="ActiveDb"/> instances that
+    /// share the same member <c>Path</c> strings. Used to exercise the
+    /// cross-DB path-collision scenario (#82) without having to fabricate
+    /// custom XML fixtures.
+    /// </summary>
+    private static (DataBlockInfo a, DataBlockInfo b, MemberNode speedA, MemberNode speedB)
+        BuildTwoDbsWithSamePaths()
+    {
+        var speedA = new MemberNode("Speed", "Int", "111", "Speed", null,
+            Array.Empty<MemberNode>());
+        var tempA = new MemberNode("Temperature", "Int", "21", "Temperature", null,
+            Array.Empty<MemberNode>());
+        var infoA = new DataBlockInfo(
+            "DB_Recipe_A", 1, "Optimized", "GlobalDB", new[] { speedA, tempA });
+
+        var speedB = new MemberNode("Speed", "Int", "222", "Speed", null,
+            Array.Empty<MemberNode>());
+        var tempB = new MemberNode("Temperature", "Int", "42", "Temperature", null,
+            Array.Empty<MemberNode>());
+        var infoB = new DataBlockInfo(
+            "DB_Recipe_B", 2, "Optimized", "GlobalDB", new[] { speedB, tempB });
+
+        return (infoA, infoB, speedA, speedB);
+    }
+
+    [Fact]
+    public void StashRestoration_TwoDbsSharePath_RestoresOntoCorrectDb()
+    {
+        // #82 — In multi-DB mode two ActiveDbs can share a member Path
+        // string verbatim (typical when both reference the same UDT, but
+        // also happens for any same-named scalar). Stash entries persist
+        // only the bare Path (no "DbName.MemberPath" prefix), so restore
+        // must resolve against the OWNING ActiveDb — not first-match
+        // across roots. Before the fix the restore would silently land
+        // on whichever DB sits at RootMembers[0].
+        var (infoA, infoB, _, _) = BuildTwoDbsWithSamePaths();
+
+        var configLoader = new ConfigLoader(null);
+        var bulkService = new BulkChangeService(new ChangeLogger(), configLoader);
+        var tracker = Substitute.For<IUsageTracker>();
+        tracker.GetStatus().Returns(new UsageStatus(0, 100));
+        tracker.RecordUsage(Arg.Any<int>()).Returns(true);
+
+        var mbx = new FakeMessageBox(YesNoCancelResult.No); // Keep on remove
+        var peer = new ActiveDb(infoB, "<Block name='DB_Recipe_B' />", onApply: _ => { });
+
+        // currentPlcName left empty: both DBs share PlcName "" — the path
+        // collision is what we're testing, not the PLC dimension.
+        var vm = new BulkChangeViewModel(
+            infoA, "<Block name='DB_Recipe_A' />",
+            new HierarchyAnalyzer(), bulkService, tracker, configLoader,
+            onApply: _ => { },
+            messageBox: mbx,
+            additionalActiveDbs: new[] { peer },
+            // Reactivation needs the factory so it can rebuild the stashed
+            // peer when the user reactivates from the inspector.
+            buildActiveDbForSummary: s => s.Name == infoB.Name
+                ? new ActiveDb(infoB, "<Block name='DB_Recipe_B' />", onApply: _ => { })
+                : null);
+
+        vm.AllActiveDbs.Should().HaveCount(2);
+
+        // Stage an inline edit on PEER's Speed (path "Speed", same string
+        // as anchor's Speed). The anchor's Speed must NOT receive this
+        // edit when we later restore the stash.
+        var peerSpeedVm = vm.Tree.RootMembers
+            .First(r => r.Name == infoB.Name)
+            .AllDescendants().First(n => n.Name == "Speed" && n.IsLeaf);
+        peerSpeedVm.EditableStartValue = "999";
+
+        // Remove peer → Keep (stash). Anchor stays active.
+        var peerRef = vm.AllActiveDbs.First(d => d.Info.Name == infoB.Name);
+        vm.ActiveSet.RequestRemoveActiveDb(peerRef);
+
+        vm.AllActiveDbs.Should().HaveCount(1);
+        vm.AllActiveDbs[0].Info.Name.Should().Be(infoA.Name);
+        vm.ActiveSet.StashedDbs.Should().ContainSingle(s => s.DbName == infoB.Name);
+
+        // Pre-condition: the anchor's Speed is untouched (its StartValue
+        // is 111, no pending edit applied). After the peer was removed the
+        // active set is single-DB, so RootMembers is flat — Speed is right
+        // at the top level.
+        var anchorSpeedVmBeforeReactivate = vm.Tree.RootMembers
+            .First(r => r.IsLeaf && r.Name == "Speed");
+        anchorSpeedVmBeforeReactivate.PendingValue.Should().BeNull(
+            "anchor's Speed must NOT carry the peer's pending edit before reactivation");
+
+        // Reactivate peer → Replace path (mbx returns No for AddOrReplace).
+        // This is the solo-reactivate path: peer becomes the only active DB,
+        // anchor is dropped. The restore must target the (now-only) peer's
+        // Speed, not the (already-gone) anchor's.
+        var stash = vm.ActiveSet.StashedDbs[0];
+        vm.ActiveSet.SwitchToStashedDbCommand.Execute(stash);
+
+        vm.AllActiveDbs.Should().HaveCount(1, "Replace path soloed to peer");
+        vm.AllActiveDbs[0].Info.Name.Should().Be(infoB.Name);
+
+        // The restored leaf must be the peer's Speed — same Path string,
+        // distinct model reference. Without the #82 fix this would be
+        // dropped or aliased.
+        var restoredLeaf = vm.Tree.RootMembers
+            .SelectMany(r => new[] { r }.Concat(r.AllDescendants()))
+            .First(n => n.IsLeaf && n.Name == "Speed");
+        restoredLeaf.PendingValue.Should().Be("999",
+            "stash restore must land on the peer's Speed, the DB the edit " +
+            "was made on — first-match across roots would silently route " +
+            "to the wrong DB when both share a Path");
+    }
+
+    [Fact]
+    public void CrossDbScopeRouting_PathCollision_EachDbStagesItsOwnNode()
+    {
+        // #82 — A bulk scope spans every active DB whose tree contains
+        // matching paths. When two DBs share a member Path, the scope's
+        // MatchingMembers carries two distinct MemberNode references
+        // (one per DB). Set Pending must stage exactly the per-DB VM each
+        // model maps to — not the first-match across roots.
+        var (infoA, infoB, _, _) = BuildTwoDbsWithSamePaths();
+
+        var configLoader = new ConfigLoader(null);
+        var bulkService = new BulkChangeService(new ChangeLogger(), configLoader);
+        var tracker = Substitute.For<IUsageTracker>();
+        tracker.GetStatus().Returns(new UsageStatus(0, 100));
+        tracker.RecordUsage(Arg.Any<int>()).Returns(true);
+
+        var peer = new ActiveDb(infoB, "<Block name='DB_Recipe_B' />", onApply: _ => { });
+
+        var vm = new BulkChangeViewModel(
+            infoA, "<Block name='DB_Recipe_A' />",
+            new HierarchyAnalyzer(), bulkService, tracker, configLoader,
+            onApply: _ => { },
+            additionalActiveDbs: new[] { peer });
+
+        vm.AllActiveDbs.Should().HaveCount(2);
+
+        // Find each DB's Speed VM. AllDescendants() crosses the synthetic
+        // root, so we filter by the synthetic root's Name (the DB's name).
+        var anchorRoot = vm.Tree.RootMembers.First(r => r.Name == infoA.Name);
+        var peerRoot = vm.Tree.RootMembers.First(r => r.Name == infoB.Name);
+        var anchorSpeedVm = anchorRoot.AllDescendants()
+            .First(n => n.IsLeaf && n.Name == "Speed");
+        var peerSpeedVm = peerRoot.AllDescendants()
+            .First(n => n.IsLeaf && n.Name == "Speed");
+
+        // Sanity: distinct model refs, identical Path string.
+        anchorSpeedVm.Should().NotBeSameAs(peerSpeedVm);
+        anchorSpeedVm.Path.Should().Be(peerSpeedVm.Path);
+
+        // Make sure both Speed leaves are visible in the flat list (the
+        // synthetic group roots start expanded in multi-DB mode, but
+        // RefreshFlatList wires the projection).
+        FlatTreeManager.ExpandAll(vm.Tree.RootMembers);
+        vm.RefreshFlatList();
+
+        // Select anchor's Speed → SelectedScope automatically extends to
+        // every active DB whose tree contains a matching path (cross-DB
+        // lift). Bulk-stage value "777".
+        vm.Selection.SelectedFlatMember = anchorSpeedVm;
+        // Pick the broadest scope — the cross-DB lift produces a scope
+        // whose MatchingMembers spans every active DB with the path.
+        var scope = vm.Selection.AvailableScopes
+            .OrderByDescending(s => s.MatchCount)
+            .FirstOrDefault();
+        scope.Should().NotBeNull("cross-DB selection must produce at least one scope");
+        vm.Selection.SelectedScope = scope;
+        vm.NewValue = "777";
+
+        // Sanity: the scope picked up Speed in BOTH DBs.
+        vm.Selection.SelectedScope!.MatchingMembers.Should().HaveCountGreaterOrEqualTo(2,
+            "cross-DB scope must include the Speed model from each active DB");
+
+        vm.SetPendingCommand.Execute(null);
+
+        // Per #82: each DB's Speed VM must carry the staged value via its
+        // own MemberNode reference. A first-match-by-path bug would stage
+        // on anchor's Speed twice and leave peer's untouched.
+        anchorSpeedVm.PendingValue.Should().Be("777",
+            "anchor's Speed (model A) must be staged");
+        peerSpeedVm.PendingValue.Should().Be("777",
+            "peer's Speed (model B) must be staged — first-match across " +
+            "roots would silently miss this and stage on anchor's Speed twice");
+    }
+
     // ── Pill-row tests (#pill-refactor) ──────────────────────────────────────
 
     [Fact]

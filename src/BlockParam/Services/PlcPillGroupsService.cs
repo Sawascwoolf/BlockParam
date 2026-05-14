@@ -52,9 +52,13 @@ public static class PlcPillGroupsService
         for (int i = 0; i < activeDbs.Count; i++)
         {
             var db = activeDbs[i];
-            // Index 0 reads PLC name from anchorPlcName (the host signals
-            // the anchor's PLC explicitly; for non-anchor DBs use db.PlcName).
-            var plc = (i == 0 ? anchorPlcName : db.PlcName) ?? "";
+            // #82: every ActiveDb (anchor included) carries its own PlcName,
+            // so the grouping key is uniform. anchorPlcName stays as a
+            // back-compat fallback for legacy hosts that may still seed the
+            // anchor with an empty PlcName.
+            var plc = !string.IsNullOrEmpty(db.PlcName)
+                ? db.PlcName
+                : (i == 0 ? (anchorPlcName ?? "") : "");
             // DataBlockInfo.Number is int (never null for a parsed block).
             var item = new DataBlockListItem(
                 new DataBlockSummary(
