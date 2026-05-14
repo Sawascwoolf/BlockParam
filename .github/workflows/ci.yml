@@ -90,3 +90,203 @@ jobs:
 
       - name: Build (Release)
         run: dotnet build src/BlockParam/BlockParam.csproj -c Release --no-restore -p:UseSiemensStubs=true -p:TiaVersion=21
+
+  screenshots:
+    name: Screenshots (DevLauncher --capture)
+    runs-on: windows-latest
+    # Marker-only: never on pull_request. Opt-in via "[image-ci]" or manual
+    # dispatch while we shake out headless WPF rendering on hosted runners.
+    # Goal is artifact-on-demand, not visual regression — failures should
+    # not block PRs. Separate marker from "[run-ci]" so routine UI work
+    # can rebuild visuals without re-running v20/v21, and vice versa.
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'push' && contains(github.event.head_commit.message, '[image-ci]'))
+    # Need write to push the rendered PNG back to the branch.
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-v20-${{ hashFiles('**/*.csproj') }}
+          restore-keys: ${{ runner.os }}-nuget-v20-
+
+      - name: Build DevLauncher
+        run: dotnet build src/BlockParam.DevLauncher/BlockParam.DevLauncher.csproj -c Release -p:UseSiemensStubs=true
+
+      - name: Capture all DevLauncher screenshots
+        shell: pwsh
+        run: |
+          $exe   = "src/BlockParam.DevLauncher/bin/Release/net48/BlockParam.DevLauncher.exe"
+          $stage = "ci-output"
+          $logs  = "ci-logs"
+          New-Item -ItemType Directory -Force -Path $stage, $logs | Out-Null
+
+          # All DevLauncher --capture-* modes we can run headlessly. Each
+          # entry is run independently; failures are accumulated rather
+          # than fail-fast so we get a full picture per run. The playbook
+          # script writes its outputs to assets/screenshots/ (per its
+          # output_dir) — we collect those after the run.
+          $captures = @(
+            @{ Name = "playbook";              Args = @("--capture-script", "assets/screenshots/scripts/playbook.json") },
+            @{ Name = "rules";                 Args = @("--capture-rules", "$stage/workflow_rules.png") },
+            @{ Name = "license";               Args = @("--capture-license", $stage) },
+            @{ Name = "pill";                  Args = @("--capture-pill", $stage) },
+            @{ Name = "pill-db";               Args = @("--capture-pill-db", $stage) },
+            @{ Name = "pill-grouped";          Args = @("--capture-pill-grouped", $stage) },
+            @{ Name = "pill-grouped-bundled";  Args = @("--capture-pill-grouped-bundled", $stage) },
+            @{ Name = "pill-row";              Args = @("--capture-pill-row", "$stage/pill-row.png") }
+          )
+
+          $failed = @()
+          foreach ($c in $captures) {
+            Write-Host ""
+            Write-Host "=== $($c.Name) ==="
+            $logFile = "$logs/$($c.Name).log"
+            $captureArgs = $c.Args
+            & $exe @captureArgs 2>&1 | Tee-Object -FilePath $logFile
+            $exit = $LASTEXITCODE
+            Write-Host "exit=$exit"
+            if ($exit -ne 0) { $failed += $c.Name }
+          }
+
+          # Playbook writes to assets/screenshots/ — pull its outputs into
+          # the flat stage dir so the orphan branch has everything in one
+          # place. Names (01_hero.png … 05_collapsed_rail.png) don't
+          # collide with any other capture mode's filenames.
+          foreach ($name in "01_hero.png","02_bulk_edit_plant.png","03_scope_module.png","04_pending_queue.png","05_collapsed_rail.png") {
+            $src = "assets/screenshots/$name"
+            if (Test-Path $src) { Copy-Item $src "$stage/$name" -Force }
+          }
+
+          # Copy Serilog file-sink output for diagnostics (Debug-level,
+          # richer than stdout).
+          $sinkDir = Join-Path $env:TEMP "BlockParam"
+          if (Test-Path $sinkDir) {
+            Get-ChildItem -Path $sinkDir -Filter "devlauncher-*.log" |
+              ForEach-Object { Copy-Item $_.FullName "$logs/" -Force }
+          }
+
+          Write-Host ""
+          Write-Host "=== Captured PNGs ==="
+          Get-ChildItem $stage -Filter *.png | Sort-Object Name | Format-Table Name, Length
+
+          if ($failed.Count -gt 0) {
+            throw "Failed captures: $($failed -join ', ')"
+          }
+
+      - name: Build masonry overview composites
+        if: success()
+        shell: pwsh
+        run: |
+          python -m pip install --quiet Pillow
+          if ($LASTEXITCODE -ne 0) { throw "pip install Pillow failed" }
+          python assets/screenshots/scripts/build_masonry.py `
+            --input-dir   ci-output `
+            --desktop-out ci-output/overview-desktop.png `
+            --mobile-out  ci-output/overview-mobile.png
+          if ($LASTEXITCODE -ne 0) { throw "build_masonry.py failed" }
+          Get-Item ci-output/overview-*.png | Format-Table Name, Length
+
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshots
+          path: ci-output/*.png
+          if-no-files-found: ignore
+
+      - name: Upload DevLauncher logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: devlauncher-logs
+          path: ci-logs/*
+          if-no-files-found: ignore
+
+      - name: Force-push ci-screenshots branch
+        # Intentionally skipped on workflow_dispatch (manual button) — those
+        # runs are exploratory and shouldn't clobber the canonical orphan
+        # branch. The pull_request event is already excluded by the job's
+        # outer `if` (line ~102), so only `[image-ci]` push events qualify.
+        if: success() && github.event_name == 'push'
+        shell: pwsh
+        run: |
+          $sha       = git rev-parse --short HEAD
+          $srcBranch = "${{ github.ref_name }}"
+          $runUrl    = "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # Build the orphan branch in a temp worktree so the main
+          # checkout (and any later steps) stays untouched. Uniquely-
+          # named local branch avoids any "already exists" race across
+          # reruns; we force-push to the canonical remote name.
+          $wt          = Join-Path $env:RUNNER_TEMP "ci-screenshots-wt"
+          $localBranch = "ci-screenshots-stage-${{ github.run_id }}"
+          if (Test-Path $wt) { Remove-Item -Recurse -Force $wt }
+          git worktree add --orphan -b $localBranch $wt
+          if ($LASTEXITCODE -ne 0) { throw "git worktree add failed" }
+
+          Copy-Item ci-output/*.png $wt/
+
+          $readme = @"
+          # CI-rendered screenshots
+
+          This branch is force-pushed by ``.github/workflows/ci.yml`` (screenshots job)
+          on every successful run. **Do not commit by hand — your changes will be
+          erased on the next run.**
+
+          ## Single-image overviews
+
+          | Layout | Image |
+          |---|---|
+          | Desktop (3-col masonry) | [``overview-desktop.png``](overview-desktop.png) |
+          | Mobile (2-col masonry)  | [``overview-mobile.png``](overview-mobile.png) |
+
+          ![desktop overview](overview-desktop.png)
+
+          ## Individual files
+
+          Each PNG below is the headless DevLauncher render of a UI surface.
+          Reference any file via raw URL:
+
+          ``````
+          https://github.com/${{ github.repository }}/raw/ci-screenshots/<name>.png
+          ``````
+
+          ## This refresh
+
+          - Source branch: ``$srcBranch``
+          - Source commit: ``$sha``
+          - Run: $runUrl
+          - Timestamp (UTC): $((Get-Date).ToUniversalTime().ToString("o"))
+          "@
+          Set-Content -Path "$wt/README.md" -Value $readme -Encoding UTF8
+
+          Push-Location $wt
+          git add .
+          # Message intentionally omits [image-ci]/[run-ci] markers so a
+          # push to ci-screenshots cannot retrigger any job.
+          git commit -m "ci: refresh screenshots from $sha"
+          if ($LASTEXITCODE -ne 0) { Pop-Location; throw "git commit failed" }
+          git push --force origin "${localBranch}:ci-screenshots"
+          $pushExit = $LASTEXITCODE
+          Pop-Location
+
+          git worktree remove $wt --force | Out-Null
+
+          if ($pushExit -ne 0) { throw "git push failed (exit $pushExit)" }
+          $count = (Get-ChildItem ci-output -Filter *.png | Measure-Object).Count
+          Write-Host "Pushed $count PNGs to ci-screenshots"
