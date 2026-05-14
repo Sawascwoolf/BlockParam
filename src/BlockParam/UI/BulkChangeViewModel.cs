@@ -1057,8 +1057,8 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     {
         // Match on (Name, PlcName) — multi-PLC projects can host two DBs
         // with the same name on different PLCs (#58 review must-fix #4).
-        // For index 0 the PLC name comes from _currentPlcName (display state);
-        // for the rest we read each ActiveDb.PlcName directly.
+        // For index 0 the PLC name comes from State.AnchorPlcName (display
+        // state); for the rest we read each ActiveDb.PlcName directly.
         for (int i = 0; i < State.Dbs.Count; i++)
         {
             var db = State.Dbs[i];
@@ -1376,7 +1376,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
-    /// Re-runs the full UI rebuild after _activeDbs is mutated (add / remove /
+    /// Re-runs the full UI rebuild after State.Dbs changes (add / remove /
     /// reactivate). Refreshes dropdown checkbox states, clears stale selection
     /// /scope/manual-selection (held by VM references that the rebuild
     /// invalidates), rebuilds the tree from the new active set, then re-applies
@@ -1485,7 +1485,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
                 : (IConstantResolver?)null;
             var parser = new SimaticMLParser(constantResolver, _udtResolver, _commentResolver);
             var info = parser.Parse(xml);
-            // PlcName from _currentPlcName: the dropdown only enumerates DBs
+            // PlcName from State.AnchorPlcName: the dropdown only enumerates DBs
             // from the anchor's PLC, so any read-only-fallback addition is
             // implicitly on the same PLC as the anchor.
             return new ActiveDb(info, xml, onApply: null, plcName: State.AnchorPlcName);
@@ -1598,7 +1598,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     /// pending edits to capture. Reads from the store — unambiguous in
     /// multi-DB sessions where the same Path can exist in multiple DBs,
     /// and correct even if the tree hasn't rebuilt yet. Pure read —
-    /// does NOT mutate <c>_stashedDbs</c> (the snapshot setter does).
+    /// does NOT mutate <c>State.Stashes</c> (the snapshot setter does).
     /// </summary>
     private StashedDbState? CaptureStashForDb(ActiveDb db)
     {
@@ -1880,7 +1880,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
 
     /// <summary>
     /// Replays a stash's edits onto the live tree (#78). Pure write — does
-    /// NOT pop the stash entry from <see cref="_stashedDbs"/>. Callers
+    /// NOT pop the stash entry from <c>State.Stashes</c>. Callers
     /// that need the entry popped do that separately, ideally as part of
     /// composing the next <see cref="ActiveSetState"/> so the cascade
     /// fires once.
