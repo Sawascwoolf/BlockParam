@@ -47,13 +47,12 @@ namespace BlockParam.UI;
 /// </para>
 ///
 /// <para>
-/// The legacy backing fields (<c>_activeDbs</c>, <c>_stashedDbs</c>,
-/// <c>_currentPlcName</c>) remain as the storage indexed by the ~50
-/// reader sites in this file; the State setter overwrites them from
-/// the new snapshot to keep the two views in lock-step. <b>Lint
-/// invariant:</b> any direct write to those fields outside the State
-/// setter or the constructor seed is a bug — the snapshot will drift
-/// out of sync with what the cascade can see.
+/// <b>Single authoritative storage.</b> Slice 8 PR 0 deleted the
+/// legacy backing fields (<c>_activeDbs</c> / <c>_stashedDbs</c> /
+/// <c>_currentPlcName</c>) — every read now goes through
+/// <c>State.Dbs[i]</c> / <c>State.Stashes[k]</c> / <c>State.AnchorPlcName</c>.
+/// The State setter has no sync-cascade left and the snapshot cannot
+/// drift out of sync with what the cascade can see.
 /// </para>
 /// </summary>
 public class BulkChangeViewModel : ViewModelBase, IDisposable
@@ -77,19 +76,14 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     private AutocompleteProvider? _autocompleteProvider;
     private TagTableCache? _tagTableCache;
 
-    // Active DB set. All DBs in this list are peers — index 0 is just the
-    // first one in storage order, used as the anchor when the UI needs a
-    // single representative (title, default scope, "current" name display).
-    // Per-DB state (Info, Xml, OnApply) lives on each ActiveDb instance, so
-    // bulk preview / Apply iterate the whole list without privileging any
-    // entry. Mutations go through Add / RemoveActiveDb so anchor display
-    // updates stay consistent.
-    private readonly List<ActiveDb> _activeDbs = new();
-    // _active is kept as a derived alias over _activeDbs[0] so the ~50
-    // call sites that expected "the anchor DB" don't all need rewriting.
-    // It carries no privilege — removing _activeDbs[0] just shifts the next
-    // one into position.
-    private ActiveDb _active => _activeDbs[0];
+    // _active is a derived alias over State.Dbs[0] so the ~50 host call
+    // sites that expected "the anchor DB" don't all need rewriting. It
+    // carries no privilege — removing State.Dbs[0] just shifts the next
+    // one into position. Active DBs in State.Dbs are peers; index 0 is
+    // just the first one in storage order, used as the anchor when the
+    // UI needs a single representative (title, default scope, "current"
+    // name display).
+    private ActiveDb _active => State.Dbs[0];
     private string _title = "";
     // DB-switcher state (#59). Lazy-loaded on first dropdown open and cached
     // for the dialog session; the ↻ button re-enumerates on demand.
@@ -106,12 +100,12 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     private string _dataBlockSearchText = "";
     private bool _isDataBlocksDropdownOpen;
     private bool _isLoadingDataBlocks;
-    private string _currentPlcName = "";
-    // In-memory stash of pending edits keyed by DB identity (#59). Lets the
-    // user switch DBs without committing or losing work — when they come back
-    // to a stashed DB later in the same session, the edits restore.
-    private readonly Dictionary<string, StashedDbState> _stashedDbs =
-        new(StringComparer.Ordinal);
+    // Active-DB set, per-DB pending-edit stashes, and anchor PLC name all
+    // live on the State snapshot (#78). Legacy backing fields
+    // (_activeDbs / _stashedDbs / _currentPlcName) were deleted in slice 8
+    // PR 0 once every read site was migrated to State.X — the State
+    // setter no longer needs its sync-cascade and there is one
+    // authoritative storage for each.
 
     // Tree-shape state (RootMembers, flat list, model lookups, synthetic-
     // group routing) lives on the MemberTreeViewModel slice (#80 slice 7a).
@@ -129,10 +123,8 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     // anchor PLC. The State setter is the one place that runs the cascade
     // (RebuildAfterActiveSetChanged / SyncStashedDbsCollection / anchor
     // PLC display) so every mutation gesture goes through one funnel.
-    // The legacy backing fields (_activeDbs / _stashedDbs / _currentPlcName)
-    // are kept as the storage of last resort — many call sites still index
-    // _activeDbs[i] etc. — and the setter overwrites them from the new
-    // snapshot to keep the two views in lock-step.
+    // Single authoritative storage: every reader walks State.X directly
+    // (slice 8 PR 0 deleted the legacy backing fields).
     private ActiveSetState _state =
         new ActiveSetState(
             new List<ActiveDb>(),
@@ -193,9 +185,21 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         _dispatcher = Dispatcher.CurrentDispatcher;
         _projectLanguages = projectLanguages is { Count: > 0 } ? projectLanguages : new[] { "en-GB" };
         _commentLanguagePolicy = new CommentLanguagePolicy(editingLanguage, referenceLanguage, _projectLanguages);
-        _activeDbs.Add(new ActiveDb(dataBlockInfo, currentXml, onApply));
+
+        // Seed the active-set snapshot first so everything below can read
+        // through State.X (slice 8 PR 0). Direct backing-field assignment —
+        // the State setter's cascade isn't safe to fire here because
+        // RootMembers / StashedDbs collections aren't constructed yet; the
+        // constructor's explicit BuildRootMembersFromActiveDbs /
+        // RebuildPlcPills calls below take its place for the initial build.
+        var initialDbs = new List<ActiveDb> { new ActiveDb(dataBlockInfo, currentXml, onApply) };
         if (additionalActiveDbs != null)
-            _activeDbs.AddRange(additionalActiveDbs);
+            initialDbs.AddRange(additionalActiveDbs);
+        _state = new ActiveSetState(
+            initialDbs,
+            new Dictionary<string, StashedDbState>(),
+            currentPlcName ?? "");
+
         _analyzer = analyzer;
         _bulkChangeService = bulkChangeService;
         _configLoader = configLoader;
@@ -218,17 +222,6 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         _enumerateDataBlocks = enumerateDataBlocks;
         _switchToDataBlock = switchToDataBlock;
         _buildActiveDbForSummary = buildActiveDbForSummary;
-        _currentPlcName = currentPlcName ?? "";
-        // Seed the snapshot from the populated backing fields. Direct
-        // assignment (not via the setter) — RootMembers / StashedDbs
-        // collections aren't constructed yet, so the cascade isn't
-        // safe to fire here. The constructor's explicit
-        // BuildRootMembersFromActiveDbs / RebuildPlcPills calls below
-        // take the place of the cascade for the initial build.
-        _state = new ActiveSetState(
-            _activeDbs.ToList(),
-            new Dictionary<string, StashedDbState>(),
-            _currentPlcName);
         _autocompleteProvider = tagTableCache != null
             ? new AutocompleteProvider(configLoader, tagTableCache)
             : null;
@@ -261,7 +254,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         }
 
         var version = typeof(BulkChangeViewModel).Assembly.GetName().Version;
-        _title = BuildTitle(version, _currentPlcName, dataBlockInfo.Name, _activeDbs.Count);
+        _title = BuildTitle(version, State.AnchorPlcName, dataBlockInfo.Name, State.Dbs.Count);
 
         InlineRuleExtractor.ApplyTo(configLoader.GetConfig(), dataBlockInfo);
 
@@ -283,8 +276,8 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         // flat union so each match carries a visible DB-of-origin label,
         // and scope walks naturally extend one level deeper.
         Tree = new MemberTreeViewModel(
-            getActiveDbs: () => _activeDbs.AsReadOnly(),
-            getCurrentPlcName: () => _currentPlcName,
+            getActiveDbs: () => State.Dbs,
+            getCurrentPlcName: () => State.AnchorPlcName,
             commentLanguagePolicy: _commentLanguagePolicy,
             subscribeToVm: SubscribeStartValueEdited);
         Tree.RootsRebuilt += OnTreeRootsRebuilt;
@@ -368,17 +361,10 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             var old = _state;
             _state = value;
 
-            // Sync the legacy backing fields so the ~50 read sites that
-            // index _activeDbs[i] / _stashedDbs[k] / _currentPlcName
-            // continue to see the same authoritative values.
-            _activeDbs.Clear();
-            _activeDbs.AddRange(value.Dbs);
-            _stashedDbs.Clear();
-            foreach (var kv in value.Stashes) _stashedDbs[kv.Key] = kv.Value;
-            bool anchorChanged = !string.Equals(_currentPlcName, value.AnchorPlcName, StringComparison.Ordinal);
-            if (anchorChanged)
+            // CurrentPlcName / HasCurrentPlcName are derived from
+            // State.AnchorPlcName; re-raise them only on actual change.
+            if (!string.Equals(old.AnchorPlcName, value.AnchorPlcName, StringComparison.Ordinal))
             {
-                _currentPlcName = value.AnchorPlcName;
                 OnPropertyChanged(nameof(CurrentPlcName));
                 OnPropertyChanged(nameof(HasCurrentPlcName));
             }
@@ -414,7 +400,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     {
         var version = typeof(BulkChangeViewModel).Assembly.GetName().Version;
         var anchorName = State.Dbs.Count > 0 ? State.Dbs[0].Info.Name : "";
-        Title = BuildTitle(version, _currentPlcName, anchorName, State.Dbs.Count);
+        Title = BuildTitle(version, State.AnchorPlcName, anchorName, State.Dbs.Count);
         OnPropertyChanged(nameof(CurrentDataBlockName));
     }
 
@@ -737,10 +723,10 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     /// (default title / scope label, see <see cref="DataBlockListItem.IsAnchor"/>);
     /// it has no privilege over removability or Apply ordering.
     /// </summary>
-    public IReadOnlyList<ActiveDb> AllActiveDbs => _activeDbs.AsReadOnly();
+    public IReadOnlyList<ActiveDb> AllActiveDbs => State.Dbs;
 
     /// <summary>True when more than one DB is active in this session (#58).</summary>
-    public bool HasMultipleActiveDbs => _activeDbs.Count > 1;
+    public bool HasMultipleActiveDbs => State.Dbs.Count > 1;
 
     // ── Pill-row (#pill-refactor) ─────────────────────────────────────────────
 
@@ -850,8 +836,8 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         }
 
         var newPills = PlcPillGroupsService.Build(
-            _activeDbs,
-            _currentPlcName,
+            State.Dbs,
+            State.AnchorPlcName,
             loadDbsForPlc: LoadDbsForPlcAsync,
             extraPlcs: _extraPillPlcs);
 
@@ -906,10 +892,10 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     private IReadOnlyList<DataBlockListItem> GetActiveItemsForPlc(PlcPillViewModel pill)
     {
         var result = new List<DataBlockListItem>();
-        for (int i = 0; i < _activeDbs.Count; i++)
+        for (int i = 0; i < State.Dbs.Count; i++)
         {
-            var db = _activeDbs[i];
-            var plc = (i == 0 ? _currentPlcName : db.PlcName) ?? "";
+            var db = State.Dbs[i];
+            var plc = (i == 0 ? State.AnchorPlcName : db.PlcName) ?? "";
             if (!string.Equals(plc, pill.PlcName, StringComparison.Ordinal)) continue;
             result.Add(new DataBlockListItem(
                 new DataBlockSummary(db.Info.Name, "", plcName: plc, number: db.Info.Number),
@@ -983,9 +969,9 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     /// Reads the bound collections so the log matches what the user sees.
     /// </summary>
     private string SnapshotState() =>
-        $"active=[{string.Join(",", _activeDbs.Select(d => d.Info.Name))}] " +
+        $"active=[{string.Join(",", State.Dbs.Select(d => d.Info.Name))}] " +
         $"pending={Pending.PendingEdits.Count} stashed={StashedDbs.Count} " +
-        $"treeShape={(_activeDbs.Count == 1 ? "single" : "multi")}";
+        $"treeShape={(State.Dbs.Count == 1 ? "single" : "multi")}";
 
     /// <summary>
     /// Owning PLC name for the active DB, surfaced as a dim prefix in the
@@ -1000,10 +986,10 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     /// <see cref="System.ComponentModel.INotifyPropertyChanged"/> events
     /// for both this property and <see cref="HasCurrentPlcName"/>.
     /// </summary>
-    public string CurrentPlcName => _currentPlcName;
+    public string CurrentPlcName => State.AnchorPlcName;
 
     /// <summary>True when <see cref="CurrentPlcName"/> is non-empty.</summary>
-    public bool HasCurrentPlcName => !string.IsNullOrEmpty(_currentPlcName);
+    public bool HasCurrentPlcName => !string.IsNullOrEmpty(State.AnchorPlcName);
 
     public bool IsDataBlocksDropdownOpen
     {
@@ -1073,10 +1059,10 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         // with the same name on different PLCs (#58 review must-fix #4).
         // For index 0 the PLC name comes from _currentPlcName (display state);
         // for the rest we read each ActiveDb.PlcName directly.
-        for (int i = 0; i < _activeDbs.Count; i++)
+        for (int i = 0; i < State.Dbs.Count; i++)
         {
-            var db = _activeDbs[i];
-            var plc = i == 0 ? _currentPlcName : db.PlcName;
+            var db = State.Dbs[i];
+            var plc = i == 0 ? State.AnchorPlcName : db.PlcName;
             if (string.Equals(db.Info.Name, summary.Name, StringComparison.Ordinal)
                 && string.Equals(plc, summary.PlcName, StringComparison.Ordinal))
                 return (true, i == 0);
@@ -1268,10 +1254,11 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
 
     private bool IsSameSummary(ActiveDb db, DataBlockSummary summary)
     {
-        // Mirror FindActiveDb's anchor PLC handling: index 0 reads
-        // _currentPlcName; the rest carry their own PlcName on ActiveDb.
-        var idx = _activeDbs.IndexOf(db);
-        var plc = idx == 0 ? _currentPlcName : db.PlcName;
+        // Mirror FindActiveDb's anchor PLC handling: the anchor reads its
+        // display PLC from State.AnchorPlcName; the rest carry their own
+        // PlcName on ActiveDb.
+        var isAnchor = State.Dbs.Count > 0 && ReferenceEquals(State.Dbs[0], db);
+        var plc = isAnchor ? State.AnchorPlcName : db.PlcName;
         return string.Equals(db.Info.Name, summary.Name, StringComparison.Ordinal)
             && string.Equals(plc, summary.PlcName, StringComparison.Ordinal);
     }
@@ -1501,7 +1488,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             // PlcName from _currentPlcName: the dropdown only enumerates DBs
             // from the anchor's PLC, so any read-only-fallback addition is
             // implicitly on the same PLC as the anchor.
-            return new ActiveDb(info, xml, onApply: null, plcName: _currentPlcName);
+            return new ActiveDb(info, xml, onApply: null, plcName: State.AnchorPlcName);
         }
         catch (Exception ex)
         {
@@ -1532,12 +1519,12 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     /// </summary>
     private ActiveDb? FindActiveDb(DataBlockSummary summary)
     {
-        for (int i = 0; i < _activeDbs.Count; i++)
+        for (int i = 0; i < State.Dbs.Count; i++)
         {
-            var db = _activeDbs[i];
-            // Index 0 reads its display PLC from _currentPlcName; the rest
-            // read it from each ActiveDb directly.
-            var plc = i == 0 ? _currentPlcName : db.PlcName;
+            var db = State.Dbs[i];
+            // Index 0 reads its display PLC from State.AnchorPlcName; the
+            // rest read it from each ActiveDb directly.
+            var plc = i == 0 ? State.AnchorPlcName : db.PlcName;
             if (string.Equals(db.Info.Name, summary.Name, StringComparison.Ordinal)
                 && string.Equals(plc, summary.PlcName, StringComparison.Ordinal))
                 return db;
@@ -1632,7 +1619,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             "",
             blockType: db.Info.BlockType,
             isInstanceDb: string.Equals(db.Info.BlockType, "InstanceDB", StringComparison.Ordinal),
-            plcName: _currentPlcName);
+            plcName: State.AnchorPlcName);
         return new StashedDbState(summary, entries);
     }
 
@@ -1949,7 +1936,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     private void SyncStashedDbsCollection()
     {
         StashedDbs.Clear();
-        foreach (var state in _stashedDbs.Values
+        foreach (var state in State.Stashes.Values
             .OrderBy(s => s.FolderPath, StringComparer.OrdinalIgnoreCase)
             .ThenBy(s => s.DbName, StringComparer.OrdinalIgnoreCase))
         {
@@ -3241,7 +3228,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         // OnApply inside the same dialog tick. Host wires all OnApply
         // invocations into a single ExclusiveAccess block so multi-DB Apply
         // is one TIA undo step (matches issue #58 decision).
-        if (_activeDbs.Count > 1)
+        if (State.Dbs.Count > 1)
         {
             ExecuteApplyMultiDb();
             return;
