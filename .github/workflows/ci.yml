@@ -122,12 +122,38 @@ jobs:
         run: dotnet build src/BlockParam.DevLauncher/BlockParam.DevLauncher.csproj -c Release -p:UseSiemensStubs=true
 
       - name: Capture rules-editor screenshot
+        shell: pwsh
         run: |
           $exe = "src/BlockParam.DevLauncher/bin/Release/net48/BlockParam.DevLauncher.exe"
-          New-Item -ItemType Directory -Force -Path ci-screenshots | Out-Null
-          & $exe --capture-rules ci-screenshots/rules.png
+          New-Item -ItemType Directory -Force -Path ci-screenshots, ci-logs | Out-Null
+
+          # Capture every byte DevLauncher writes to stdout/stderr — the
+          # Serilog console sink output is what tells us why a capture
+          # failed. Tee to a file we can upload as artifact.
+          $stdoutLog = "ci-logs/devlauncher.stdout.log"
+          & $exe --capture-rules ci-screenshots/rules.png 2>&1 | Tee-Object -FilePath $stdoutLog
+          $exit = $LASTEXITCODE
+          Write-Host "DevLauncher exit code: $exit"
+
+          # Dump the Serilog file sink (it logs at Debug level — richer than
+          # stdout). Path: %TEMP%\BlockParam\devlauncher-<pid>.log
+          $sinkDir = Join-Path $env:TEMP "BlockParam"
+          if (Test-Path $sinkDir) {
+            Get-ChildItem -Path $sinkDir -Filter "devlauncher-*.log" |
+              ForEach-Object {
+                Write-Host "--- $($_.FullName) ---"
+                Get-Content $_.FullName | Write-Host
+                Copy-Item $_.FullName -Destination "ci-logs/" -Force
+              }
+          } else {
+            Write-Host "Sink dir not present: $sinkDir"
+          }
+
+          if ($exit -ne 0) {
+            throw "DevLauncher --capture-rules exited with code $exit"
+          }
           if (-not (Test-Path ci-screenshots/rules.png)) {
-            throw "Capture did not produce ci-screenshots/rules.png"
+            throw "DevLauncher exited 0 but produced no PNG"
           }
           Get-Item ci-screenshots/rules.png | Format-List Name,Length
 
@@ -137,3 +163,12 @@ jobs:
         with:
           name: screenshots
           path: ci-screenshots/*.png
+          if-no-files-found: ignore
+
+      - name: Upload DevLauncher logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: devlauncher-logs
+          path: ci-logs/*
+          if-no-files-found: ignore
