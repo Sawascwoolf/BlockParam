@@ -550,7 +550,7 @@ public class BulkChangeViewModelRegressionTests : IDisposable
             isFilterRehydration: false);
 
         vm2.Selection.IsManualMode.Should().BeTrue();
-        vm2.IsSelectionTypeHomogeneous.Should().BeTrue(
+        vm2.Selection.IsSelectionTypeHomogeneous.Should().BeTrue(
             "2 Int leaves → all same datatype → homogeneous");
 
         // Add a Bool leaf — breaks homogeneity
@@ -562,7 +562,7 @@ public class BulkChangeViewModelRegressionTests : IDisposable
             removed: System.Array.Empty<MemberNodeViewModel>(),
             isFilterRehydration: false);
 
-        vm2.IsSelectionTypeHomogeneous.Should().BeFalse(
+        vm2.Selection.IsSelectionTypeHomogeneous.Should().BeFalse(
             "Int + Bool → mixed datatypes → not homogeneous");
         vm2.Selection.ManualSelectionSummary.Should().Contain("2",
             "ManualSelectionSummary (Dialog_ManualSelectionMixed) must contain the distinct datatype count (2)");
