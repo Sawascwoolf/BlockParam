@@ -44,7 +44,7 @@ public class ActiveSetViewModelTests
     [Fact]
     public void Constructor_SeedsStateAndEmptyStashes()
     {
-        var initial = StateWith(dbs: Db("Foo"));
+        var initial = Snap(Db("Foo"));
 
         var vm = new ActiveSetViewModel(initial);
 
@@ -57,7 +57,7 @@ public class ActiveSetViewModelTests
     public void Constructor_SeedsStashesIntoBoundCollection()
     {
         var stash = Stash("DBa", "/a");
-        var initial = StateWith(dbs: Db("Anchor"), stashes: new Dictionary<string, StashedDbState>
+        var initial = Snap(Db("Anchor"), stashes: new Dictionary<string, StashedDbState>
         {
             ["k"] = stash,
         });
@@ -71,9 +71,9 @@ public class ActiveSetViewModelTests
     [Fact]
     public void SetState_RaisesStateChangedWithOldAndNew()
     {
-        var old = StateWith(dbs: Db("A"));
+        var old = Snap(Db("A"));
         var vm = new ActiveSetViewModel(old);
-        var next = StateWith(dbs: Db("A"), Db("B"));
+        var next = Snap(Db("A"), Db("B"));
 
         (ActiveSetState? captOld, ActiveSetState? captNew) = (null, null);
         vm.StateChanged += (o, n) => { captOld = o; captNew = n; };
@@ -88,7 +88,7 @@ public class ActiveSetViewModelTests
     [Fact]
     public void SetState_SameReference_IsNoOp()
     {
-        var snap = StateWith(dbs: Db("A"));
+        var snap = Snap(Db("A"));
         var vm = new ActiveSetViewModel(snap);
         int events = 0;
         vm.StateChanged += (_, _) => events++;
@@ -101,7 +101,7 @@ public class ActiveSetViewModelTests
     [Fact]
     public void SetState_Null_Throws()
     {
-        var vm = new ActiveSetViewModel(StateWith(dbs: Db("A")));
+        var vm = new ActiveSetViewModel(Snap(Db("A")));
 
         Action act = () => vm.SetState(null!);
 
@@ -116,7 +116,7 @@ public class ActiveSetViewModelTests
         // changes like Add / Solo / Remove that don't touch stashes).
         var stash = Stash("X");
         var stashes = new Dictionary<string, StashedDbState> { ["k"] = stash };
-        var initial = StateWith(dbs: Db("A"), stashes: stashes);
+        var initial = Snap(Db("A"), stashes: stashes);
         var vm = new ActiveSetViewModel(initial);
         var sentinel = vm.StashedDbs[0];
 
@@ -131,7 +131,7 @@ public class ActiveSetViewModelTests
     public void SetState_StashesChanged_RebuildsBoundCollection()
     {
         var s1 = Stash("OldDb");
-        var initial = StateWith(dbs: Db("A"), stashes: new Dictionary<string, StashedDbState>
+        var initial = Snap(Db("A"), stashes: new Dictionary<string, StashedDbState>
         {
             ["k1"] = s1,
         });
@@ -153,7 +153,7 @@ public class ActiveSetViewModelTests
         var a = Stash("Alpha", folder: "FolderA");
         var z = Stash("Zeta", folder: "FolderB");
 
-        var initial = StateWith(dbs: Db("Anchor"), stashes: new Dictionary<string, StashedDbState>
+        var initial = Snap(Db("Anchor"), stashes: new Dictionary<string, StashedDbState>
         {
             ["k1"] = z,
             ["k2"] = b,
@@ -168,7 +168,7 @@ public class ActiveSetViewModelTests
     [Fact]
     public void SetState_StashesAppearingFromEmpty_FlipsHasStashedDbsAndNotifies()
     {
-        var vm = new ActiveSetViewModel(StateWith(dbs: Db("A")));
+        var vm = new ActiveSetViewModel(Snap(Db("A")));
         var raised = CapturePropertyChanges(vm);
         var s = Stash("New");
 
@@ -184,7 +184,7 @@ public class ActiveSetViewModelTests
     [Fact]
     public void SetState_StashesDisappearingToEmpty_FlipsHasStashedDbsAndNotifies()
     {
-        var initial = StateWith(dbs: Db("A"), stashes: new Dictionary<string, StashedDbState>
+        var initial = Snap(Db("A"), stashes: new Dictionary<string, StashedDbState>
         {
             ["k"] = Stash("X"),
         });
@@ -203,7 +203,7 @@ public class ActiveSetViewModelTests
         // Dbs-only swap shouldn't fire HasStashedDbs PropertyChanged — the
         // mirror isn't re-synced, so the OnPropertyChanged inside the sync
         // method never runs. Cheap check that the no-op path is honored.
-        var initial = StateWith(dbs: Db("A"), stashes: new Dictionary<string, StashedDbState>
+        var initial = Snap(Db("A"), stashes: new Dictionary<string, StashedDbState>
         {
             ["k"] = Stash("X"),
         });
@@ -222,7 +222,7 @@ public class ActiveSetViewModelTests
         // mutates it in place via Clear() + Add() rather than replacing the
         // collection. Guards against a future "set StashedDbs = new …()"
         // regression that would silently break ItemsControl bindings.
-        var vm = new ActiveSetViewModel(StateWith(dbs: Db("A")));
+        var vm = new ActiveSetViewModel(Snap(Db("A")));
         var collection = vm.StashedDbs;
 
         vm.SetState(vm.State.With(stashes: new Dictionary<string, StashedDbState>
@@ -235,19 +235,22 @@ public class ActiveSetViewModelTests
 
     // --- helpers ---
 
-    private static ActiveSetState StateWith(
-        IEnumerable<ActiveDb> dbs,
+    private static ActiveSetState Snap(
+        ActiveDb anchor,
         IDictionary<string, StashedDbState>? stashes = null,
         string anchorPlcName = "")
         => new ActiveSetState(
-            dbs.ToList(),
+            new[] { anchor },
             stashes != null
                 ? new Dictionary<string, StashedDbState>(stashes)
                 : new Dictionary<string, StashedDbState>(),
             anchorPlcName);
 
-    private static ActiveSetState StateWith(params ActiveDb[] dbs)
-        => StateWith((IEnumerable<ActiveDb>)dbs);
+    private static ActiveSetState Snap(params ActiveDb[] dbs)
+        => new ActiveSetState(
+            dbs,
+            new Dictionary<string, StashedDbState>(),
+            "");
 
     private static ActiveDb Db(string name, string plc = "")
     {
