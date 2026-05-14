@@ -45,7 +45,7 @@ def build_montage(
         im = Image.open(path).convert("RGB")
         ratio = col_width / im.width
         new_h = max(1, int(round(im.height * ratio)))
-        scaled.append((path.name, im.resize((col_width, new_h), Image.LANCZOS)))
+        scaled.append((path.name, im.resize((col_width, new_h), Image.Resampling.LANCZOS)))
 
     col_items: list[list[tuple[str, Image.Image]]] = [[] for _ in range(columns)]
     col_heights = [0] * columns

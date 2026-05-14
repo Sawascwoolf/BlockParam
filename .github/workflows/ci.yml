@@ -124,7 +124,7 @@ jobs:
       - name: Build DevLauncher
         run: dotnet build src/BlockParam.DevLauncher/BlockParam.DevLauncher.csproj -c Release -p:UseSiemensStubs=true
 
-      - name: Capture rules-editor screenshot
+      - name: Capture all DevLauncher screenshots
         shell: pwsh
         run: |
           $exe   = "src/BlockParam.DevLauncher/bin/Release/net48/BlockParam.DevLauncher.exe"
@@ -215,6 +215,10 @@ jobs:
           if-no-files-found: ignore
 
       - name: Force-push ci-screenshots branch
+        # Intentionally skipped on workflow_dispatch (manual button) — those
+        # runs are exploratory and shouldn't clobber the canonical orphan
+        # branch. The pull_request event is already excluded by the job's
+        # outer `if` (line ~102), so only `[image-ci]` push events qualify.
         if: success() && github.event_name == 'push'
         shell: pwsh
         run: |
@@ -258,9 +262,9 @@ jobs:
           Each PNG below is the headless DevLauncher render of a UI surface.
           Reference any file via raw URL:
 
-          ````
+          ``````
           https://github.com/${{ github.repository }}/raw/ci-screenshots/<name>.png
-          ````
+          ``````
 
           ## This refresh
 
