@@ -102,6 +102,9 @@ jobs:
     if: |
       github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'push' && contains(github.event.head_commit.message, '[image-ci]'))
+    # Need write to push the rendered PNG back to the branch.
+    permissions:
+      contents: write
 
     steps:
       - uses: actions/checkout@v4
@@ -172,3 +175,26 @@ jobs:
           name: devlauncher-logs
           path: ci-logs/*
           if-no-files-found: ignore
+
+      - name: Commit rendered PNG back to branch
+        if: success() && github.event_name == 'push'
+        shell: pwsh
+        run: |
+          $dest = "ci-output/rules.png"
+          New-Item -ItemType Directory -Force -Path ci-output | Out-Null
+          Copy-Item ci-screenshots/rules.png $dest -Force
+
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add $dest
+
+          git diff --cached --quiet
+          if ($LASTEXITCODE -eq 0) {
+            Write-Host "PNG unchanged; skipping commit."
+            exit 0
+          }
+
+          # Message intentionally omits [image-ci] / [run-ci] so the
+          # auto-commit does NOT retrigger CI.
+          git commit -m "chore(ci): refresh rules-editor screenshot"
+          git push origin "HEAD:${{ github.ref_name }}"
