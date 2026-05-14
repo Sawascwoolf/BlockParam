@@ -2176,31 +2176,34 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     /// Host-side handler for <see cref="SelectionScopeViewModel.ScopeChanged"/>.
     /// The slice raises this once per <c>SelectedScope</c> setter call; the
     /// host runs highlighting + re-raises the composed
-    /// <see cref="SetButtonText"/> / <see cref="SetButtonTooltip"/> +
-    /// <c>CanExecuteSetPending</c> notifications that compose with
-    /// scope state.
+    /// <see cref="SetButtonText"/> / <see cref="SetButtonTooltip"/>
+    /// notifications that compose with scope state.
+    ///
+    /// <para>
+    /// Set Pending / Clear Manual <c>CanExecute</c> picks up changes via
+    /// WPF's <c>CommandManager.RequerySuggested</c> on the next render
+    /// cycle — pre-slice code did not call <c>RaiseCanExecuteChanged</c>
+    /// from this seam either.
+    /// </para>
     /// </summary>
     private void OnSelectionScopeChanged()
     {
         UpdateHighlighting();
         OnPropertyChanged(nameof(SetButtonText));
         OnPropertyChanged(nameof(SetButtonTooltip));
-        (SetPendingCommand as RelayCommand)?.RaiseCanExecuteChanged();
     }
 
     /// <summary>
     /// Host-side handler for <see cref="SelectionScopeViewModel.ManualSelectionChanged"/>.
     /// Re-raises the host-composed properties that depend on the manual-set
-    /// count and re-evaluates Set Pending availability. The slice already
-    /// re-raised its own properties (IsManualMode, ManualSelectionCount,
-    /// SelectedMemberDisplay, …); host only re-raises what it owns.
+    /// count. The slice already re-raised its own properties
+    /// (IsManualMode, ManualSelectionCount, SelectedMemberDisplay, …);
+    /// host only re-raises what it owns.
     /// </summary>
     private void OnSelectionManualChanged()
     {
         OnPropertyChanged(nameof(SetButtonText));
         OnPropertyChanged(nameof(SetButtonTooltip));
-        (SetPendingCommand as RelayCommand)?.RaiseCanExecuteChanged();
-        (ClearManualSelectionCommand as RelayCommand)?.RaiseCanExecuteChanged();
     }
 
     private void OnMemberSelected(MemberNodeViewModel? memberVm)
