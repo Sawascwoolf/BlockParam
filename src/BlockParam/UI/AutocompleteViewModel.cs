@@ -202,9 +202,7 @@ public class AutocompleteViewModel : ViewModelBase
 
         var terms = filter.Trim().Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
         return source.Where(s => terms.All(term =>
-            s.DisplayName.IndexOf(term, StringComparison.OrdinalIgnoreCase) >= 0 ||
-            s.Value.IndexOf(term, StringComparison.OrdinalIgnoreCase) >= 0 ||
-            (s.Comment != null && s.Comment.IndexOf(term, StringComparison.OrdinalIgnoreCase) >= 0)))
+            StringMatcher.MatchesAny(term, s.DisplayName, s.Value, s.Comment)))
             .ToList();
     }
 }

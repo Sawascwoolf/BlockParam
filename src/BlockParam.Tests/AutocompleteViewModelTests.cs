@@ -199,4 +199,46 @@ public class AutocompleteViewModelTests
         staticResult.Select(s => s.Value).Should().BeEquivalentTo(
             instanceResult.FilteredSuggestions.Select(s => s.Value));
     }
+
+    // Regression: the inline IndexOf triple was replaced with StringMatcher.MatchesAny in
+    // issue #117. The following tests pin the exact semantics that must survive the migration.
+
+    [Fact]
+    public void Match_NullComment_DoesNotThrow_AndCanMatchOnOtherFields()
+    {
+        // Suggestions whose Comment is null must not NRE after the migration
+        // (StringMatcher.MatchesAny skips null fields rather than crashing).
+        var items = new[]
+        {
+            S("42", "NullComment", comment: null),
+            S("99", "HasComment", "the-keyword"),
+        };
+
+        var result = AutocompleteViewModel.Match(items, "the-keyword");
+
+        result.Should().ContainSingle(s => s.Value == "99",
+            "match via Comment must still work when another item has a null Comment");
+        result.Should().NotContain(s => s.Value == "42",
+            "item with null Comment and no DisplayName/Value hit must not appear");
+    }
+
+    [Fact]
+    public void Match_FilterHitsDisplayNameOnly_ReturnsThatItem()
+    {
+        var items = new[] { S("val", "UniqueDisplay", null) };
+
+        var result = AutocompleteViewModel.Match(items, "UniqueDisplay");
+
+        result.Should().ContainSingle(s => s.Value == "val");
+    }
+
+    [Fact]
+    public void Match_FilterHitsValueOnly_ReturnsThatItem()
+    {
+        var items = new[] { S("unique-val", "SomeDisplay", null) };
+
+        var result = AutocompleteViewModel.Match(items, "unique-val");
+
+        result.Should().ContainSingle(s => s.Value == "unique-val");
+    }
 }
