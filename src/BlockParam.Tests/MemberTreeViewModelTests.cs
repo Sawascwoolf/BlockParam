@@ -175,7 +175,7 @@ public class MemberTreeViewModelTests
     }
 
     /// <summary>
-    /// Multi-DB rebuilds go through <c>AddDbGroupRoot</c>, which iterates
+    /// Multi-DB rebuilds go through <c>BuildDbGroupRoot</c>, which iterates
     /// every descendant of the synthetic group VM and invokes
     /// <c>_subscribeToVm</c> per node. Single-DB coverage (above) only
     /// exercises the flat top-level + descendant walk on a fixture without
@@ -204,7 +204,7 @@ public class MemberTreeViewModelTests
 
         // MakeNestedDb produces one struct ("Group") with two leaves
         // ("Speed", "Temp") per DB. Per #108's non-recursive contract,
-        // AddDbGroupRoot subscribes the synthetic root + every descendant:
+        // BuildDbGroupRoot subscribes the synthetic root + every descendant:
         // synthetic + Group + Speed + Temp = 4 per DB. Two DBs = 8 total.
         // An accidental "subscribe roots only" or "subscribe leaves only"
         // regression would shift this number.
@@ -224,7 +224,7 @@ public class MemberTreeViewModelTests
     /// non-recursive by contract — register on the passed node only, do
     /// NOT walk <c>node.Children</c>. A previous host implementation was
     /// itself recursive, and combined with <see cref="MemberTreeViewModel"/>'s
-    /// per-descendant loop in <c>AddDbGroupRoot</c> produced one
+    /// per-descendant loop in <c>BuildDbGroupRoot</c> produced one
     /// <c>StartValueEdited</c> / <c>SelectedChanged</c> handler per node
     /// for every ancestor between the root and the leaf — so an inline
     /// edit on a deeply-nested leaf fired N (= depth) sweeps of the tree.

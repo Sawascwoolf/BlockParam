@@ -213,7 +213,7 @@ public class BulkChangeViewModelMultiDbTests
     /// <summary>
     /// Regression for #108: in multi-DB mode the host's
     /// <c>SubscribeStartValueEdited</c> used to be recursive AND
-    /// <see cref="MemberTreeViewModel.AddDbGroupRoot"/> also walked every
+    /// <c>MemberTreeViewModel.BuildDbGroupRoot</c> also walked every
     /// descendant — so non-leaf nodes ended up with depth-many
     /// <c>StartValueEdited</c> and <c>SelectedChanged</c> handlers each.
     /// Editing a leaf still produced the correct pending value (the store
