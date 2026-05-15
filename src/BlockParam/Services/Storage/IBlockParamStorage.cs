@@ -55,10 +55,10 @@ public interface IBlockParamStorage
     void DeleteDirectory(StoragePath path);
 
     /// <summary>
-    /// Returns the last write time, or the FILETIME epoch
-    /// (<c>1601-01-01</c>) if the file does not exist. Mirrors
-    /// <see cref="File.GetLastWriteTime"/> so callers don't need a separate
-    /// existence check before stat'ing.
+    /// Returns the last write time (local time), or exactly
+    /// <c>new DateTime(1601, 1, 1)</c> (the FILETIME epoch, Kind=Unspecified)
+    /// if the file does not exist — so callers don't need a separate existence
+    /// check before stat'ing and the sentinel is timezone-independent.
     /// </summary>
     DateTime GetLastWriteTime(StoragePath path);
 
