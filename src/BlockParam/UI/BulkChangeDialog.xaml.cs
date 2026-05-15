@@ -641,11 +641,14 @@ public partial class BulkChangeDialog : Window
     /// <summary>
     /// Finds the inline-edit TextBox for the given member path. Used to
     /// point the cursor at a cell before any typing has happened.
+    /// Delegates the path→VM resolution to the VM's DB-scoped lookup
+    /// (<see cref="BulkChangeViewModel.FindAnchorVmByPath"/>) so the
+    /// lookup is unambiguous in multi-DB sessions (#82 / #121).
     /// </summary>
     private FrameworkElement? FindInlineCell(string path)
     {
         if (DataContext is not BulkChangeViewModel vm) return null;
-        var node = FindFlatByPath(vm, path);
+        var node = vm.FindAnchorVmByPath(path);
         if (node == null) return null;
         MemberListView.ScrollIntoView(node);
         UpdateLayout();
@@ -653,13 +656,6 @@ public partial class BulkChangeDialog : Window
                    as ListViewItem;
         if (item == null) return null;
         return FindDescendant<TextBox>(item, "InlineStartValue");
-    }
-
-    private static MemberNodeViewModel? FindFlatByPath(BulkChangeViewModel vm, string path)
-    {
-        foreach (var m in vm.Tree.FlatMembers)
-            if (m.Path == path) return m;
-        return null;
     }
 
     /// <summary>

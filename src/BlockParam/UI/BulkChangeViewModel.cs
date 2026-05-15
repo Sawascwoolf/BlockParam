@@ -1104,6 +1104,17 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(NewValue));
     }
 
+    /// <summary>
+    /// Scripted-overlay helper: resolves a member path to a VM within the
+    /// anchor (first active) DB.  The scripted overlay only runs in single-DB
+    /// DevLauncher sessions, so scoping to the anchor is always correct.
+    /// Uses <see cref="FindNodeByPathInDb"/> so the lookup is DB-scoped
+    /// rather than a bare <c>FlatMembers</c> walk that could alias across
+    /// DBs (#82 / #121).
+    /// </summary>
+    internal MemberNodeViewModel? FindAnchorVmByPath(string path) =>
+        FindNodeByPathInDb(path, _active);
+
     public void RefreshFlatList()
     {
         // Pre-PR shape (one combined try/finally on the host) is preserved by
@@ -1111,12 +1122,14 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         // Tree.RebuildFlatList's insideRefreshScope callback — both still run
         // while Tree.IsRefreshing is true, so SelectedFlatMember setter +
         // code-behind SelectionChanged stay suppressed during the rebuild.
-        var selectedPath = Selection.SelectedFlatMember?.Path;
+        // Capture the model reference (not the path string) so restore is
+        // unambiguous when two DBs share a path (#82 / #121).
+        var selectedModel = Selection.SelectedFlatMember?.Model;
         Tree.RebuildFlatList(insideRefreshScope: () =>
         {
-            if (selectedPath != null)
+            if (selectedModel != null)
             {
-                var restored = Tree.FlatMembers.FirstOrDefault(m => m.Path == selectedPath);
+                var restored = Tree.FindVmByModel(selectedModel);
                 // Silent setter so we don't re-trigger OnMemberSelected during
                 // the rebuild — the slice raises SelectedFlatMember /
                 // HasSelection / SelectedMemberDisplay PropertyChanged for us.
@@ -1399,10 +1412,15 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     /// </summary>
     private void RebuildPendingEdits()
     {
-        var bulkPaths = BulkPreview.Count > 0
-            ? new HashSet<string>(BulkPreview.Entries.Select(e => e.Path), StringComparer.Ordinal)
+        // Build the set keyed by VM reference so the "will be overwritten by
+        // bulk" flag in PendingEditsViewModel is unambiguous across DBs.
+        // BulkPreviewEntry.Node is the MemberNodeViewModel that will be
+        // targeted; path string was unreliable when two DBs share a path
+        // (#82 / #121).
+        var bulkNodes = BulkPreview.Count > 0
+            ? new HashSet<MemberNodeViewModel>(BulkPreview.Entries.Select(e => e.Node))
             : null;
-        Pending.Rebuild(RootMembers, bulkPaths);
+        Pending.Rebuild(RootMembers, bulkNodes);
     }
 
     /// <summary>
@@ -2856,10 +2874,18 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         foreach (var root in RootMembers)
             CollectExpandStates(root, expandStates);
 
-        // Preserve selection + scope by stable identity (#8). Index-based lookup
-        // broke because OnMemberSelected adds scopes reversed while RefreshTree
-        // used plain order — indices didn't line up after Apply.
-        var selectedPath = Selection.SelectedFlatMember?.Path;
+        // Preserve selection + scope by stable (ActiveDb, path) identity (#8, #82, #121).
+        // Index-based lookup broke because OnMemberSelected adds scopes reversed
+        // while RefreshTree used plain order — indices didn't line up after Apply.
+        // Capture both path AND owning ActiveDb before the re-parse so the restore
+        // uses FindNodeByPathInDb (DB-scoped) rather than a bare FlatMembers walk.
+        // Model reference is stale after re-parse; path is stable across a
+        // structure-preserving re-parse (the Apply case).
+        var selectedFlatMember = Selection.SelectedFlatMember;
+        var selectedPath = selectedFlatMember?.Path;
+        var selectedOwner = selectedFlatMember != null
+            ? Tree.FindActiveDbForModel(selectedFlatMember.Model)
+            : null;
         var selectedScopeAncestorPath = Selection.SelectedScope?.AncestorPath;
         var selectedScopeDepth = Selection.SelectedScope?.Depth;
 
@@ -2892,10 +2918,17 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         ApplyAllFilters();
         RefreshFlatList();
 
-        // Restore selection and re-trigger scope analysis
+        // Restore selection and re-trigger scope analysis. Use the DB-scoped
+        // path lookup (#82 / #121) so the same path string in two different
+        // DBs always resolves to the right one.  Model references are stale
+        // after re-parse; path is stable across a structure-preserving Apply.
+        // Fall back to _active when the owning DB was not found in the index
+        // (e.g. a node from a DB that was since removed) — FindNodeByPathInDb
+        // will return null if the path doesn't exist in that DB anyway.
         if (selectedPath != null)
         {
-            var restored = Tree.FlatMembers.FirstOrDefault(m => m.Path == selectedPath);
+            var owner = selectedOwner ?? _active;
+            var restored = Tree.FindNodeByPathInDb(selectedPath, owner);
             if (restored != null)
             {
                 // Silent setter — RefreshTree re-populates scopes manually
