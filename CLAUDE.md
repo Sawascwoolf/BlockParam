@@ -80,18 +80,32 @@ After deployment, restart TIA Portal to load the new version.
 
 ## CI (GitHub Actions)
 
-One workflow: `.github/workflows/ci.yml`. Two jobs, both on `windows-latest`:
+One workflow: `.github/workflows/ci.yml`. Three jobs, all on `windows-latest`:
 
 | Job | Runs |
 |---|---|
-| `v20` | Build + xUnit tests + PEVerify against the V20 stub set |
+| `v20` | Build + xUnit tests against the V20 stub set (incl. `PartialTrustSandboxTests`) |
+| `peverify` | Build BlockParam.dll + `PEVerify.exe /IL /UNIQUE` (issue #130) |
 | `v21` | Build only (V21 output dir `bin\…\v21\` isn't on the Tests/DevLauncher resolution path) |
 
-The `v20` PEVerify step (issue #130) runs `PEVerify.exe /IL /UNIQUE`
-on `src\BlockParam\bin\Release\net48\BlockParam.dll` after tests. It catches
-partial-trust IL patterns (e.g. `ldflda` + `call` on a readonly-struct field)
-that would crash the assembly under TIA's Add-In Loader sandbox but pass
-full-trust CI/DevLauncher. A clean green run prints:
+The partial-trust IL gate is **two layers, kept separate on purpose**:
+
+- **`peverify` job (static):** runs `PEVerify.exe /IL /UNIQUE` on
+  `src\BlockParam\bin\Release\net48\BlockParam.dll`. Split out of `v20`
+  so its conclusion is its own check-run — it is **expected RED** until
+  the remaining readonly-struct IL fix lands (#130); a red here means
+  the gate is catching unverifiable IL, not that the build broke.
+- **`PartialTrustSandboxTests` (behavioral, in `v20`):** re-creates TIA's
+  Add-In Loader sandbox in a homogeneous Execution-only AppDomain and
+  JITs the method under partial trust. PEVerify/ILVerify both *pass*
+  `ldflda`+`call` on a readonly-struct field, so this runtime test is the
+  only **green** regression gate for the class of bug #131 fixed; it
+  includes a self-test canary that fails loudly if the runner stops
+  enforcing verification (so a green is never a false negative).
+
+PEVerify catches partial-trust IL patterns (e.g. `ldflda` + `call` on a
+readonly-struct field) that would crash the assembly under TIA's Add-In
+Loader sandbox but pass full-trust CI/DevLauncher. A clean green run prints:
 
 ```
 All Classes and Methods in BlockParam.dll Verified.
@@ -107,7 +121,7 @@ If a real false positive lands on a compiler-generated type, mask the
 specific diagnostic with `/IGNORE=0x<hex>` and leave a one-line comment per
 masked code in the workflow.
 
-Both jobs build with `-p:UseSiemensStubs=true`. The stubs live in
+All build jobs use `-p:UseSiemensStubs=true`. The stubs live in
 `ci/stubs/Siemens.Engineering.Stubs/` (clean-room API-surface only — no
 Siemens code, never shipped). Hosted runners have no TIA Portal install,
 so without the stubs the real Openness references can't resolve.

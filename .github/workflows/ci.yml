@@ -53,6 +53,49 @@ jobs:
       - name: Test
         run: dotnet test src/BlockParam.Tests/BlockParam.Tests.csproj -c Release --no-build -p:UseSiemensStubs=true --logger "trx;LogFileName=test-results.trx"
 
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: '**/TestResults/*.trx'
+
+  # Split into its own job so Build+Test (above) and the partial-trust IL
+  # gate report as separate check-runs. This job is EXPECTED RED until the
+  # remaining readonly-struct IL fix lands (issue #130): a red here means
+  # the static gate is catching unverifiable partial-trust IL, NOT that the
+  # build is broken (see PR #133). The *green* runtime regression gate for
+  # the same bug class is PartialTrustSandboxTests in the v20 job — keep
+  # both: PEVerify is the static net, the AppDomain smoke test is the
+  # behavioral one (PEVerify alone does not flag this pattern).
+  peverify:
+    name: Partial-trust IL gate (V20 PEVerify)
+    runs-on: windows-latest
+    if: |
+      github.event_name != 'push' ||
+      contains(github.event.head_commit.message, '[run-ci]')
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-v20-${{ hashFiles('**/*.csproj') }}
+          restore-keys: ${{ runner.os }}-nuget-v20-
+
+      - name: Restore
+        run: dotnet restore src/BlockParam/BlockParam.csproj -p:UseSiemensStubs=true
+
+      - name: Build (Release)
+        run: dotnet build src/BlockParam/BlockParam.csproj -c Release --no-restore -p:UseSiemensStubs=true
+
       # PEVerify catches partial-trust IL patterns that crash the assembly
       # under TIA's Add-In Loader sandbox but pass full-trust CI/DevLauncher.
       # Greatest-hit regression: `ldflda` + `call` on a readonly-struct field
@@ -91,13 +134,6 @@ jobs:
           name: peverify-log
           path: peverify-output/peverify.log
           if-no-files-found: ignore
-
-      - name: Upload test results
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: test-results
-          path: '**/TestResults/*.trx'
 
   v21:
     name: Build (V21, net48)
