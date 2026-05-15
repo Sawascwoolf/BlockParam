@@ -450,6 +450,32 @@ public partial class BulkChangeDialog : Window
     }
 
     /// <summary>
+    /// Scripted-only: shows the prompt overlay with the given text and button
+    /// labels, mimicking <see cref="ThreeButtonDialog"/> as an in-tree visual
+    /// for <see cref="System.Windows.Media.Imaging.RenderTargetBitmap"/> capture
+    /// (#96). The real <c>Window.ShowDialog</c> lives in a separate HWND and is
+    /// invisible to the headless renderer.
+    /// </summary>
+    internal void ShowPromptOverlayScripted(
+        string message, string primaryLabel, string secondaryLabel, string cancelLabel)
+    {
+        PromptOverlayMessage.Text = message;
+        PromptOverlayPrimary.Content = primaryLabel;
+        PromptOverlaySecondary.Content = secondaryLabel;
+        PromptOverlayCancel.Content = cancelLabel;
+        PromptOverlay.Visibility = Visibility.Visible;
+        // Dim the dialog behind the overlay with a semi-transparent backdrop.
+        PromptBackdrop.Visibility = Visibility.Visible;
+    }
+
+    /// <summary>Scripted-only: hides the prompt overlay.</summary>
+    internal void HidePromptOverlayScripted()
+    {
+        PromptOverlay.Visibility = Visibility.Collapsed;
+        PromptBackdrop.Visibility = Visibility.Collapsed;
+    }
+
+    /// <summary>
     /// Finds the per-row undo (↶) Button for the pending-edit entry whose
     /// node has the given path. Walks the PendingEditsList container
     /// generator + the row's visual tree. Returns null if the entry isn't
@@ -539,32 +565,56 @@ public partial class BulkChangeDialog : Window
 
     /// <summary>
     /// Finds the "PENDING IN &lt;DbName&gt;" header Button in the stash section
-    /// of the inspector panel. Walks the <see cref="StashedDbsList"/> and
-    /// returns the Button whose CommandParameter is the
-    /// <see cref="StashedDbState"/> whose <see cref="StashedDbState.DbName"/>
-    /// matches <paramref name="dbName"/>.
+    /// of the inspector panel. Scrolls the stash list into view first so the
+    /// container is realized, then walks the visual tree of the item's
+    /// <see cref="System.Windows.Controls.ContentPresenter"/> looking for the
+    /// Button whose <c>CommandParameter</c> is the matching
+    /// <see cref="StashedDbState"/>.
     /// </summary>
     private Button? FindStashHeaderButton(string dbName)
     {
-        UpdateLayout();
+        // Scroll the stash section into the inspector viewport so its
+        // ItemsControl containers are realized and TranslatePoint returns
+        // coordinates inside the captured frame.
+        if (StashedDbsList.Visibility == Visibility.Visible)
+        {
+            StashedDbsList.BringIntoView();
+            InspectorScroll.ScrollToBottom();
+            UpdateLayout();
+        }
+
         foreach (var item in StashedDbsList.Items)
         {
-            if (item is StashedDbState stash
-                && string.Equals(stash.DbName, dbName, System.StringComparison.OrdinalIgnoreCase))
+            if (item is not StashedDbState stash) continue;
+            if (!string.Equals(stash.DbName, dbName, System.StringComparison.OrdinalIgnoreCase)) continue;
+
+            // For ItemsControl the generated container is a ContentPresenter,
+            // not a ListBoxItem — cast to FrameworkElement to cover both cases.
+            var container = StashedDbsList.ItemContainerGenerator
+                .ContainerFromItem(item) as FrameworkElement;
+            if (container == null)
             {
-                var container = StashedDbsList.ItemContainerGenerator
-                    .ContainerFromItem(item) as FrameworkElement;
-                if (container == null) return null;
-                // The stash header template has a Button whose Command is
-                // SwitchToStashedDbCommand. It is the DockPanel-hosted Button
-                // (the second button in template order after the expand ToggleButton).
-                // We match by the CommandParameter being the stash item.
-                foreach (var btn in FindAllDescendants<Button>(container))
+                // Container not yet realized even after BringIntoView — fall
+                // back to a full-dialog visual-tree walk.
+                Log.Warning(
+                    "FindStashHeaderButton: no container for {Db} — falling back to full tree walk",
+                    dbName);
+                foreach (var btn in FindAllDescendants<Button>(this))
                 {
                     if (btn.CommandParameter is StashedDbState s
                         && string.Equals(s.DbName, dbName, System.StringComparison.OrdinalIgnoreCase))
                         return btn;
                 }
+                return null;
+            }
+
+            // The stash header template has a Button whose CommandParameter
+            // is bound to the item itself (the StashedDbState). Match it.
+            foreach (var btn in FindAllDescendants<Button>(container))
+            {
+                if (btn.CommandParameter is StashedDbState s
+                    && string.Equals(s.DbName, dbName, System.StringComparison.OrdinalIgnoreCase))
+                    return btn;
             }
         }
         return null;

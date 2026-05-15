@@ -1659,6 +1659,69 @@
         </ListBox>
     </Border>
 
+    <!-- Scripted-only prompt backdrop (dims the dialog behind the prompt overlay). -->
+    <Rectangle x:Name="PromptBackdrop" Panel.ZIndex="1499"
+               Fill="#40000000"
+               HorizontalAlignment="Stretch" VerticalAlignment="Stretch"
+               Visibility="Collapsed" IsHitTestVisible="False"/>
+
+    <!-- Scripted-only prompt overlay (DevLauncher capture mode #96).
+         Mimics ThreeButtonDialog for RenderTargetBitmap snapshots — the
+         real Window.ShowDialog cannot be captured in a headless render.
+         Centered in the window; hidden by default. Content is populated
+         imperatively by ShowPromptOverlayScripted before capture. -->
+    <Border x:Name="PromptOverlay" Panel.ZIndex="1500"
+            HorizontalAlignment="Center" VerticalAlignment="Center"
+            Visibility="Collapsed"
+            Background="White"
+            BorderBrush="#999" BorderThickness="1"
+            MinWidth="420" MaxWidth="620"
+            Padding="16">
+        <Border.Effect>
+            <DropShadowEffect Color="Black" BlurRadius="16"
+                              ShadowDepth="4" Opacity="0.25"/>
+        </Border.Effect>
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="*"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+
+            <!-- Warning glyph — matches ThreeButtonDialog -->
+            <TextBlock Grid.Row="0" Grid.Column="0"
+                       Text="&#x26A0;"
+                       FontFamily="Segoe UI Symbol" FontSize="32"
+                       Foreground="#E0A800"
+                       VerticalAlignment="Top"
+                       Margin="0,0,12,16"/>
+
+            <!-- Body text (set imperatively) -->
+            <TextBlock x:Name="PromptOverlayMessage"
+                       Grid.Row="0" Grid.Column="1"
+                       TextWrapping="Wrap" Margin="0,0,0,16"
+                       VerticalAlignment="Top"
+                       FontFamily="Segoe UI" FontSize="12"/>
+
+            <!-- Right-aligned button row (labels set imperatively) -->
+            <StackPanel Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="2"
+                        Orientation="Horizontal" HorizontalAlignment="Right">
+                <Button x:Name="PromptOverlayPrimary"
+                        Height="28" MinWidth="90" Padding="12,4" Margin="0,0,8,0"
+                        FontFamily="Segoe UI" FontSize="12"/>
+                <Button x:Name="PromptOverlaySecondary"
+                        Height="28" MinWidth="90" Padding="12,4" Margin="0,0,8,0"
+                        FontFamily="Segoe UI" FontSize="12"/>
+                <Button x:Name="PromptOverlayCancel"
+                        Height="28" MinWidth="70" Padding="12,4"
+                        FontFamily="Segoe UI" FontSize="12"/>
+            </StackPanel>
+        </Grid>
+    </Border>
+
     <!-- Scripted-only scope dropdown overlay (DevLauncher capture mode).
          Mimics the ComboBox popup for RenderTargetBitmap snapshots, which
          cannot capture the real Popup (it lives in a separate HWND). -->

@@ -522,9 +522,13 @@
       "cursor": { "target": "chipClose:DB_ProcessPlant_A1" } },
 
     { "id": "mdb17_three_way_prompt", "filename": "mdb17_three_way_prompt.png", "beat": "readingBulk", "dialog": "main", "preserveState": true,
-      "activeSet": { "closeChip": "DB_ProcessPlant_A1", "promptAnswer": "stash" },
+      "activeSet": { "closeChip": "DB_ProcessPlant_A1", "promptCapture": true },
       "cursor": { "target": "chip:DB_ProcessPlant_B1" },
       "caption": "Apply / Stash / Cancel — pending edits are safe" },
+
+    { "id": "mdb17a_stash_execute", "filename": "mdb17a_stash_execute.png", "beat": "clickRelease", "dialog": "main", "preserveState": true,
+      "activeSet": { "closeChip": "DB_ProcessPlant_A1", "promptAnswer": "stash" },
+      "cursor": { "target": "chip:DB_ProcessPlant_B1" } },
 
     { "id": "mdb18_pick_stash", "filename": "mdb18_pick_stash.png", "beat": "pointingWithMouse", "dialog": "main", "preserveState": true,
       "cursor": { "target": "chip:DB_ProcessPlant_B1" } },
@@ -543,9 +547,13 @@
       "cursor": { "target": "stashHeader:DB_ProcessPlant_A1" } },
 
     { "id": "mdb22_add_or_replace_prompt", "filename": "mdb22_add_or_replace_prompt.png", "beat": "readingBulk", "dialog": "main", "preserveState": true,
-      "activeSet": { "reactivate": "DB_ProcessPlant_A1", "promptAnswer": "add" },
+      "activeSet": { "reactivate": "DB_ProcessPlant_A1", "promptCapture": true },
       "cursor": { "target": "chip:DB_ProcessPlant_A1" },
       "caption": "Add alongside or replace current session?" },
+
+    { "id": "mdb22a_add_execute", "filename": "mdb22a_add_execute.png", "beat": "clickRelease", "dialog": "main", "preserveState": true,
+      "activeSet": { "reactivate": "DB_ProcessPlant_A1", "promptAnswer": "add" },
+      "cursor": { "target": "chip:DB_ProcessPlant_A1" } },
 
     { "id": "mdb23_pick_add", "filename": "mdb23_pick_add.png", "beat": "pointingWithMouse", "dialog": "main", "preserveState": true,
       "cursor": { "target": "chip:DB_ProcessPlant_A1" } },

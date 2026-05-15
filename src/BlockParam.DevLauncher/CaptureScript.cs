@@ -299,6 +299,25 @@ public sealed class ActiveSetScene
     /// pending edits, soloing when nothing is pending, etc.).
     /// </summary>
     [JsonProperty("promptAnswer")] public string? PromptAnswer { get; set; }
+
+    /// <summary>
+    /// When true, renders the 3-way prompt as an in-tree overlay in the
+    /// captured frame WITHOUT performing the triggering gesture (#96).
+    /// The overlay shows the text and button labels that the real
+    /// <see cref="BlockParam.UI.ThreeButtonDialog"/> would display, determined
+    /// by which gesture field is set (<see cref="CloseChip"/> →
+    /// Apply/Stash/Cancel; <see cref="Reactivate"/> → Add/Replace/Cancel).
+    /// The overlay is populated from localization strings so the English
+    /// text is correct regardless of OS culture.
+    ///
+    /// <para>
+    /// Use in a scene that captures the prompt visual; follow it with a
+    /// <c>preserveState</c> scene that carries the same gesture +
+    /// <see cref="PromptAnswer"/> to actually dismiss the prompt and
+    /// advance state.
+    /// </para>
+    /// </summary>
+    [JsonProperty("promptCapture")] public bool? PromptCapture { get; set; }
 }
 
 public static class CaptureScriptLoader
@@ -330,12 +349,13 @@ public static class SceneApplier
     /// </summary>
     public static void Apply(Scene scene, BulkChangeViewModel vm, BulkChangeDialog dialog)
     {
-        // Cursor and hover-preview are transient per-scene — always clear
-        // at the top so stale marks from the previous frame don't leak
-        // forward even when preserveState keeps everything else.
+        // Cursor, hover-preview, and prompt overlay are transient per-scene —
+        // always clear at the top so stale marks from the previous frame don't
+        // leak forward even when preserveState keeps everything else.
         dialog.HideCursor();
         ClearHoverPreview(vm, dialog);
         dialog.HideScopeDropdownScripted();
+        dialog.HidePromptOverlayScripted();
 
         // Reset zoom to the default (or per-scene override) so a previous
         // scene's override doesn't leak into subsequent frames.
@@ -358,7 +378,7 @@ public static class SceneApplier
         // promptAnswer FIRST so it's in place if AddPeer/CloseChip/Solo/
         // Reactivate immediately raises a 3-way prompt.
         if (scene.ActiveSet != null)
-            ApplyActiveSet(scene, vm);
+            ApplyActiveSet(scene, vm, dialog);
 
         if (scene.Filter != null)
         {
@@ -626,10 +646,29 @@ public static class SceneApplier
     /// solo → reactivate. The prompt answer is armed first so the
     /// ScriptedMessageBoxService already has it when any of the above
     /// immediately raises a 3-way dialog.
+    ///
+    /// <para>
+    /// When <see cref="ActiveSetScene.PromptCapture"/> is true, the triggering
+    /// gesture (<see cref="ActiveSetScene.CloseChip"/> or
+    /// <see cref="ActiveSetScene.Reactivate"/>) is NOT executed. Instead the
+    /// prompt overlay is shown in the captured frame with the English text and
+    /// button labels the real dialog would display (#96). A follow-on scene
+    /// (with <c>preserveState</c>) carries the same gesture + promptAnswer to
+    /// actually dismiss the prompt and advance state.
+    /// </para>
     /// </summary>
-    private static void ApplyActiveSet(Scene scene, BulkChangeViewModel vm)
+    private static void ApplyActiveSet(Scene scene, BulkChangeViewModel vm, BulkChangeDialog dialog)
     {
         var block = scene.ActiveSet!;
+
+        // When promptCapture=true, show the prompt overlay for the current
+        // frame WITHOUT executing the triggering gesture. The follow-on scene
+        // executes the gesture and consumes the scripted answer.
+        if (block.PromptCapture == true)
+        {
+            ShowPromptOverlayForScene(block, vm, dialog);
+            return;
+        }
 
         // Arm the scripted prompt answer before any gesture that may raise one.
         if (vm.MessageBoxService is ScriptedMessageBoxService scripted
@@ -740,6 +779,54 @@ public static class SceneApplier
                     "Scene {Id}: activeSet.reactivate → {Name}", scene.Id, stash.DbName);
             }
         }
+    }
+
+    /// <summary>
+    /// Populates and shows the <c>PromptOverlay</c> inside the dialog for
+    /// capture-mode frames that need the 3-way prompt visible (#96).
+    /// Determines prompt kind from the active-set block fields:
+    ///   • <see cref="ActiveSetScene.CloseChip"/> → Apply/Stash/Cancel prompt
+    ///   • <see cref="ActiveSetScene.Reactivate"/> → Add/Replace/Cancel prompt
+    /// Text is built from the same localization strings the real
+    /// <see cref="BlockParam.UI.WpfMessageBoxService"/> uses, so English text
+    /// is correct when running with en-US culture (as capture mode forces).
+    /// </summary>
+    private static void ShowPromptOverlayForScene(
+        ActiveSetScene block, BulkChangeViewModel vm, BulkChangeDialog dialog)
+    {
+        // --- Apply/Stash/Cancel: triggered by closeChip ---
+        if (block.CloseChip != null)
+        {
+            var db = vm.ActiveSet.State.Dbs
+                .FirstOrDefault(d => string.Equals(d.Info.Name, block.CloseChip,
+                    System.StringComparison.OrdinalIgnoreCase));
+            int pendingCount = db != null ? vm.Pending.PendingEdits.Count : 1;
+            string dbName = block.CloseChip;
+            var message = BlockParam.Localization.Res.Format(
+                "Dialog_SwitchDb_KeepConfirm_Text", pendingCount, dbName);
+            dialog.ShowPromptOverlayScripted(
+                message,
+                BlockParam.Localization.Res.Get("Dialog_SwitchDb_KeepConfirm_ApplyButton"),
+                BlockParam.Localization.Res.Get("Dialog_SwitchDb_KeepConfirm_StashButton"),
+                BlockParam.Localization.Res.Get("Dialog_Cancel"));
+            return;
+        }
+
+        // --- Add/Replace/Cancel: triggered by reactivate ---
+        if (block.Reactivate != null)
+        {
+            var message = BlockParam.Localization.Res.Format(
+                "Reactivate_AdditiveOrReplace_Text", block.Reactivate);
+            dialog.ShowPromptOverlayScripted(
+                message,
+                BlockParam.Localization.Res.Get("Reactivate_AdditiveOrReplace_AddButton"),
+                BlockParam.Localization.Res.Get("Reactivate_AdditiveOrReplace_ReplaceButton"),
+                BlockParam.Localization.Res.Get("Dialog_Cancel"));
+            return;
+        }
+
+        Serilog.Log.Warning(
+            "[promptCapture] No closeChip or reactivate gesture specified — cannot determine prompt kind");
     }
 
     private static void CollapseRecursive(MemberNodeViewModel node)
