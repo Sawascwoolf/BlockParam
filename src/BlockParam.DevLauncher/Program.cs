@@ -274,6 +274,16 @@ class Program
             Log.Error(e.Exception, "UNHANDLED EXCEPTION");
             e.Handled = true; // prevent crash, log instead
         };
+
+        // In capture-script mode inject a ScriptedMessageBoxService so
+        // multi-DB prompts (Apply/Stash/Cancel, Add-or-Replace) return the
+        // scene's canned answer without hanging for user input (#96).
+        // Interactive mode keeps the real WpfMessageBoxService (null → default).
+        BlockParam.UI.IMessageBoxService? messageBoxService =
+            capturePlan is CapturePlan
+                ? new ScriptedMessageBoxService()
+                : null;
+
         // DB-switcher (#59) for DevLauncher: simulate the project block tree
         // by enumerating every *.xml under %TEMP%\BlockParam\ that parses as a
         // SimaticML DB. Lets the dropdown be exercised without a real TIA
@@ -289,6 +299,7 @@ class Program
                 File.WriteAllText(outPath, modifiedXml);
                 Log.Information("Saved to {Path}", outPath);
             },
+            messageBox: messageBoxService,
             tagTableCache: tagTableCache,
             tagTableDir: tagTableDir,
             licenseService: licenseService,
