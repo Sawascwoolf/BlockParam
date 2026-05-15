@@ -64,7 +64,10 @@ public sealed class FileSystemBlockParamStorage : IBlockParamStorage
             Directory.Delete(path.FullPath);
     }
 
-    public DateTime GetLastWriteTime(StoragePath path) => File.GetLastWriteTime(path.FullPath);
+    public DateTime GetLastWriteTime(StoragePath path) =>
+        File.Exists(path.FullPath)
+            ? File.GetLastWriteTime(path.FullPath)
+            : new DateTime(1601, 1, 1); // FILETIME epoch; matches in-memory contract
 
     public IEnumerable<StoragePath> EnumerateFiles(
         StoragePath directory, string pattern = "*", bool recursive = false)
