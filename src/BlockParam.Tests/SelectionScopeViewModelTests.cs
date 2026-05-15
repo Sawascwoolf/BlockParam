@@ -355,6 +355,44 @@ public class SelectionScopeViewModelTests
         leafB.IsSelected.Should().BeTrue();
     }
 
+    /// <summary>
+    /// Guard for issue #123: if a future feature sets IsSelected = true on a
+    /// synthetic DB-group root, OnNodeSelected must bail early and must NOT
+    /// clear IsSelected on any real leaf. Without the guard the cascade would
+    /// walk every DB in the tree and deselect everything — the exact opposite
+    /// of a "select-all-in-DB" or header-click intent.
+    /// </summary>
+    [Fact]
+    public void OnNodeSelected_SyntheticDbGroupRoot_DoesNotCascadeDeselect()
+    {
+        // Arrange: multi-DB tree so that a cascade would affect leaves in both.
+        var (vm, tree, _) = BuildWithMultiDb();
+        var dbA = tree.RootMembers[0]; // synthetic group VM for DB_A
+        var dbB = tree.RootMembers[1]; // synthetic group VM for DB_B
+        var leafA = dbA.AllDescendants().First(n => n.IsLeaf);
+        var leafB = dbB.AllDescendants().First(n => n.IsLeaf);
+
+        // Pre-select a real leaf so we can detect whether it gets cleared.
+        leafA.IsSelected = true;
+        leafB.IsSelected = true;
+
+        // Act: simulate what would happen if a future feature set IsSelected
+        // on the synthetic DB group root and that triggered the SelectedChanged
+        // callback (OnNodeSelected) with the synthetic VM as the sender.
+        dbA.Datatype.Should().Be("DB",
+            "this fixture's synthetic root must carry the 'DB' marker for the guard to activate");
+        vm.OnNodeSelected(dbA);
+
+        // Assert: both real leaves must be untouched — the guard short-circuited
+        // before the cascade could clear them.
+        leafA.IsSelected.Should().BeTrue(
+            "OnNodeSelected must bail early for synthetic DB-group roots (#123): " +
+            "leafA must not be deselected by a cascade triggered on a non-leaf");
+        leafB.IsSelected.Should().BeTrue(
+            "OnNodeSelected must bail early for synthetic DB-group roots (#123): " +
+            "leafB in the other DB must also be untouched");
+    }
+
     [Fact]
     public void OnNodeSelected_ReEntry_IsSilentlyIgnored()
     {
