@@ -218,27 +218,9 @@ public class SimaticMLParser
                 childUdt, childPathWithinUdt, unresolvedUdts);
             childrenList.AddRange(children);
 
-            // UDT instances have children in <Sections><Section Name="None"><Member .../>.
-            // Multi-instance sub-FBs nest their full interface mirror here
-            // (Input/Output/InOut/Static/Temp/Constant); only Static carries stored,
-            // editable IDB data alongside Input/Output (per-instance defaults). InOut
-            // members are interface pointers with no stored value; Temp is scratch;
-            // Constant is pre-resolved literals at compile time. Walking InOut at
-            // every nesting level turned Gen_Main_IDB into a 9 GB UI thread stall (#77).
-            var nestedSections = LocalElement(memberElement, Sections);
-            if (nestedSections != null)
-            {
-                var nestedNs = nestedSections.Name.Namespace;
-                if (nestedNs == XNamespace.None) nestedNs = ns;
-                foreach (var section in LocalElements(nestedSections, Section))
-                {
-                    if (!IsParseableSection(section.Attribute(Name)?.Value)) continue;
-                    var sectionChildren = ParseMembers(
-                        section, nestedNs, node, path, indexStack,
-                        childUdt, childPathWithinUdt, unresolvedUdts);
-                    childrenList.AddRange(sectionChildren);
-                }
-            }
+            WalkFilteredNestedSections(
+                memberElement, ns, node, path, indexStack,
+                childUdt, childPathWithinUdt, unresolvedUdts, childrenList);
 
             result.Add(node);
         }
@@ -411,22 +393,14 @@ public class SimaticMLParser
             }
             else // UDT
             {
-                var nestedSections = LocalElement(memberElement, Sections);
-                if (nestedSections != null)
-                {
-                    var nestedNs = nestedSections.Name.Namespace;
-                    if (nestedNs == XNamespace.None) nestedNs = ns;
-                    foreach (var section in LocalElements(nestedSections, Section))
-                    {
-                        // Same filter as ParseMembers nested-section walk (#77).
-                        if (!IsParseableSection(section.Attribute(Name)?.Value)) continue;
-                        var tmpl = ParseMembers(
-                            section, nestedNs, elementNode, childPath, childIndexStack,
-                            elementUdt, elementPathWithinUdt, unresolvedUdts);
-                        elementChildrenList.AddRange(tmpl);
-                    }
-                }
-                else if (elementUdt != null && _udtResolver != null && !_udtResolver.HasType(elementUdt))
+                var hadNestedSections = WalkFilteredNestedSections(
+                    memberElement, ns, elementNode, childPath, childIndexStack,
+                    elementUdt, elementPathWithinUdt, unresolvedUdts, elementChildrenList);
+
+                if (!hadNestedSections
+                    && elementUdt != null
+                    && _udtResolver != null
+                    && !_udtResolver.HasType(elementUdt))
                 {
                     // No nested sections AND UDT is unknown: flag it so the UI
                     // can prompt the user to export UDTs.
@@ -438,6 +412,43 @@ public class SimaticMLParser
         }
 
         return arrayNode;
+    }
+
+    /// <summary>
+    /// Walks the <c>&lt;Sections&gt;</c> child of <paramref name="memberElement"/>,
+    /// applies <see cref="IsParseableSection"/> to each <c>&lt;Section&gt;</c>,
+    /// and appends the parsed members from every surviving section to
+    /// <paramref name="target"/>. Shared by both the non-array and array-of-UDT
+    /// branches so the section filter cannot drift between the two call sites (#77).
+    /// Returns true when a <c>&lt;Sections&gt;</c> element was found (regardless of
+    /// whether any of its <c>&lt;Section&gt;</c> children survived the filter), so
+    /// callers that need an "unresolved UDT" fallback can distinguish "no nested
+    /// sections at all" from "nested sections all filtered out".
+    /// </summary>
+    private bool WalkFilteredNestedSections(
+        XElement memberElement,
+        XNamespace fallbackNs,
+        MemberNode parentNode,
+        string path,
+        IReadOnlyList<string> indexStack,
+        string? enclosingUdt,
+        string pathWithinUdt,
+        HashSet<string> unresolvedUdts,
+        List<MemberNode> target)
+    {
+        var nestedSections = LocalElement(memberElement, Sections);
+        if (nestedSections == null) return false;
+        var nestedNs = nestedSections.Name.Namespace;
+        if (nestedNs == XNamespace.None) nestedNs = fallbackNs;
+        foreach (var section in LocalElements(nestedSections, Section))
+        {
+            if (!IsParseableSection(section.Attribute(Name)?.Value)) continue;
+            var sectionChildren = ParseMembers(
+                section, nestedNs, parentNode, path, indexStack,
+                enclosingUdt, pathWithinUdt, unresolvedUdts);
+            target.AddRange(sectionChildren);
+        }
+        return true;
     }
 
     /// <summary>
