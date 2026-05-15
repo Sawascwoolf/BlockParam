@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
+using System.Reflection;
 using System.Security;
 using System.Security.Permissions;
 using BlockParam.Services;
@@ -88,33 +90,50 @@ public sealed class PartialTrustSandboxTests
         }
     }
 
-    private static string AsmDir(Type t)
+    // The ORIGINAL deployed directory of an assembly. vstest shadow-copies
+    // assemblies into incomplete per-assembly cache dirs, so Assembly.Location
+    // points at a dir that holds that one DLL but not its dependency closure.
+    // Assembly.CodeBase is preserved as the original build-output path even
+    // under shadow copy (valid on .NET Framework 4.8, the test TFM) — that
+    // directory contains the full copy-local closure.
+    private static string CodeBaseDir(Assembly a)
     {
-        var loc = t.Assembly.Location;
-        return !string.IsNullOrEmpty(loc)
-            ? Path.GetDirectoryName(loc)!
-            : AppDomain.CurrentDomain.BaseDirectory;
+        if (!a.IsDynamic && !string.IsNullOrEmpty(a.CodeBase))
+        {
+            var uri = new Uri(a.CodeBase);
+            if (uri.IsFile)
+                return Path.GetDirectoryName(uri.LocalPath)!;
+        }
+        var loc = a.IsDynamic ? null : a.Location;
+        return string.IsNullOrEmpty(loc)
+            ? AppDomain.CurrentDomain.BaseDirectory
+            : Path.GetDirectoryName(loc)!;
     }
 
-    // vstest shadow-copies the test assembly, so BlockParam.dll and
-    // BlockParam.Tests.dll live in different directories at run time and
-    // no single ApplicationBase contains both. Stage the union of both
-    // output dirs into one temp dir so the sandbox's trusted loader
-    // resolves everything (incl. Newtonsoft) from ApplicationBase — no
-    // AssemblyResolve hook (transparent partial-trust code may not
-    // install one) and no grant beyond Execution. Harness infrastructure,
-    // not subject to the storage-layer guardrail.
+    // No single existing dir contains the whole closure (BlockParam.dll +
+    // BlockParam.Tests.dll + Newtonsoft + deps) because of vstest shadow
+    // copy. Stage the union of the test and production build-output dirs
+    // (resolved via CodeBase, which survives shadow copy) into one temp
+    // dir; the sandbox's trusted loader then resolves everything from
+    // ApplicationBase with no AssemblyResolve hook (transparent
+    // partial-trust code may not install one) and no grant beyond
+    // Execution. Harness infrastructure — not subject to the storage-layer
+    // guardrail.
     private static string StageAssemblies()
     {
+        var dirs = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            CodeBaseDir(typeof(PartialTrustSandboxTests).Assembly),
+            CodeBaseDir(typeof(UiZoomService).Assembly),
+            AppDomain.CurrentDomain.BaseDirectory,
+        };
+
         var staging = Path.Combine(
             Path.GetTempPath(), "BlockParamPT-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(staging);
-        foreach (var src in new[]
-                 {
-                     AsmDir(typeof(UiZoomService)),
-                     AsmDir(typeof(PartialTrustSandboxTests)),
-                 })
+        foreach (var src in dirs)
         {
+            if (!Directory.Exists(src)) continue;
             foreach (var dll in Directory.GetFiles(src, "*.dll"))
                 File.Copy(dll, Path.Combine(staging, Path.GetFileName(dll)), overwrite: true);
         }
