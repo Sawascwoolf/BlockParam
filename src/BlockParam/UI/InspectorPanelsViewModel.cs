@@ -38,10 +38,8 @@ public class InspectorPanelsViewModel : ViewModelBase
         get => _isInspectorCollapsed;
         set
         {
-            if (_isInspectorCollapsed == value) return;
-            _isInspectorCollapsed = value;
-            OnPropertyChanged(nameof(IsInspectorCollapsed));
-            OnPropertyChanged(nameof(IsInspectorExpanded));
+            if (SetProperty(ref _isInspectorCollapsed, value))
+                OnPropertyChanged(nameof(IsInspectorExpanded));
         }
     }
 

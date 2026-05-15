@@ -98,9 +98,7 @@ internal sealed class PillGroupViewModel : PillViewModelBase
         get => _isSelected;
         set
         {
-            if (_isSelected == value) return;
-            _isSelected = value;
-            OnPropertyChanged();
+            if (!SetProperty(ref _isSelected, value)) return;
 
             // User-driven write (header checkbox clicked) — push to children.
             // A null write from the user shouldn't happen (XAML uses
