@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using BlockParam.Models;
 
 namespace BlockParam.UI;
@@ -35,14 +36,30 @@ namespace BlockParam.UI;
 /// </summary>
 public sealed class TreeIndexState
 {
+    /// <summary>
+    /// Wraps caller-supplied dictionaries in <see cref="ReadOnlyDictionary{TKey,TValue}"/>
+    /// so callers cannot cast back to <c>Dictionary&lt;,&gt;</c> and mutate the
+    /// snapshot (#122). One allocation per dictionary per rebuild; negligible cost.
+    /// </summary>
     public TreeIndexState(
         IReadOnlyDictionary<MemberNode, MemberNodeViewModel> modelToVm,
         IReadOnlyDictionary<MemberNode, ActiveDb> modelToDb,
         IReadOnlyDictionary<ActiveDb, MemberNodeViewModel> dbToSynthetic)
     {
-        ModelToVm = modelToVm;
-        ModelToDb = modelToDb;
-        DbToSynthetic = dbToSynthetic;
+        // Callers always pass Dictionary<,> (built in BuildTreeIndex locals).
+        // The is-cast avoids a second allocation on the happy path; the
+        // explicit-cast fallback handles any future caller that passes a
+        // pre-wrapped IDictionary. ReadOnlyDictionary<K,V> ctor takes
+        // IDictionary<K,V> (net48 BCL constraint — no IReadOnlyDictionary ctor).
+        ModelToVm = new ReadOnlyDictionary<MemberNode, MemberNodeViewModel>(
+            modelToVm is Dictionary<MemberNode, MemberNodeViewModel> d1
+                ? d1 : (IDictionary<MemberNode, MemberNodeViewModel>)modelToVm);
+        ModelToDb = new ReadOnlyDictionary<MemberNode, ActiveDb>(
+            modelToDb is Dictionary<MemberNode, ActiveDb> d2
+                ? d2 : (IDictionary<MemberNode, ActiveDb>)modelToDb);
+        DbToSynthetic = new ReadOnlyDictionary<ActiveDb, MemberNodeViewModel>(
+            dbToSynthetic is Dictionary<ActiveDb, MemberNodeViewModel> d3
+                ? d3 : (IDictionary<ActiveDb, MemberNodeViewModel>)dbToSynthetic);
     }
 
     /// <summary>

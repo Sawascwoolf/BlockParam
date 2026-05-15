@@ -74,6 +74,11 @@ public class MemberTreeViewModel : ViewModelBase
     private TreeIndexState _treeIndex = TreeIndexState.Empty;
 
     private bool _isRefreshing;
+    // #122: backing field for RootMembers so BuildRootMembersFromActiveDbs can
+    // swap the entire collection in one assignment and raise a single
+    // PropertyChanged — instead of Clear() + N×Add() firing N+1 CollectionChanged
+    // events while _treeIndex is already on the new snapshot.
+    private ObservableCollection<MemberNodeViewModel> _rootMembers;
 
     public MemberTreeViewModel(
         Func<IReadOnlyList<ActiveDb>> getActiveDbs,
@@ -86,7 +91,7 @@ public class MemberTreeViewModel : ViewModelBase
         _commentLanguagePolicy = commentLanguagePolicy;
         _subscribeToVm = subscribeToVm;
 
-        RootMembers = new ObservableCollection<MemberNodeViewModel>();
+        _rootMembers = new ObservableCollection<MemberNodeViewModel>();
         ExpandAllCommand = new RelayCommand(ExecuteExpandAll);
         CollapseAllCommand = new RelayCommand(ExecuteCollapseAll);
     }
@@ -96,8 +101,20 @@ public class MemberTreeViewModel : ViewModelBase
     /// member of the anchor DB; multi-DB session = one synthetic
     /// <c>Datatype="DB"</c> group per active DB whose children are that
     /// DB's real members.
+    ///
+    /// <para>
+    /// Backed by a writable field so <see cref="BuildRootMembersFromActiveDbs"/>
+    /// can swap to a fresh <see cref="ObservableCollection{T}"/> in one
+    /// assignment, raising a single <c>PropertyChanged</c> instead of
+    /// N+1 <c>CollectionChanged</c> events while the new index is already
+    /// installed (#122).
+    /// </para>
     /// </summary>
-    public ObservableCollection<MemberNodeViewModel> RootMembers { get; }
+    public ObservableCollection<MemberNodeViewModel> RootMembers
+    {
+        get => _rootMembers;
+        private set => SetProperty(ref _rootMembers, value);
+    }
 
     /// <summary>
     /// Flat-list projection of <see cref="RootMembers"/> respecting current
@@ -183,16 +200,18 @@ public class MemberTreeViewModel : ViewModelBase
         var (newRoots, newIndex) = BuildTreeIndex(
             activeDbs, anchorPlc, _commentLanguagePolicy, _subscribeToVm);
 
-        // Atomic install: replace the index in one assignment, then refresh
-        // RootMembers in place (kept as ObservableCollection for WPF
-        // bindings on the TreeView/ListView). Order matters: any handler
-        // wired to RootMembers' CollectionChanged would read TreeIndex via
+        // Atomic install: replace the index in one assignment, then swap
+        // RootMembers to a fresh ObservableCollection and raise a single
+        // PropertyChanged. Order matters: any handler wired to
+        // RootMembers.CollectionChanged (on the old collection) or
+        // PropertyChanged(nameof(RootMembers)) would read TreeIndex via
         // ModelToVm — assign the index first so those reads observe the
-        // new state.
+        // new state. Using a fresh collection instead of Clear()+N×Add()
+        // collapses N+1 CollectionChanged events into one PropertyChanged
+        // event, closing the partial-state seam where a handler could
+        // observe the new index but an incomplete RootMembers list (#122).
         _treeIndex = newIndex;
-        RootMembers.Clear();
-        foreach (var root in newRoots)
-            RootMembers.Add(root);
+        RootMembers = new ObservableCollection<MemberNodeViewModel>(newRoots);
 
         RootsRebuilt?.Invoke();
     }
