@@ -119,9 +119,7 @@ public class SubscriptionViewModel : ViewModelBase, IDisposable
         get => _availableUpdate;
         private set
         {
-            if (ReferenceEquals(_availableUpdate, value)) return;
-            _availableUpdate = value;
-            OnPropertyChanged(nameof(AvailableUpdate));
+            if (!SetProperty(ref _availableUpdate, value)) return;
             OnPropertyChanged(nameof(HasUpdateAvailable));
             OnPropertyChanged(nameof(UpdateBadgeText));
             OnPropertyChanged(nameof(UpdateBadgeTooltip));

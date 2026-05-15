@@ -64,9 +64,7 @@ public class DataBlockListItem : ViewModelBase
         get => _isActive;
         set
         {
-            if (_isActive == value) return;
-            _isActive = value;
-            OnPropertyChanged();
+            if (!SetProperty(ref _isActive, value)) return;
             if (!_suppressToggle)
                 ToggleRequested?.Invoke(this);
         }
