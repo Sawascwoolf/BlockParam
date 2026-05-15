@@ -207,6 +207,10 @@ public partial class BulkChangeDialog : Window
                 // ManualSelectedPaths is keyed by VM reference now (#58),
                 // so a same-path leaf in another active DB is a different
                 // entry — Contains(m) picks the right one without alias.
+                // TODO(#84 follow-up): extract the Contains(m) predicate into
+                // SelectionScopeViewModel.GetItemsToRehydrate(visibleItems, manualSelection)
+                // so the rule becomes unit-testable. The SelectedItems.Add loop must stay
+                // in code-behind (UI-thread WPF operation). See PR #136 description.
                 if (vm.Selection.ManualSelectedPaths.Contains(m))
                 {
                     MemberListView.SelectedItems.Add(m);

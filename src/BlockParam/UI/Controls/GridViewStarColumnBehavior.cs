@@ -103,15 +103,43 @@ public static class GridViewStarColumnBehavior
     {
         if (d is not ListView lv) return;
 
-        // Subscribe once; subsequent calls are no-ops because the lambda
-        // captures the ListView by reference and reads its current attached
-        // property values on every SizeChanged event.
-        lv.SizeChanged -= OnListViewSizeChanged;
-        lv.SizeChanged += OnListViewSizeChanged;
+        // When StarColumn transitions null→value, hook the Loaded/Unloaded
+        // lifecycle so SizeChanged is only active while the ListView is in
+        // the visual tree. When it transitions value→null, unhook everything.
+        if (e.Property == StarColumnProperty)
+        {
+            var oldCol = e.OldValue as GridViewColumn;
+            var newCol = e.NewValue as GridViewColumn;
+
+            if (oldCol == null && newCol != null)
+            {
+                // attach
+                lv.Loaded += OnListViewLoaded;
+                lv.Unloaded += OnListViewUnloaded;
+                if (lv.IsLoaded) lv.SizeChanged += OnListViewSizeChanged;
+            }
+            else if (oldCol != null && newCol == null)
+            {
+                // detach
+                lv.Loaded -= OnListViewLoaded;
+                lv.Unloaded -= OnListViewUnloaded;
+                lv.SizeChanged -= OnListViewSizeChanged;
+            }
+        }
 
         // Apply immediately in case the parameter changed while the ListView
         // is already laid out (e.g. during a theme switch or a test harness).
         Apply(lv);
+    }
+
+    private static void OnListViewLoaded(object sender, RoutedEventArgs e)
+    {
+        if (sender is ListView lv) lv.SizeChanged += OnListViewSizeChanged;
+    }
+
+    private static void OnListViewUnloaded(object sender, RoutedEventArgs e)
+    {
+        if (sender is ListView lv) lv.SizeChanged -= OnListViewSizeChanged;
     }
 
     private static void OnListViewSizeChanged(object sender, SizeChangedEventArgs e)
