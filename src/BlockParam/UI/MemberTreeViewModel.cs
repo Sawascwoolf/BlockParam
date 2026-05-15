@@ -60,14 +60,18 @@ public class MemberTreeViewModel : ViewModelBase
     /// handlers on the passed node only, never recurse into <c>node.Children</c>.
     /// A previous recursive host doubled (then N-tupled, by depth) the
     /// handler registrations on every non-leaf descendant in multi-DB mode
-    /// because <see cref="AddDbGroupRoot"/> already walks every descendant.
+    /// because <see cref="BuildDbGroupRoot"/> already walks every descendant.
     /// </para>
     /// </summary>
     private readonly Action<MemberNodeViewModel> _subscribeToVm;
 
-    private readonly Dictionary<MemberNode, MemberNodeViewModel> _modelToVm = new();
-    private readonly Dictionary<MemberNode, ActiveDb> _modelToDb = new();
-    private readonly Dictionary<ActiveDb, MemberNodeViewModel> _dbToSynthetic = new();
+    // #79: the three model→VM / model→DB / DB→synthetic dictionaries are
+    // owned by a single immutable snapshot. Every tree rebuild builds the
+    // snapshot in locals and installs it in one atomic assignment via
+    // <see cref="BuildTreeIndex"/>, so readers never observe a partial state
+    // where roots have been minted but a descendant is still missing from
+    // ModelToVm, or where DbToSynthetic still has keys from the prior tree.
+    private TreeIndexState _treeIndex = TreeIndexState.Empty;
 
     private bool _isRefreshing;
 
@@ -114,18 +118,27 @@ public class MemberTreeViewModel : ViewModelBase
     }
 
     /// <summary>
+    /// Immutable snapshot of the three model→VM / model→DB / DB→synthetic
+    /// lookup dictionaries (#79). Assigned exactly once per tree rebuild;
+    /// callers can capture the reference and read it concurrently with a
+    /// subsequent rebuild without observing a partial state.
+    /// </summary>
+    public TreeIndexState TreeIndex => _treeIndex;
+
+    /// <summary>
     /// <c>MemberNode</c> → owning tree VM. O(1) replacement for any
     /// path-string walk; unambiguous in multi-DB sessions where the same
-    /// path string can appear in multiple DBs (#82).
+    /// path string can appear in multiple DBs (#82). Backed by
+    /// <see cref="TreeIndex"/>.
     /// </summary>
-    public IReadOnlyDictionary<MemberNode, MemberNodeViewModel> ModelToVm => _modelToVm;
+    public IReadOnlyDictionary<MemberNode, MemberNodeViewModel> ModelToVm => _treeIndex.ModelToVm;
 
     /// <summary>
     /// <c>MemberNode</c> → owning <c>ActiveDb</c>. Used by the host's
     /// pending-edit store + multi-DB scope routing to write back to the
-    /// right tree / xml.
+    /// right tree / xml. Backed by <see cref="TreeIndex"/>.
     /// </summary>
-    public IReadOnlyDictionary<MemberNode, ActiveDb> ModelToDb => _modelToDb;
+    public IReadOnlyDictionary<MemberNode, ActiveDb> ModelToDb => _treeIndex.ModelToDb;
 
     /// <summary>
     /// <c>ActiveDb</c> → its synthetic group root in the multi-DB tree.
@@ -133,9 +146,9 @@ public class MemberTreeViewModel : ViewModelBase
     /// through <see cref="RootMembers"/> directly). Used by
     /// <see cref="FindNodeByPathInDb"/> and by the host's
     /// <c>ApplyAllFilters</c> to route per-DB filter sets to the correct
-    /// subtree.
+    /// subtree. Backed by <see cref="TreeIndex"/>.
     /// </summary>
-    public IReadOnlyDictionary<ActiveDb, MemberNodeViewModel> DbToSynthetic => _dbToSynthetic;
+    public IReadOnlyDictionary<ActiveDb, MemberNodeViewModel> DbToSynthetic => _treeIndex.DbToSynthetic;
 
     public ICommand ExpandAllCommand { get; }
     public ICommand CollapseAllCommand { get; }
@@ -149,23 +162,65 @@ public class MemberTreeViewModel : ViewModelBase
     public event Action? RootsRebuilt;
 
     /// <summary>
-    /// Rebuilds <see cref="RootMembers"/> + the three lookup dictionaries
-    /// from the current active-DB set. Single-DB session puts top-level
-    /// members of the anchor DB directly at root; multi-DB session creates
-    /// one synthetic group per DB. Fires <see cref="RootsRebuilt"/> when
-    /// the new shape is ready.
+    /// Rebuilds <see cref="RootMembers"/> + the <see cref="TreeIndex"/>
+    /// snapshot from the current active-DB set. Single-DB session puts
+    /// top-level members of the anchor DB directly at root; multi-DB
+    /// session creates one synthetic group per DB. Fires
+    /// <see cref="RootsRebuilt"/> once <see cref="RootMembers"/> and
+    /// <see cref="_treeIndex"/> are both fully populated — readers in the
+    /// handler observe a consistent tree (#79).
     /// </summary>
     public void BuildRootMembersFromActiveDbs()
     {
-        // Always rebuild the routing dictionaries so every model node is
-        // mapped to its current VM + owning DB. Stale entries from a prior
-        // tree would route writes to disposed VMs.
-        _modelToVm.Clear();
-        _modelToDb.Clear();
-        _dbToSynthetic.Clear();
-        RootMembers.Clear();
-
         var activeDbs = _getActiveDbs();
+        var anchorPlc = _getCurrentPlcName();
+
+        // Build the new roots + new index snapshot into local builders. No
+        // mutation of _treeIndex or RootMembers happens until the walk is
+        // complete, so a subscribe callback that touches MemberTreeViewModel
+        // mid-build (e.g. a property-changed handler) still sees the prior
+        // consistent snapshot.
+        var (newRoots, newIndex) = BuildTreeIndex(
+            activeDbs, anchorPlc, _commentLanguagePolicy, _subscribeToVm);
+
+        // Atomic install: replace the index in one assignment, then refresh
+        // RootMembers in place (kept as ObservableCollection for WPF
+        // bindings on the TreeView/ListView). Order matters: any handler
+        // wired to RootMembers' CollectionChanged would read TreeIndex via
+        // ModelToVm — assign the index first so those reads observe the
+        // new state.
+        _treeIndex = newIndex;
+        RootMembers.Clear();
+        foreach (var root in newRoots)
+            RootMembers.Add(root);
+
+        RootsRebuilt?.Invoke();
+    }
+
+    /// <summary>
+    /// Pure tree-build (#79 Phase 2): consumes the current active-DB set +
+    /// anchor PLC name and produces the new top-level VM list paired with a
+    /// fresh <see cref="TreeIndexState"/>. No side effects on
+    /// <see cref="MemberTreeViewModel"/> state — callers install the result
+    /// atomically.
+    ///
+    /// <para>
+    /// The per-VM <paramref name="subscribeToVm"/> callback is invoked
+    /// during the walk (non-recursive contract, #108). That's the only
+    /// observable side effect — every other store touched here is a local
+    /// builder.
+    /// </para>
+    /// </summary>
+    private static (List<MemberNodeViewModel> Roots, TreeIndexState Index) BuildTreeIndex(
+        IReadOnlyList<ActiveDb> activeDbs,
+        string anchorPlc,
+        CommentLanguagePolicy commentLanguagePolicy,
+        Action<MemberNodeViewModel> subscribeToVm)
+    {
+        var roots = new List<MemberNodeViewModel>();
+        var modelToVm = new Dictionary<MemberNode, MemberNodeViewModel>();
+        var modelToDb = new Dictionary<MemberNode, ActiveDb>();
+        var dbToSynthetic = new Dictionary<ActiveDb, MemberNodeViewModel>();
 
         if (activeDbs.Count == 1)
         {
@@ -173,19 +228,19 @@ public class MemberTreeViewModel : ViewModelBase
             var only = activeDbs[0];
             foreach (var member in only.Info.Members)
             {
-                var vm = new MemberNodeViewModel(member, null, _commentLanguagePolicy);
-                // #108: _subscribeToVm is non-recursive by contract, so the
-                // slice walks the subtree itself. Subscribe the root, then
+                var vm = new MemberNodeViewModel(member, null, commentLanguagePolicy);
+                // #108: subscribeToVm is non-recursive by contract, so the
+                // builder walks the subtree itself. Subscribe the root, then
                 // every descendant — same per-node fan-out as the multi-DB
-                // path in AddDbGroupRoot.
-                _subscribeToVm(vm);
+                // path in BuildDbGroupRoot.
+                subscribeToVm(vm);
                 foreach (var descendant in vm.AllDescendants())
-                    _subscribeToVm(descendant);
-                IndexSubtree(vm, only);
-                RootMembers.Add(vm);
+                    subscribeToVm(descendant);
+                IndexSubtree(vm, only, modelToVm, modelToDb);
+                roots.Add(vm);
             }
         }
-        else
+        else if (activeDbs.Count > 1)
         {
             // Multi-DB: one synthetic group node per DB. Children are the DB's
             // real top-level members, reused by reference — Path strings stay
@@ -197,10 +252,9 @@ public class MemberTreeViewModel : ViewModelBase
             //
             // #82: every ActiveDb (including the anchor) carries its own
             // PlcName now, so the prefix lookup is uniform — no index-0
-            // special case. The getCurrentPlcName callback is kept for
-            // back-compat with hosts that may still seed the anchor with an
-            // empty PlcName; we prefer db.PlcName when it's non-empty.
-            var anchorPlc = _getCurrentPlcName();
+            // special case. The anchorPlc fallback is kept for back-compat
+            // with hosts that may still seed the anchor with an empty
+            // PlcName; we prefer db.PlcName when it's non-empty.
             var nameCounts = activeDbs
                 .GroupBy(d => d.Info.Name, StringComparer.Ordinal)
                 .ToDictionary(g => g.Key, g => g.Count(), StringComparer.Ordinal);
@@ -214,14 +268,26 @@ public class MemberTreeViewModel : ViewModelBase
                 var displayName = collides && !string.IsNullOrEmpty(plc)
                     ? $"{plc} / {db.Info.Name}"
                     : db.Info.Name;
-                AddDbGroupRoot(db, displayName);
+                var groupVm = BuildDbGroupRoot(
+                    db, displayName, commentLanguagePolicy, subscribeToVm,
+                    modelToVm, modelToDb);
+                dbToSynthetic[db] = groupVm;
+                roots.Add(groupVm);
             }
         }
+        // activeDbs.Count == 0: roots/index stay empty — same as legacy
+        // (the old method cleared the dicts and never populated them).
 
-        RootsRebuilt?.Invoke();
+        return (roots, new TreeIndexState(modelToVm, modelToDb, dbToSynthetic));
     }
 
-    private void AddDbGroupRoot(ActiveDb db, string displayName)
+    private static MemberNodeViewModel BuildDbGroupRoot(
+        ActiveDb db,
+        string displayName,
+        CommentLanguagePolicy commentLanguagePolicy,
+        Action<MemberNodeViewModel> subscribeToVm,
+        Dictionary<MemberNode, MemberNodeViewModel> modelToVm,
+        Dictionary<MemberNode, ActiveDb> modelToDb)
     {
         var info = db.Info;
         var synthetic = new MemberNode(
@@ -231,18 +297,17 @@ public class MemberTreeViewModel : ViewModelBase
             path: info.Name,
             parent: null,
             children: info.Members);
-        var groupVm = new MemberNodeViewModel(synthetic, null, _commentLanguagePolicy);
+        var groupVm = new MemberNodeViewModel(synthetic, null, commentLanguagePolicy);
         // Subscribe edited-value events on every minted VM (the synthetic
         // group root + every real descendant) so inline edits in any active
         // DB bubble up to the VM the same way single-DB edits do. The
         // synthetic group's StartValue is null and never raises the event,
         // but subscribing it keeps the "one callback per minted VM" contract
         // simple — see #108.
-        _subscribeToVm(groupVm);
+        subscribeToVm(groupVm);
         foreach (var descendant in groupVm.AllDescendants())
-            _subscribeToVm(descendant);
+            subscribeToVm(descendant);
         groupVm.IsExpanded = true;
-        _dbToSynthetic[db] = groupVm;
         // Map every real (non-synthetic) descendant to its VM + owning DB so
         // multi-DB scope hits route writes to the right tree / xml.
         foreach (var descendant in groupVm.AllDescendants())
@@ -252,26 +317,30 @@ public class MemberTreeViewModel : ViewModelBase
             // against the synthetic instance avoids relying on Datatype string
             // matching, which is fragile.
             if (ReferenceEquals(descendant.Model, synthetic)) continue;
-            _modelToVm[descendant.Model] = descendant;
-            _modelToDb[descendant.Model] = db;
+            modelToVm[descendant.Model] = descendant;
+            modelToDb[descendant.Model] = db;
         }
-        RootMembers.Add(groupVm);
+        return groupVm;
     }
 
     /// <summary>
     /// Indexes every node in <paramref name="rootVm"/>'s subtree (root
-    /// included) into <see cref="_modelToVm"/> + <see cref="_modelToDb"/>.
-    /// Used by the single-DB code path; multi-DB indexes inside
-    /// <see cref="AddDbGroupRoot"/> with the synthetic-skip rule.
+    /// included) into the supplied builder dicts. Used by the single-DB
+    /// code path; multi-DB indexes inside <see cref="BuildDbGroupRoot"/>
+    /// with the synthetic-skip rule.
     /// </summary>
-    private void IndexSubtree(MemberNodeViewModel rootVm, ActiveDb db)
+    private static void IndexSubtree(
+        MemberNodeViewModel rootVm,
+        ActiveDb db,
+        Dictionary<MemberNode, MemberNodeViewModel> modelToVm,
+        Dictionary<MemberNode, ActiveDb> modelToDb)
     {
-        _modelToVm[rootVm.Model] = rootVm;
-        _modelToDb[rootVm.Model] = db;
+        modelToVm[rootVm.Model] = rootVm;
+        modelToDb[rootVm.Model] = db;
         foreach (var descendant in rootVm.AllDescendants())
         {
-            _modelToVm[descendant.Model] = descendant;
-            _modelToDb[descendant.Model] = db;
+            modelToVm[descendant.Model] = descendant;
+            modelToDb[descendant.Model] = db;
         }
     }
 
@@ -355,7 +424,7 @@ public class MemberTreeViewModel : ViewModelBase
     /// naturally (#82).
     /// </summary>
     public MemberNodeViewModel? FindVmByModel(MemberNode model) =>
-        _modelToVm.TryGetValue(model, out var vm) ? vm : null;
+        _treeIndex.ModelToVm.TryGetValue(model, out var vm) ? vm : null;
 
     /// <summary>
     /// Returns the active DB that owns <paramref name="model"/>, or null
@@ -363,7 +432,7 @@ public class MemberTreeViewModel : ViewModelBase
     /// from before the last <c>RefreshTree</c>).
     /// </summary>
     public ActiveDb? FindActiveDbForModel(MemberNode model) =>
-        _modelToDb.TryGetValue(model, out var db) ? db : null;
+        _treeIndex.ModelToDb.TryGetValue(model, out var db) ? db : null;
 
     /// <summary>
     /// DB-scoped path lookup (#82). The bare-path overload was removed
@@ -374,7 +443,7 @@ public class MemberTreeViewModel : ViewModelBase
     /// Works in both tree shapes:
     /// <list type="bullet">
     ///   <item>Multi-DB shape: walks <paramref name="owner"/>'s synthetic
-    ///   subtree via <see cref="_dbToSynthetic"/>.</item>
+    ///   subtree via <see cref="DbToSynthetic"/>.</item>
     ///   <item>Single-DB shape: walks <see cref="RootMembers"/> directly
     ///   when <paramref name="owner"/> is the (one) active DB. Anything
     ///   else returns null instead of falling through to a different DB —
@@ -383,7 +452,10 @@ public class MemberTreeViewModel : ViewModelBase
     /// </summary>
     public MemberNodeViewModel? FindNodeByPathInDb(string path, ActiveDb owner)
     {
-        if (_dbToSynthetic.TryGetValue(owner, out var synthetic))
+        // Capture the snapshot once so we read DbToSynthetic and the
+        // dependent walk against the same _treeIndex (#79).
+        var index = _treeIndex;
+        if (index.DbToSynthetic.TryGetValue(owner, out var synthetic))
         {
             foreach (var child in synthetic.Children)
             {
@@ -395,8 +467,8 @@ public class MemberTreeViewModel : ViewModelBase
 
         // Single-DB shape: only resolve when owner is the sole active DB.
         // The lookup dictionaries already pin every model to its owning DB,
-        // so we use _modelToDb as the authoritative "is owner active?" check
-        // without touching the active-set slice.
+        // so we use the active-DB callback as the authoritative "is owner
+        // active?" check without touching the active-set slice.
         var activeDbs = _getActiveDbs();
         if (activeDbs.Count == 1 && ReferenceEquals(activeDbs[0], owner))
         {

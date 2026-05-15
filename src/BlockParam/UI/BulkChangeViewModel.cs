@@ -1568,7 +1568,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     private void ApplyAllFilters()
     {
         // Multi-DB safe (#58): build per-DB search/exclude sets and route
-        // them to each synthetic root via _dbToSynthetic. Path strings are
+        // them to each synthetic root via Tree.DbToSynthetic. Path strings are
         // unique within a DB but identical across DBs that share the
         // structure, so a single shared HashSet<string> would mis-mark same-
         // path leaves in other active DBs as search hits.
@@ -2351,7 +2351,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
 
         // Pair every synthetic root with its ActiveDb so each pending edit
         // is routed to the correct XML buffer + OnApply callback. Multi-PLC
-        // safe (#58 review must-fix #4): _dbToSynthetic is keyed by
+        // safe (#58 review must-fix #4): Tree.DbToSynthetic is keyed by
         // ActiveDb reference, never by name — two PLCs hosting DBs with
         // identical names map to two distinct synthetic roots.
         var perDb = new List<(ActiveDb db, List<(MemberNode Member, string Value)> edits)>();
@@ -2695,7 +2695,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     /// <para>
     /// <b>Non-recursive by contract (#108).</b> Callers passing this as the
     /// <c>subscribeToVm</c> callback to <see cref="MemberTreeViewModel"/> are
-    /// responsible for iterating per node — the slice's <c>AddDbGroupRoot</c>
+    /// responsible for iterating per node — the slice's <c>BuildDbGroupRoot</c>
     /// already walks every descendant of the synthetic group VM, and a
     /// previous recursive implementation here doubled (then N-tupled, by
     /// depth) the handler registrations on every non-leaf descendant in
