@@ -65,7 +65,7 @@ public class PendingEditsViewModelTests
         pressure.EditableStartValue = "42";
 
         var vm = new PendingEditsViewModel(() => 2);
-        vm.Rebuild(new[] { root }, bulkPaths: null);
+        vm.Rebuild(new[] { root }, bulkNodes: null);
 
         vm.PendingEdits.Should().HaveCount(2);
         vm.HasPendingEdits.Should().BeTrue();
@@ -73,14 +73,17 @@ public class PendingEditsViewModelTests
     }
 
     [Fact]
-    public void Rebuild_MarksOverwrittenByBulkWhenPathInBulkSet()
+    public void Rebuild_MarksOverwrittenByBulkWhenNodeInBulkSet()
     {
+        // The bulk-overwrite flag is keyed by VM reference, not path string,
+        // so two DBs sharing a path never alias (#82 / #121).
         var root = BuildTree();
         var speed = FindLeaf(root, "Speed");
         speed.EditableStartValue = "999";
 
         var vm = new PendingEditsViewModel(() => 1);
-        vm.Rebuild(new[] { root }, bulkPaths: new System.Collections.Generic.HashSet<string> { speed.Path });
+        vm.Rebuild(new[] { root },
+            bulkNodes: new System.Collections.Generic.HashSet<MemberNodeViewModel> { speed });
 
         vm.PendingEdits.Should().ContainSingle()
             .Which.WillBeOverwrittenByBulk.Should().BeTrue();

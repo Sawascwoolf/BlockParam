@@ -91,13 +91,16 @@ public class PendingEditsViewModel : ViewModelBase
 
     /// <summary>
     /// Rebuild <see cref="PendingEdits"/> from the current tree state.
-    /// Caller passes the pre-built BulkPreview paths so overwritten flags can
-    /// be set on each entry without the slice scanning the preview itself.
+    /// Caller passes the pre-built BulkPreview VM set so overwritten flags
+    /// can be set on each entry without the slice scanning the preview itself.
+    /// Identity is <see cref="MemberNodeViewModel"/> reference — not path
+    /// string — so two DBs sharing a path never falsely alias (#82 / #121).
     /// </summary>
-    public void Rebuild(IEnumerable<MemberNodeViewModel> roots, HashSet<string>? bulkPaths)
+    public void Rebuild(IEnumerable<MemberNodeViewModel> roots,
+        HashSet<MemberNodeViewModel>? bulkNodes)
     {
         PendingEdits.Clear();
-        CollectPendingEntries(roots, bulkPaths);
+        CollectPendingEntries(roots, bulkNodes);
         OnPropertyChanged(nameof(HasPendingEdits));
         RaiseInvalidPendingChanged();
     }
@@ -140,20 +143,23 @@ public class PendingEditsViewModel : ViewModelBase
     }
 
     private void CollectPendingEntries(IEnumerable<MemberNodeViewModel> nodes,
-        HashSet<string>? bulkPaths)
+        HashSet<MemberNodeViewModel>? bulkNodes)
     {
         foreach (var node in nodes)
         {
             if (node.IsPendingInlineEdit)
             {
-                bool overwritten = bulkPaths != null && bulkPaths.Contains(node.Path);
+                // VM reference equality is unambiguous: two DBs that share a
+                // path string produce two distinct MemberNodeViewModel instances
+                // and will never alias (#82 / #121).
+                bool overwritten = bulkNodes != null && bulkNodes.Contains(node);
                 PendingEdits.Add(new PendingEditEntry(
                     node,
                     node.StartValue ?? "",
                     node.PendingValue ?? "",
                     willBeOverwrittenByBulk: overwritten));
             }
-            CollectPendingEntries(node.Children, bulkPaths);
+            CollectPendingEntries(node.Children, bulkNodes);
         }
     }
 

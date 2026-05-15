@@ -321,6 +321,176 @@ public class BulkChangeViewModelDbSwitcherTests
             "Apply on B doesn't touch the stash dictionary");
     }
 
+    // ── Multi-PLC same-name tests (#121) ────────────────────────────────────
+
+    /// <summary>
+    /// Builds two <see cref="DataBlockInfo"/> instances with the <b>same name</b>
+    /// but different PLC names — the real-world failure mode for multi-PLC
+    /// projects where two PLCs each export a DB called "DB_Shared". Used by
+    /// the <c>RestoreStashOntoLive</c> routing tests.
+    /// </summary>
+    private static (DataBlockInfo infoA, DataBlockInfo infoB,
+                    MemberNode speedA, MemberNode speedB)
+        BuildTwoPlcsSameDbName()
+    {
+        // Both DBs have the SAME name and the SAME member paths — the
+        // combination that was the original #82 bug and is now extended
+        // to the PLC dimension by #121.
+        const string sharedDbName = "DB_Shared";
+
+        var speedA = new MemberNode("Speed", "Int", "100", "Speed", null,
+            Array.Empty<MemberNode>());
+        var infoA = new DataBlockInfo(
+            sharedDbName, 1, "Optimized", "GlobalDB", new[] { speedA });
+
+        var speedB = new MemberNode("Speed", "Int", "200", "Speed", null,
+            Array.Empty<MemberNode>());
+        var infoB = new DataBlockInfo(
+            sharedDbName, 1, "Optimized", "GlobalDB", new[] { speedB });
+
+        return (infoA, infoB, speedA, speedB);
+    }
+
+    [Fact]
+    public void RestoreStashOntoLive_SameDbNameDifferentPlcs_RoutesToPlcADb()
+    {
+        // #121 — RestoreStashOntoLive must route edits to the DB whose
+        // (Name, PlcName) pair matches the stash's Summary, not to whichever
+        // DB happens to sit first when two DBs share a name across PLCs.
+        //
+        // Scenario: anchor = DB_Shared@PLC_A, peer = DB_Shared@PLC_B.
+        // Stage an edit on PLC_A, stash PLC_A (Keep), reactivate PLC_A.
+        // The restored edit must land on PLC_A's Speed, NOT PLC_B's.
+        var (infoA, infoB, _, _) = BuildTwoPlcsSameDbName();
+        const string plcA = "PLC_A";
+        const string plcB = "PLC_B";
+
+        var configLoader = new ConfigLoader(null);
+        var bulkService = new BulkChangeService(new ChangeLogger(), configLoader);
+        var usageTracker = Substitute.For<IUsageTracker>();
+        usageTracker.GetStatus().Returns(new UsageStatus(0, 100));
+        usageTracker.RecordUsage(Arg.Any<int>()).Returns(true);
+
+        var mbx = new FakeMessageBox(YesNoCancelResult.No);  // Keep on chip-close
+
+        // PLC_B peer starts alongside the PLC_A anchor.
+        var peerB = new ActiveDb(infoB, "<Block name='DB_Shared' />",
+            onApply: _ => { }, plcName: plcB);
+
+        var vm = new BulkChangeViewModel(
+            infoA, "<Block name='DB_Shared' />",
+            new HierarchyAnalyzer(), bulkService, usageTracker, configLoader,
+            onApply: _ => { },
+            messageBox: mbx,
+            currentPlcName: plcA,
+            additionalActiveDbs: new[] { peerB },
+            buildActiveDbForSummary: s => s.PlcName == plcA
+                ? new ActiveDb(infoA, "<Block name='DB_Shared' />",
+                    onApply: _ => { }, plcName: plcA)
+                : null);
+
+        vm.AllActiveDbs.Should().HaveCount(2);
+
+        // Locate each DB by its PLC name, then find Speed via the DB-scoped
+        // path lookup so we never rely on a bare FlatMembers walk (#82 / #121).
+        var dbA = vm.AllActiveDbs.First(d => d.PlcName == plcA);
+        var dbB = vm.AllActiveDbs.First(d => d.PlcName == plcB);
+
+        // Stage on PLC_A's Speed.
+        var plcASpeed = vm.Tree.FindNodeByPathInDb("Speed", dbA);
+        plcASpeed.Should().NotBeNull("PLC_A must have a Speed member");
+        plcASpeed!.EditableStartValue = "999";
+
+        // Remove PLC_A anchor → Keep (stash it). PLC_B stays active.
+        vm.ActiveSet.RequestRemoveActiveDb(dbA);
+
+        vm.AllActiveDbs.Should().HaveCount(1);
+        vm.ActiveSet.StashedDbs.Should().ContainSingle();
+        vm.ActiveSet.StashedDbs[0].Summary.PlcName.Should().Be(plcA,
+            "stash must carry the PLC name so re-activation targets the right DB");
+
+        // PLC_B's Speed must be untouched — no cross-DB bleed.
+        // After stashing PLC_A the active set is single-DB (PLC_B), so
+        // FindNodeByPathInDb with dbB should resolve cleanly.
+        var plcBSpeed = vm.Tree.FindNodeByPathInDb("Speed", dbB);
+        plcBSpeed.Should().NotBeNull("PLC_B must still be active with its Speed member");
+        plcBSpeed!.PendingValue.Should().BeNull(
+            "PLC_B's Speed must NOT carry PLC_A's stashed edit");
+
+        // Reactivate PLC_A → Replace (mbx returns No → Replace path in
+        // AskAddOrReplace — PLC_B is now the only active DB, so |active|=1
+        // skips the prompt and goes through the Replace branch automatically).
+        var stash = vm.ActiveSet.StashedDbs[0];
+        vm.ActiveSet.SwitchToStashedDbCommand.Execute(stash);
+
+        vm.AllActiveDbs.Should().HaveCount(1, "Replace path soloed to PLC_A DB");
+
+        // The restored VM must carry the edit — PLC_A's Speed, not PLC_B's.
+        var restoredSpeed = vm.Tree.RootMembers
+            .SelectMany(r => new[] { r }.Concat(r.AllDescendants()))
+            .First(n => n.IsLeaf && n.Name == "Speed");
+        restoredSpeed.PendingValue.Should().Be("999",
+            "stash restore must land on PLC_A's Speed; first-match-by-name " +
+            "across PLCs would silently route to the wrong tree");
+    }
+
+    [Fact]
+    public void StashRestore_SameDbNameDifferentPlcs_CrossDbScopeDoesNotBleedAcrossPlcs()
+    {
+        // #121 — After reactivating a stashed DB whose name is shared across
+        // PLCs, a subsequent cross-DB scope selection must not confuse the two
+        // DB identities.  Specifically: after PLC_A's Speed is restored to 999,
+        // selecting PLC_A's Speed must not carry PLC_B's StartValue (200).
+        var (infoA, infoB, _, _) = BuildTwoPlcsSameDbName();
+        const string plcA = "PLC_A";
+        const string plcB = "PLC_B";
+
+        var configLoader = new ConfigLoader(null);
+        var bulkService = new BulkChangeService(new ChangeLogger(), configLoader);
+        var usageTracker = Substitute.For<IUsageTracker>();
+        usageTracker.GetStatus().Returns(new UsageStatus(0, 100));
+        usageTracker.RecordUsage(Arg.Any<int>()).Returns(true);
+
+        var mbx = new FakeMessageBox(YesNoCancelResult.No);
+
+        // Start with both PLCs active.
+        var peerB = new ActiveDb(infoB, "<Block name='DB_Shared' />",
+            onApply: _ => { }, plcName: plcB);
+
+        var vm = new BulkChangeViewModel(
+            infoA, "<Block name='DB_Shared' />",
+            new HierarchyAnalyzer(), bulkService, usageTracker, configLoader,
+            onApply: _ => { },
+            messageBox: mbx,
+            currentPlcName: plcA,
+            additionalActiveDbs: new[] { peerB });
+
+        vm.AllActiveDbs.Should().HaveCount(2);
+
+        // Find both Speed VMs — synthetic roots in multi-DB shape.
+        var dbA = vm.AllActiveDbs.First(d => d.PlcName == plcA);
+        var dbB = vm.AllActiveDbs.First(d => d.PlcName == plcB);
+
+        // Locate Speed in each DB via the DB-scoped lookup (#82).
+        var speedAVm = vm.Tree.FindNodeByPathInDb("Speed", dbA);
+        var speedBVm = vm.Tree.FindNodeByPathInDb("Speed", dbB);
+
+        speedAVm.Should().NotBeNull("PLC_A's Speed must exist in the tree");
+        speedBVm.Should().NotBeNull("PLC_B's Speed must exist in the tree");
+        speedAVm.Should().NotBeSameAs(speedBVm,
+            "two PLCs with the same DB name must produce distinct VM instances");
+
+        // Both share the same path string.
+        speedAVm!.Path.Should().Be(speedBVm!.Path,
+            "both have a member named Speed at the same depth");
+
+        // Each DB's VM must carry its own StartValue — no aliasing.
+        speedAVm.StartValue.Should().Be("100",
+            "PLC_A's StartValue must reflect infoA's value");
+        speedBVm.StartValue.Should().Be("200",
+            "PLC_B's StartValue must reflect infoB's value");
+    }
+
     /// <summary>
     /// Convenience enum shared across DB-switcher tests. Yes/No/Cancel maps
     /// onto the three named outcomes for each typed prompt method.
