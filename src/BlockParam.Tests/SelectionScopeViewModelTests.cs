@@ -444,6 +444,118 @@ public class SelectionScopeViewModelTests
     }
 
     // ─────────────────────────────────────────────────────────────────────
+    // GetNonLeafItems — extracted from OnListViewSelectionChanged (#84)
+    // ─────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public void GetNonLeafItems_EmptyInput_ReturnsEmpty()
+    {
+        var result = SelectionScopeViewModel.GetNonLeafItems(
+            System.Array.Empty<MemberNodeViewModel>());
+        result.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void GetNonLeafItems_AllLeaves_ReturnsEmpty()
+    {
+        var (_, tree, _) = BuildWithSingleDb();
+        var leaves = tree.RootMembers.Where(r => r.IsLeaf).ToList();
+        leaves.Should().NotBeEmpty("fixture must have at least one leaf");
+
+        var result = SelectionScopeViewModel.GetNonLeafItems(leaves);
+        result.Should().BeEmpty("every input was a leaf — nothing to deselect");
+    }
+
+    [Fact]
+    public void GetNonLeafItems_ParentNodes_AreReturned()
+    {
+        // Build a DB with a nested structure so we have a non-leaf parent.
+        var child = new MemberNode("Speed", "Int", "0", "Motor.Speed", null,
+            System.Array.Empty<MemberNode>());
+        var parent = new MemberNode("Motor", "UDT_Motor", null, "Motor", null,
+            new[] { child });
+        var (_, _, dbs) = Build();
+        var db = new ActiveDb(
+            new DataBlockInfo("DB_Test", 1, "Optimized", "GlobalDB", new[] { parent }),
+            "<Block />");
+        dbs.Add(db);
+
+        var (_, tree, _) = Build();
+        // Rebuild a fresh tree with the nested structure.
+        var dbs2 = new System.Collections.Generic.List<ActiveDb> { db };
+        var tree2 = new MemberTreeViewModel(
+            getActiveDbs: () => dbs2,
+            getCurrentPlcName: () => "",
+            commentLanguagePolicy: new CommentLanguagePolicy(null, null, new[] { "en-GB" }),
+            subscribeToVm: _ => { });
+        tree2.BuildRootMembersFromActiveDbs();
+
+        var parentVm = tree2.RootMembers.First(r => !r.IsLeaf);
+        var childVm = parentVm.Children.First(c => c.IsLeaf);
+
+        // Pass both — only the parent should come back.
+        var result = SelectionScopeViewModel.GetNonLeafItems(
+            new[] { parentVm, childVm });
+
+        result.Should().ContainSingle()
+            .Which.Should().BeSameAs(parentVm,
+                "only the non-leaf parent should be flagged for deselection");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // FilterGhostRemovals — extracted from OnListViewSelectionChanged (#84)
+    // ─────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public void FilterGhostRemovals_EmptyRemoved_ReturnsEmpty()
+    {
+        var (_, tree, _) = BuildWithSingleDb();
+        var leaf = tree.RootMembers.First(r => r.IsLeaf);
+        var stillSelected = new HashSet<MemberNodeViewModel> { leaf };
+
+        var result = SelectionScopeViewModel.FilterGhostRemovals(
+            System.Array.Empty<MemberNodeViewModel>(), stillSelected);
+
+        result.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void FilterGhostRemovals_ItemStillSelected_IsFiltered()
+    {
+        // Simulate WPF ghost-removal: item appears in RemovedItems but is
+        // still in SelectedItems (the singular SelectedItem changed, not the set).
+        var (_, tree, _) = BuildWithSingleDb();
+        var leaf = tree.RootMembers.First(r => r.IsLeaf);
+        var stillSelected = new HashSet<MemberNodeViewModel> { leaf };
+
+        var result = SelectionScopeViewModel.FilterGhostRemovals(
+            new[] { leaf }, stillSelected);
+
+        result.Should().BeEmpty(
+            "item is still in SelectedItems — this is a ghost removal that must " +
+            "be ignored so the manual-selection set is not wrongly shrunk");
+    }
+
+    [Fact]
+    public void FilterGhostRemovals_ItemNotInStillSelected_IsRealRemoval()
+    {
+        var (_, tree, _) = BuildWithSingleDb();
+        var leaves = tree.RootMembers.Where(r => r.IsLeaf).ToList();
+        leaves.Should().HaveCountGreaterOrEqualTo(2,
+            "fixture needs two leaves for this test");
+
+        // leaf[0] was deselected for real; leaf[1] is a ghost removal.
+        var stillSelected = new HashSet<MemberNodeViewModel> { leaves[1] };
+
+        var result = SelectionScopeViewModel.FilterGhostRemovals(
+            new[] { leaves[0], leaves[1] }, stillSelected);
+
+        result.Should().ContainSingle()
+            .Which.Should().BeSameAs(leaves[0],
+                "only the item that is truly absent from SelectedItems is a real deselect");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
     // Fixtures
     // ─────────────────────────────────────────────────────────────────────
 

@@ -318,6 +318,55 @@ public class SelectionScopeViewModel : ViewModelBase
     }
 
     /// <summary>
+    /// Returns the subset of <paramref name="candidates"/> that must be
+    /// removed from the ListView's <c>SelectedItems</c> before a
+    /// multi-select gesture is processed. Per UX contract: only leaf
+    /// members are eligible for manual bulk-edit selection — parent / group
+    /// rows are structural and carry no editable start-value.
+    ///
+    /// <para>
+    /// This is pure, side-effect-free validation logic that lives here so
+    /// it can be unit-tested independently of the WPF ListView (#84).
+    /// Code-behind calls this method and performs the actual
+    /// <c>SelectedItems.Remove</c> calls itself, because ListView mutation
+    /// requires the UI thread and cannot live in a ViewModel.
+    /// </para>
+    /// </summary>
+    public static IReadOnlyList<MemberNodeViewModel> GetNonLeafItems(
+        IEnumerable<MemberNodeViewModel> candidates)
+    {
+        var result = new System.Collections.Generic.List<MemberNodeViewModel>();
+        foreach (var m in candidates)
+        {
+            if (!m.IsLeaf) result.Add(m);
+        }
+        return result;
+    }
+
+    /// <summary>
+    /// Filters <paramref name="removed"/> to exclude ghost removals that
+    /// WPF fires when <c>SelectedItem</c> changes in multi-select mode but
+    /// the item is still present in <c>SelectedItems</c>. A real deselect
+    /// only occurs when the item is no longer in <paramref name="stillSelected"/>.
+    ///
+    /// <para>
+    /// Pure, side-effect-free filtering logic extracted from code-behind
+    /// so it can be unit-tested without a live WPF ListView (#84).
+    /// </para>
+    /// </summary>
+    public static IReadOnlyList<MemberNodeViewModel> FilterGhostRemovals(
+        IEnumerable<MemberNodeViewModel> removed,
+        IReadOnlyCollection<MemberNodeViewModel> stillSelected)
+    {
+        var result = new System.Collections.Generic.List<MemberNodeViewModel>();
+        foreach (var m in removed)
+        {
+            if (!stillSelected.Contains(m)) result.Add(m);
+        }
+        return result;
+    }
+
+    /// <summary>
     /// Set of distinct <c>Datatype</c> strings across the currently
     /// manually-selected leaves. Empty when there are no manual
     /// selections. Used by <see cref="ManualSelectionSummary"/> and

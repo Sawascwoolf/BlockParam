@@ -143,15 +143,15 @@ public partial class BulkChangeDialog : Window
         var removedList = e.RemovedItems.OfType<MemberNodeViewModel>().ToList();
         bool refreshing = vmCheck?.Tree.IsRefreshing == true;
 
-        // Ignore selection changes that are actually caused by the VM mutating
-        // the FlatMembers ObservableCollection during a refresh — they are ghost
-        // removals/additions, not user input.
+        // Ignore selection changes caused by the VM mutating FlatMembers during a
+        // refresh — they are ghost removals/additions, not user input.
         if (_suppressSelectionEvents || refreshing) return;
         if (DataContext is not BulkChangeViewModel vm) return;
 
         // Deselect any non-leaf items that got included in the multi-select.
-        // Per UX decision: only leaf members are selectable for manual bulk edit.
-        var parentsToDrop = addedList.Where(m => !m.IsLeaf).ToList();
+        // Business rule (testable in SelectionScopeViewModel): only leaf members
+        // are selectable for manual bulk edit (#84).
+        var parentsToDrop = SelectionScopeViewModel.GetNonLeafItems(addedList);
         if (parentsToDrop.Count > 0)
         {
             _suppressSelectionEvents = true;
@@ -168,10 +168,11 @@ public partial class BulkChangeDialog : Window
 
         // WPF fires SelectionChanged with RemovedItems=[X] when the singular
         // SelectedItem property changes, even if X is still in SelectedItems
-        // (multi-select). Filter those ghost removals — a real deselect means
-        // the item is no longer in SelectedItems.
-        var stillSelected = MemberListView.SelectedItems.OfType<MemberNodeViewModel>().ToHashSet();
-        var realRemoved = removedList.Where(m => !stillSelected.Contains(m)).ToList();
+        // (multi-select). Filter those ghost removals — business rule now tested
+        // in SelectionScopeViewModel.FilterGhostRemovals (#84).
+        var stillSelected = MemberListView.SelectedItems.OfType<MemberNodeViewModel>()
+            .ToHashSet();
+        var realRemoved = SelectionScopeViewModel.FilterGhostRemovals(removedList, stillSelected);
 
         var added = addedList.Where(m => m.IsLeaf);
         vm.UpdateManualSelection(added, realRemoved, isFilterRehydration: false);
@@ -228,28 +229,8 @@ public partial class BulkChangeDialog : Window
         }
     }
 
-    /// <summary>
-    /// #9: GridView columns have no native star sizing, so we compute it here.
-    /// Fixed columns keep their widths; the Comment column soaks up whatever
-    /// space is left so long comments stop truncating when the dialog is wide.
-    /// </summary>
-    private void OnMemberListSizeChanged(object sender, SizeChangedEventArgs e)
-    {
-        if (CommentColumn == null || NameColumn == null
-            || DataTypeColumn == null || StartValueColumn == null) return;
-
-        // Chrome + vertical scrollbar + row padding. Slightly conservative so
-        // we never force a horizontal scrollbar when space is tight.
-        const double Chrome = 32;
-        var available = MemberListView.ActualWidth
-                        - NameColumn.Width
-                        - DataTypeColumn.Width
-                        - StartValueColumn.Width
-                        - Chrome;
-
-        const double MinCommentWidth = 160;
-        CommentColumn.Width = System.Math.Max(MinCommentWidth, available);
-    }
+    // OnMemberListSizeChanged removed in #84: star-width column sizing moved to
+    // GridViewStarColumnBehavior attached behavior, set directly on MemberListView in XAML.
 
     private void OnListViewDoubleClick(object sender, MouseButtonEventArgs e)
     {

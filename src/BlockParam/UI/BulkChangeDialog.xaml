@@ -4,6 +4,7 @@
         xmlns:local="clr-namespace:BlockParam.UI"
         xmlns:loc="clr-namespace:BlockParam.Localization"
         xmlns:controls="clr-namespace:BlockParam.UI.Controls.PillMultiSelect"
+        xmlns:behaviors="clr-namespace:BlockParam.UI.Controls"
         Title="{Binding ActiveSet.Title}"
                 Width="1100" Height="700"
         MinWidth="800" MinHeight="500"
@@ -339,6 +340,9 @@
                 </StackPanel>
 
                 <!-- Member Table fills the rest of the column -->
+                <!-- #9 / #84: star-width column via attached behavior.
+                     FixedColumnsWidth = NameColumn(280) + DataTypeColumn(140) + StartValueColumn(120) = 540.
+                     The behavior subscribes to SizeChanged internally so no code-behind handler is needed. -->
                 <ListView
                       x:Name="MemberListView"
                       ItemsSource="{Binding Tree.FlatMembers}"
@@ -351,7 +355,8 @@
                       MouseDoubleClick="OnListViewDoubleClick"
                       ContextMenuOpening="OnListViewContextMenuOpening"
                       SelectionChanged="OnListViewSelectionChanged"
-                      SizeChanged="OnMemberListSizeChanged"
+                      behaviors:GridViewStarColumnBehavior.StarColumn="{x:Reference CommentColumn}"
+                      behaviors:GridViewStarColumnBehavior.FixedColumnsWidth="540"
                       ScrollViewer.HorizontalScrollBarVisibility="Disabled">
                 <ListView.ContextMenu>
                     <ContextMenu/>
