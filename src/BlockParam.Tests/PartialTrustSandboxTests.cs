@@ -38,10 +38,18 @@ public sealed class PartialTrustSandboxTests
     [Fact]
     public void PersistenceEnabled_is_verifiable_under_partial_trust()
     {
-        var domain = CreateTiaLikeSandbox();
+        var baseDir = ProbeDir();
+        var domain = CreateTiaLikeSandbox(baseDir);
         try
         {
             var worker = CreateWorker(domain);
+            // vstest resolves BlockParam.dll in the default domain via its
+            // own AssemblyResolver; a bare child-domain ApplicationBase
+            // context does not. Install a resolver in the sandbox BEFORE
+            // ProbeUiZoomService is JIT-compiled (the JIT binds UiZoomService
+            // on method entry, so a missing resolver throws FileNotFound
+            // before the probe's own try/catch can run).
+            worker.InstallAssemblyResolver(baseDir);
             var result = worker.ProbeUiZoomService();
 
             // "A:OK"  -> #131 local-copy discipline present; IL verifies.
@@ -62,10 +70,12 @@ public sealed class PartialTrustSandboxTests
     [Fact]
     public void Sandbox_actually_enforces_IL_verification()
     {
-        var domain = CreateTiaLikeSandbox();
+        var baseDir = ProbeDir();
+        var domain = CreateTiaLikeSandbox(baseDir);
         try
         {
             var worker = CreateWorker(domain);
+            worker.InstallAssemblyResolver(baseDir);
             var result = worker.ProbeCanary();
 
             // "B:REJECTED" is the GOOD outcome: the sandbox verified IL and
@@ -85,21 +95,40 @@ public sealed class PartialTrustSandboxTests
         }
     }
 
+    // Directory holding the built BlockParam.dll + deps (the test output
+    // dir). Not a storage-layer concern: this only computes an AppDomain
+    // ApplicationBase for the test harness — no production path literal,
+    // no File.*/Directory.* against a BlockParam data location.
+    private static string ProbeDir()
+    {
+        var loc = typeof(PartialTrustSandboxTests).Assembly.Location;
+        return !string.IsNullOrEmpty(loc)
+            ? Path.GetDirectoryName(loc)!
+            : AppDomain.CurrentDomain.BaseDirectory;
+    }
+
     /// <summary>
     /// Homogeneous (sandboxed) AppDomain whose grant set mirrors what TIA's
-    /// Add-In Loader gives an Add-In: execution only, no full-trust assembly
-    /// list — so BlockParam.dll receives the partial grant and the CLR runs
-    /// the IL verifier on its methods at JIT, just like inside TIA Portal.
-    /// No FileIOPermission is needed: the probe uses an empty settings path,
-    /// which disables persistence before any storage call is reached.
+    /// Add-In Loader gives an Add-In: a restricted partial-trust set — so
+    /// BlockParam.dll receives the partial grant and the CLR runs the IL
+    /// verifier on its methods at JIT, just like inside TIA Portal.
+    ///
+    /// The grant adds Read/PathDiscovery for <paramref name="baseDir"/> and
+    /// ControlAppDomain purely so the in-sandbox <c>AssemblyResolve</c> hook
+    /// can <c>LoadFrom</c> BlockParam.dll + deps (vstest's own resolver does
+    /// not extend into a child domain). Critically this stays *partial*
+    /// trust — IL verification remains active, which the canary fact
+    /// independently re-proves on every run, so it is never a false green.
     /// </summary>
-    private static AppDomain CreateTiaLikeSandbox()
+    private static AppDomain CreateTiaLikeSandbox(string baseDir)
     {
-        var baseDir = Path.GetDirectoryName(typeof(PartialTrustSandboxTests).Assembly.Location)!;
         var setup = new AppDomainSetup { ApplicationBase = baseDir };
 
         var grant = new PermissionSet(PermissionState.None);
-        grant.AddPermission(new SecurityPermission(SecurityPermissionFlag.Execution));
+        grant.AddPermission(new SecurityPermission(
+            SecurityPermissionFlag.Execution | SecurityPermissionFlag.ControlAppDomain));
+        grant.AddPermission(new FileIOPermission(
+            FileIOPermissionAccess.Read | FileIOPermissionAccess.PathDiscovery, baseDir));
 
         return AppDomain.CreateDomain("BlockParam.PartialTrust.Smoke", null, setup, grant);
     }
@@ -119,6 +148,24 @@ public sealed class PartialTrustSandboxTests
 /// </summary>
 public sealed class PartialTrustWorker : MarshalByRefObject
 {
+    /// <summary>
+    /// Registers an <see cref="AppDomain.AssemblyResolve"/> handler that
+    /// loads any requested assembly from <paramref name="probeDir"/> (the
+    /// test output dir). Runs in the sandbox; references nothing from
+    /// BlockParam.dll, so JIT-compiling it does NOT trigger the very load
+    /// it exists to satisfy. Must be called before any probe.
+    /// </summary>
+    public void InstallAssemblyResolver(string probeDir)
+    {
+        AppDomain.CurrentDomain.AssemblyResolve += (_, args) =>
+        {
+            var simpleName = new AssemblyName(args.Name).Name;
+            if (string.IsNullOrEmpty(simpleName)) return null;
+            var candidate = Path.Combine(probeDir, simpleName! + ".dll");
+            return File.Exists(candidate) ? Assembly.LoadFrom(candidate) : null;
+        };
+    }
+
     /// <summary>
     /// Exercises the exact path TIA's loader hit: constructing the service
     /// (empty path → persistence disabled, zero I/O) and reading
