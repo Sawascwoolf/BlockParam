@@ -61,6 +61,7 @@ Thumbs.db
 ## Workflow video intermediate frames — regenerable via DevLauncher --capture-script.
 ## Only the stitched MP4 + fixtures + scripts are tracked.
 assets/screenshots/workflow/wf*.png
+assets/screenshots/workflow/mdb*.png
 
 ## Pill review composite — regenerated on demand by scripts/review-pill-screenshots.ps1.
 ## The 01-10 canonical scenes are tracked; the stitched composite is not.

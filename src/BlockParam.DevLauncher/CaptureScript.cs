@@ -153,6 +153,17 @@ public sealed class Scene
     /// </summary>
     [JsonProperty("discardAllPending")] public bool? DiscardAllPending { get; set; }
 
+    // ===== Active-set primitives (#96) ======================================
+
+    /// <summary>
+    /// Active-set mutation block for multi-DB chapter scenes (#96).
+    /// Applied before <see cref="Select"/> / <see cref="Scope"/> so that
+    /// DB additions/removals rebuild the tree before member lookup runs.
+    /// </summary>
+    [JsonProperty("activeSet")] public ActiveSetScene? ActiveSet { get; set; }
+
+    // ===== Scene kind =====================================================
+
     /// <summary>
     /// Scene kind. Default (null or "dialog") renders the BulkChangeDialog.
     /// "chapter" marks an intertitle card; the capture loop skips these and
@@ -182,10 +193,17 @@ public sealed class CursorState
     /// <summary>
     /// Named target — resolved after layout so coords track scroll / filter
     /// changes without per-scene hardcoding. Formats:
-    ///   "search"               -> search TextBox in the toolbar
-    ///   "apply"                -> Apply button in the bottom bar
-    ///   "suggestion:&lt;name&gt;"     -> autocomplete row with that DisplayName
-    ///                            (sidebar popup OR inline overlay)
+    ///   "search"                      -> search TextBox in the toolbar
+    ///   "apply"                       -> Apply button in the bottom bar
+    ///   "suggestion:&lt;name&gt;"          -> autocomplete row with that DisplayName
+    ///                                   (sidebar popup OR inline overlay)
+    ///   "addDbButton"                 -> the "+" add-DB button in the pill toolbar
+    ///   "chip:&lt;DbName&gt;"               -> center of the pill trigger that contains
+    ///                                   &lt;DbName&gt; (the chip body for solo)
+    ///   "chipClose:&lt;DbName&gt;"          -> the × (ClearButton) on the pill that
+    ///                                   contains &lt;DbName&gt;
+    ///   "stashHeader:&lt;DbName&gt;"        -> the "PENDING IN &lt;DbName&gt;" header button
+    ///                                   in the stash section of the inspector
     /// </summary>
     [JsonProperty("target")] public string? Target { get; set; }
 }
@@ -212,6 +230,94 @@ public sealed class FilterState
 {
     [JsonProperty("setpointsOnly")] public bool? SetpointsOnly { get; set; }
     [JsonProperty("searchText")] public string? SearchText { get; set; }
+}
+
+/// <summary>
+/// Active-set mutation sub-block for multi-DB chapter scenes (#96).
+/// Fields are applied in declaration order: dropdown open → addPeer →
+/// closeChip → solo → reactivate → promptAnswer is wired before any
+/// of the above that triggers a prompt.
+/// </summary>
+public sealed class ActiveSetScene
+{
+    /// <summary>
+    /// Set <c>vm.ActiveSet.IsAddDbPopupOpen = true</c> so the dropdown
+    /// is visible in the snapshot. Does NOT enumerate or reload the DB
+    /// list — <see cref="AddPeer"/> does that. Use this alone for
+    /// scenes that just show the open dropdown (mdb02, mdb03, mdb04).
+    /// </summary>
+    [JsonProperty("openAddDropdown")] public bool? OpenAddDropdown { get; set; }
+
+    /// <summary>
+    /// DB name to add to the active set via
+    /// <c>vm.ActiveSet.AddActiveDbFromSummary</c>. The DB must exist
+    /// in <c>%TEMP%\BlockParam\</c> (discoverable by
+    /// <c>EnumerateDevLauncherDbs</c>). Also forces the add-DB dropdown
+    /// closed (the real add gesture closes it). Enables mdb05, mdb06,
+    /// mdb07, mdb20.
+    /// </summary>
+    [JsonProperty("addPeer")] public string? AddPeer { get; set; }
+
+    /// <summary>
+    /// DB name whose chip × is clicked — invokes
+    /// <c>vm.ActiveSet.RequestRemoveActiveDb</c>. If the DB has pending
+    /// edits, the <see cref="PromptAnswer"/> answer is consumed by the
+    /// 3-way Apply/Stash/Cancel prompt. Enables mdb16, mdb17, mdb18,
+    /// mdb19.
+    /// </summary>
+    [JsonProperty("closeChip")] public string? CloseChip { get; set; }
+
+    /// <summary>
+    /// DB name to solo — invokes
+    /// <c>vm.ActiveSet.SoloActiveDbByReference</c>. Collapses the active
+    /// set to that single DB; any dropped peers with pending edits
+    /// trigger the prompt (consumed by <see cref="PromptAnswer"/>).
+    /// Enables mdb26, mdb27.
+    /// </summary>
+    [JsonProperty("solo")] public string? Solo { get; set; }
+
+    /// <summary>
+    /// DB name of a stashed DB to reactivate — invokes
+    /// <c>vm.ActiveSet.SwitchToStashedDbCommand</c>. When ≥2 DBs are
+    /// currently active the Add-or-Replace 3-way prompt fires; answer is
+    /// consumed from <see cref="PromptAnswer"/>. Enables mdb21, mdb22,
+    /// mdb23, mdb24, mdb25.
+    /// </summary>
+    [JsonProperty("reactivate")] public string? Reactivate { get; set; }
+
+    /// <summary>
+    /// Canned answer for the NEXT prompt raised during this scene's
+    /// active-set operation. Accepted values:
+    /// <list type="bullet">
+    ///   <item><description><c>"apply"</c>  — Apply &amp; switch (stash prompt)</description></item>
+    ///   <item><description><c>"stash"</c>  — Stash &amp; switch (stash prompt); enables mdb18, mdb19</description></item>
+    ///   <item><description><c>"cancel"</c> — Cancel (any prompt)</description></item>
+    ///   <item><description><c>"add"</c>    — Add alongside (reactivate prompt); enables mdb23, mdb24</description></item>
+    ///   <item><description><c>"replace"</c>— Replace active set (reactivate prompt); enables mdb25</description></item>
+    /// </list>
+    /// Omit for gestures that produce no prompt (adding a DB with no
+    /// pending edits, soloing when nothing is pending, etc.).
+    /// </summary>
+    [JsonProperty("promptAnswer")] public string? PromptAnswer { get; set; }
+
+    /// <summary>
+    /// When true, renders the 3-way prompt as an in-tree overlay in the
+    /// captured frame WITHOUT performing the triggering gesture (#96).
+    /// The overlay shows the text and button labels that the real
+    /// <see cref="BlockParam.UI.ThreeButtonDialog"/> would display, determined
+    /// by which gesture field is set (<see cref="CloseChip"/> →
+    /// Apply/Stash/Cancel; <see cref="Reactivate"/> → Add/Replace/Cancel).
+    /// The overlay is populated from localization strings so the English
+    /// text is correct regardless of OS culture.
+    ///
+    /// <para>
+    /// Use in a scene that captures the prompt visual; follow it with a
+    /// <c>preserveState</c> scene that carries the same gesture +
+    /// <see cref="PromptAnswer"/> to actually dismiss the prompt and
+    /// advance state.
+    /// </para>
+    /// </summary>
+    [JsonProperty("promptCapture")] public bool? PromptCapture { get; set; }
 }
 
 public static class CaptureScriptLoader
@@ -243,12 +349,13 @@ public static class SceneApplier
     /// </summary>
     public static void Apply(Scene scene, BulkChangeViewModel vm, BulkChangeDialog dialog)
     {
-        // Cursor and hover-preview are transient per-scene — always clear
-        // at the top so stale marks from the previous frame don't leak
-        // forward even when preserveState keeps everything else.
+        // Cursor, hover-preview, and prompt overlay are transient per-scene —
+        // always clear at the top so stale marks from the previous frame don't
+        // leak forward even when preserveState keeps everything else.
         dialog.HideCursor();
         ClearHoverPreview(vm, dialog);
         dialog.HideScopeDropdownScripted();
+        dialog.HidePromptOverlayScripted();
 
         // Reset zoom to the default (or per-scene override) so a previous
         // scene's override doesn't leak into subsequent frames.
@@ -264,6 +371,14 @@ public static class SceneApplier
             dialog.HideInlineOverlayScripted();
             dialog.HideInlineHintOverlayScripted();
         }
+
+        // Active-set mutations (#96) run before member-selection / scope so
+        // that tree rebuilds triggered by add/remove land before any path
+        // lookups. The ScriptedMessageBoxService is armed with the scene's
+        // promptAnswer FIRST so it's in place if AddPeer/CloseChip/Solo/
+        // Reactivate immediately raises a 3-way prompt.
+        if (scene.ActiveSet != null)
+            ApplyActiveSet(scene, vm, dialog);
 
         if (scene.Filter != null)
         {
@@ -520,6 +635,198 @@ public static class SceneApplier
         vm.FlushPendingHighlighting();
         vm.FlushPendingSearch();
         vm.RefreshFlatList();
+        // Close the add-DB dropdown so it doesn't leak into the next scene.
+        vm.ActiveSet.IsAddDbPopupOpen = false;
+        vm.ActiveSet.IsDataBlocksDropdownOpen = false;
+    }
+
+    /// <summary>
+    /// Applies the <see cref="Scene.ActiveSet"/> block to the live VM.
+    /// Order: arm prompt answer → openAddDropdown → addPeer → closeChip →
+    /// solo → reactivate. The prompt answer is armed first so the
+    /// ScriptedMessageBoxService already has it when any of the above
+    /// immediately raises a 3-way dialog.
+    ///
+    /// <para>
+    /// When <see cref="ActiveSetScene.PromptCapture"/> is true, the triggering
+    /// gesture (<see cref="ActiveSetScene.CloseChip"/> or
+    /// <see cref="ActiveSetScene.Reactivate"/>) is NOT executed. Instead the
+    /// prompt overlay is shown in the captured frame with the English text and
+    /// button labels the real dialog would display (#96). A follow-on scene
+    /// (with <c>preserveState</c>) carries the same gesture + promptAnswer to
+    /// actually dismiss the prompt and advance state.
+    /// </para>
+    /// </summary>
+    private static void ApplyActiveSet(Scene scene, BulkChangeViewModel vm, BulkChangeDialog dialog)
+    {
+        var block = scene.ActiveSet!;
+
+        // When promptCapture=true, show the prompt overlay for the current
+        // frame WITHOUT executing the triggering gesture. The follow-on scene
+        // executes the gesture and consumes the scripted answer.
+        if (block.PromptCapture == true)
+        {
+            ShowPromptOverlayForScene(block, vm, dialog);
+            return;
+        }
+
+        // Arm the scripted prompt answer before any gesture that may raise one.
+        if (vm.MessageBoxService is ScriptedMessageBoxService scripted
+            && block.PromptAnswer != null)
+        {
+            scripted.PromptAnswer = block.PromptAnswer;
+        }
+
+        // Open the add-DB dropdown overlay (visual only — does not add a DB).
+        if (block.OpenAddDropdown == true)
+        {
+            // Force the available list to be loaded so the overlay populates.
+            if (vm.ActiveSet.OpenDataBlocksDropdownCommand.CanExecute(null))
+                vm.ActiveSet.OpenDataBlocksDropdownCommand.Execute(null);
+            else
+                vm.ActiveSet.IsAddDbPopupOpen = true;
+        }
+
+        // Add a peer DB by name.
+        if (block.AddPeer != null)
+        {
+            // Look up the summary from the DB enumeration so PlcName is set correctly.
+            var available = vm.ActiveSet.State.Dbs;
+            // Force the available list to load if not yet done.
+            if (vm.ActiveSet.OpenDataBlocksDropdownCommand.CanExecute(null))
+                vm.ActiveSet.OpenDataBlocksDropdownCommand.Execute(null);
+
+            var summary = vm.ActiveSet.FilteredDataBlocks
+                .FirstOrDefault(s => string.Equals(s.Name, block.AddPeer,
+                    System.StringComparison.OrdinalIgnoreCase));
+
+            if (summary == null)
+            {
+                Serilog.Log.Warning(
+                    "Scene {Id}: activeSet.addPeer '{Name}' not found in FilteredDataBlocks; " +
+                    "is the fixture in %TEMP%\\BlockParam\\?",
+                    scene.Id, block.AddPeer);
+            }
+            else
+            {
+                vm.ActiveSet.AddActiveDbFromSummary(summary);
+                Serilog.Log.Information(
+                    "Scene {Id}: activeSet.addPeer added {Name}", scene.Id, summary.Name);
+            }
+            // Close the dropdown — the real gesture closes it after adding.
+            vm.ActiveSet.IsAddDbPopupOpen = false;
+            vm.ActiveSet.IsDataBlocksDropdownOpen = false;
+        }
+
+        // Close a chip by DB name (triggers Apply/Stash/Cancel prompt if pending).
+        if (block.CloseChip != null)
+        {
+            var db = vm.ActiveSet.State.Dbs
+                .FirstOrDefault(d => string.Equals(d.Info.Name, block.CloseChip,
+                    System.StringComparison.OrdinalIgnoreCase));
+            if (db == null)
+            {
+                Serilog.Log.Warning(
+                    "Scene {Id}: activeSet.closeChip '{Name}' not found in active set (active: {Active})",
+                    scene.Id, block.CloseChip,
+                    string.Join(", ", vm.ActiveSet.State.Dbs.Select(d => d.Info.Name)));
+            }
+            else
+            {
+                vm.ActiveSet.RequestRemoveActiveDb(db);
+                Serilog.Log.Information(
+                    "Scene {Id}: activeSet.closeChip requested remove of {Name}", scene.Id, db.Info.Name);
+            }
+        }
+
+        // Solo a DB by name (collapses active set to just that DB).
+        if (block.Solo != null)
+        {
+            var db = vm.ActiveSet.State.Dbs
+                .FirstOrDefault(d => string.Equals(d.Info.Name, block.Solo,
+                    System.StringComparison.OrdinalIgnoreCase));
+            if (db == null)
+            {
+                Serilog.Log.Warning(
+                    "Scene {Id}: activeSet.solo '{Name}' not found in active set",
+                    scene.Id, block.Solo);
+            }
+            else
+            {
+                vm.ActiveSet.SoloActiveDbByReference(db);
+                Serilog.Log.Information(
+                    "Scene {Id}: activeSet.solo → {Name}", scene.Id, db.Info.Name);
+            }
+        }
+
+        // Reactivate a stashed DB by name.
+        if (block.Reactivate != null)
+        {
+            var stash = vm.ActiveSet.StashedDbs
+                .FirstOrDefault(s => string.Equals(s.DbName, block.Reactivate,
+                    System.StringComparison.OrdinalIgnoreCase));
+            if (stash == null)
+            {
+                Serilog.Log.Warning(
+                    "Scene {Id}: activeSet.reactivate '{Name}' not found in stashed DBs (stashed: {Stashed})",
+                    scene.Id, block.Reactivate,
+                    string.Join(", ", vm.ActiveSet.StashedDbs.Select(s => s.DbName)));
+            }
+            else
+            {
+                vm.ActiveSet.SwitchToStashedDbCommand.Execute(stash);
+                Serilog.Log.Information(
+                    "Scene {Id}: activeSet.reactivate → {Name}", scene.Id, stash.DbName);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Populates and shows the <c>PromptOverlay</c> inside the dialog for
+    /// capture-mode frames that need the 3-way prompt visible (#96).
+    /// Determines prompt kind from the active-set block fields:
+    ///   • <see cref="ActiveSetScene.CloseChip"/> → Apply/Stash/Cancel prompt
+    ///   • <see cref="ActiveSetScene.Reactivate"/> → Add/Replace/Cancel prompt
+    /// Text is built from the same localization strings the real
+    /// <see cref="BlockParam.UI.WpfMessageBoxService"/> uses, so English text
+    /// is correct when running with en-US culture (as capture mode forces).
+    /// </summary>
+    private static void ShowPromptOverlayForScene(
+        ActiveSetScene block, BulkChangeViewModel vm, BulkChangeDialog dialog)
+    {
+        // --- Apply/Stash/Cancel: triggered by closeChip ---
+        if (block.CloseChip != null)
+        {
+            var db = vm.ActiveSet.State.Dbs
+                .FirstOrDefault(d => string.Equals(d.Info.Name, block.CloseChip,
+                    System.StringComparison.OrdinalIgnoreCase));
+            int pendingCount = db != null ? vm.Pending.PendingEdits.Count : 1;
+            string dbName = block.CloseChip;
+            var message = BlockParam.Localization.Res.Format(
+                "Dialog_SwitchDb_KeepConfirm_Text", pendingCount, dbName);
+            dialog.ShowPromptOverlayScripted(
+                message,
+                BlockParam.Localization.Res.Get("Dialog_SwitchDb_KeepConfirm_ApplyButton"),
+                BlockParam.Localization.Res.Get("Dialog_SwitchDb_KeepConfirm_StashButton"),
+                BlockParam.Localization.Res.Get("Dialog_Cancel"));
+            return;
+        }
+
+        // --- Add/Replace/Cancel: triggered by reactivate ---
+        if (block.Reactivate != null)
+        {
+            var message = BlockParam.Localization.Res.Format(
+                "Reactivate_AdditiveOrReplace_Text", block.Reactivate);
+            dialog.ShowPromptOverlayScripted(
+                message,
+                BlockParam.Localization.Res.Get("Reactivate_AdditiveOrReplace_AddButton"),
+                BlockParam.Localization.Res.Get("Reactivate_AdditiveOrReplace_ReplaceButton"),
+                BlockParam.Localization.Res.Get("Dialog_Cancel"));
+            return;
+        }
+
+        Serilog.Log.Warning(
+            "[promptCapture] No closeChip or reactivate gesture specified — cannot determine prompt kind");
     }
 
     private static void CollapseRecursive(MemberNodeViewModel node)
