@@ -182,11 +182,11 @@ public class TreeIndexStateTests
     }
 
     [Fact]
-    public void BuildIsAtomic_RootsRebuiltHandlerSeesConsistentSnapshot()
+    public void RootsRebuiltHandler_SeesFullyPopulatedIndex()
     {
-        // The slice's RootsRebuilt event fires after both RootMembers and
-        // _treeIndex are installed. Any handler — including the host's
-        // pending-edit seeder — must observe a consistent snapshot where
+        // Honest scope: RootsRebuilt fires after both _treeIndex and RootMembers
+        // are fully installed. Any handler — including the host's pending-edit
+        // seeder (SeedVmsFromStore) — must observe a consistent snapshot where
         // every reachable node is indexed (#79 atomicity guarantee).
         var (dbA, _, _) = MakeNestedDb("DB_A");
         var (dbB, _, _) = MakeNestedDb("DB_B");
@@ -212,6 +212,46 @@ public class TreeIndexStateTests
 
         sawConsistentState.Should().BeTrue(
             "RootsRebuilt must fire only after the index covers every reachable real node");
+    }
+
+    [Fact]
+    public void PropertyChanged_RootMembers_SeesFullyPopulatedIndex()
+    {
+        // Regression guard for the partial-state seam (#122): when RootMembers
+        // is replaced by a fresh ObservableCollection, PropertyChanged fires once.
+        // The index must already be fully populated at that point so any binding
+        // handler reading Tree.ModelToVm sees a consistent snapshot.
+        var (dbA, _, _) = MakeNestedDb("DB_A");
+        var (dbB, _, _) = MakeNestedDb("DB_B");
+        var vm = Build(activeDbs: new[] { dbA, dbB });
+
+        bool sawConsistentState = false;
+        int propertyChangedCount = 0;
+        vm.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName != nameof(vm.RootMembers)) return;
+            propertyChangedCount++;
+
+            // At the moment the property fires the new collection must be
+            // fully populated and every real node must be in the index.
+            var syntheticModels = new HashSet<MemberNode>(
+                vm.TreeIndex.DbToSynthetic.Values.Select(v => v.Model));
+            var reachableReal = vm.RootMembers
+                .SelectMany(r => new[] { r }.Concat(r.AllDescendants()))
+                .Where(n => !syntheticModels.Contains(n.Model))
+                .ToList();
+            // RootMembers is the new fully-populated collection at this point
+            // (swap already done). Verify the index matches it completely.
+            sawConsistentState = reachableReal.Count > 0
+                && reachableReal.All(n => vm.TreeIndex.ModelToVm.ContainsKey(n.Model));
+        };
+
+        vm.BuildRootMembersFromActiveDbs();
+
+        propertyChangedCount.Should().Be(1,
+            "RootMembers swap must raise exactly one PropertyChanged, not N+1 CollectionChanged events");
+        sawConsistentState.Should().BeTrue(
+            "index must be fully populated before the RootMembers PropertyChanged fires (#122)");
     }
 
     // ─────────────────────────────────────────────────────────────────────
