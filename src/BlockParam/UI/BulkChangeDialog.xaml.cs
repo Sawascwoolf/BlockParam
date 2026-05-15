@@ -1,6 +1,7 @@
 using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
 using BlockParam.Diagnostics;
@@ -492,6 +493,84 @@ public partial class BulkChangeDialog : Window
     }
 
     /// <summary>
+    /// Finds the <c>PillTrigger</c> ToggleButton of the PillMultiSelect that
+    /// contains the given DB name. Walks the pill-row ItemsControl, then
+    /// descends into each PillMultiSelect's visual tree looking for a
+    /// "PillTrigger" ToggleButton. The pill that contains <paramref name="dbName"/>
+    /// is the one whose <see cref="PlcPillViewModel.AvailableDbs"/> includes an
+    /// item with that DB name.
+    /// </summary>
+    private ToggleButton? FindPillTriggerForDb(string dbName)
+    {
+        UpdateLayout();
+        foreach (var pill in FindAllDescendants<Controls.PillMultiSelect.PillMultiSelect>(this))
+        {
+            if (PillContainsDb(pill, dbName))
+                return FindDescendant<ToggleButton>(pill, "PillTrigger");
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// Finds the <c>ClearButton</c> Button (the × to clear/close the pill)
+    /// of the PillMultiSelect that contains the given DB name.
+    /// </summary>
+    private Button? FindPillClearButtonForDb(string dbName)
+    {
+        UpdateLayout();
+        foreach (var pill in FindAllDescendants<Controls.PillMultiSelect.PillMultiSelect>(this))
+        {
+            if (PillContainsDb(pill, dbName))
+                return FindDescendant<Button>(pill, "ClearButton");
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// Returns true when any item in <paramref name="pill"/>'s AvailableDbs
+    /// has a Name that matches <paramref name="dbName"/> (case-insensitive).
+    /// </summary>
+    private static bool PillContainsDb(Controls.PillMultiSelect.PillMultiSelect pill, string dbName)
+    {
+        if (pill.DataContext is not PlcPillViewModel vm) return false;
+        return vm.AvailableDbs.Any(item =>
+            string.Equals(item.Name, dbName, System.StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// Finds the "PENDING IN &lt;DbName&gt;" header Button in the stash section
+    /// of the inspector panel. Walks the <see cref="StashedDbsList"/> and
+    /// returns the Button whose CommandParameter is the
+    /// <see cref="StashedDbState"/> whose <see cref="StashedDbState.DbName"/>
+    /// matches <paramref name="dbName"/>.
+    /// </summary>
+    private Button? FindStashHeaderButton(string dbName)
+    {
+        UpdateLayout();
+        foreach (var item in StashedDbsList.Items)
+        {
+            if (item is StashedDbState stash
+                && string.Equals(stash.DbName, dbName, System.StringComparison.OrdinalIgnoreCase))
+            {
+                var container = StashedDbsList.ItemContainerGenerator
+                    .ContainerFromItem(item) as FrameworkElement;
+                if (container == null) return null;
+                // The stash header template has a Button whose Command is
+                // SwitchToStashedDbCommand. It is the DockPanel-hosted Button
+                // (the second button in template order after the expand ToggleButton).
+                // We match by the CommandParameter being the stash item.
+                foreach (var btn in FindAllDescendants<Button>(container))
+                {
+                    if (btn.CommandParameter is StashedDbState s
+                        && string.Equals(s.DbName, dbName, System.StringComparison.OrdinalIgnoreCase))
+                        return btn;
+                }
+            }
+        }
+        return null;
+    }
+
+    /// <summary>
     /// Scripted-only: paints the cursor overlay at window-relative (x, y).
     /// Coordinates are in DIPs (same space as the viewport config). Hotspot
     /// is the cursor tip at (0, 0) after the translation.
@@ -609,6 +688,30 @@ public partial class BulkChangeDialog : Window
         {
             element = FindInlineCell(target.Substring("cell:".Length));
             xInset = 20; // over the cell text, not its right-edge dropdown arrow
+        }
+        else if (target == "addDbButton")
+        {
+            // The "+" add-DB button in the pill toolbar (visible when CanAddPlc is true).
+            element = AddDbButton;
+            xInset = AddDbButton.ActualWidth * 0.5;
+        }
+        else if (target.StartsWith("chip:"))
+        {
+            // Pill trigger body for the pill that contains the given DB name.
+            element = FindPillTriggerForDb(target.Substring("chip:".Length));
+            xInset = element != null ? element.ActualWidth * 0.5 : 0;
+        }
+        else if (target.StartsWith("chipClose:"))
+        {
+            // ClearButton (×) on the pill that contains the given DB name.
+            element = FindPillClearButtonForDb(target.Substring("chipClose:".Length));
+            xInset = element != null ? element.ActualWidth * 0.5 : 0;
+        }
+        else if (target.StartsWith("stashHeader:"))
+        {
+            // "PENDING IN <DbName>" header button in the stash section.
+            element = FindStashHeaderButton(target.Substring("stashHeader:".Length));
+            xInset = element != null ? element.ActualWidth * 0.5 : 0;
         }
         else element = null;
 

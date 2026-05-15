@@ -72,6 +72,16 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     private readonly SimaticMLWriter _writer = new();
     private readonly MemberSearchService _searchService = new();
     private readonly IMessageBoxService _messageBox;
+
+    /// <summary>
+    /// Exposes the message-box service so headless capture tooling (e.g.
+    /// <c>SceneApplier</c>) can cast it to
+    /// <c>ScriptedMessageBoxService</c> and arm the per-scene canned
+    /// answer before invoking an active-set command. Read-only; only the
+    /// constructor wires a concrete implementation.
+    /// </summary>
+    public IMessageBoxService MessageBoxService => _messageBox;
+
     private readonly Action? _onRefreshTagTables;
     private readonly string? _tagTableDir;
     private readonly Action? _onRefreshUdtTypes;
