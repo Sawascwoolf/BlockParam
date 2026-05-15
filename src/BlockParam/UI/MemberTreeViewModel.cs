@@ -114,10 +114,9 @@ public class MemberTreeViewModel : ViewModelBase
     }
 
     /// <summary>
-    /// <c>MemberNode</c> → owning tree VM. O(1) replacement for the
-    /// path-string walk in <see cref="FindNodeByPath"/>; unambiguous in
-    /// multi-DB sessions where the same path string can appear in
-    /// multiple DBs.
+    /// <c>MemberNode</c> → owning tree VM. O(1) replacement for any
+    /// path-string walk; unambiguous in multi-DB sessions where the same
+    /// path string can appear in multiple DBs (#82).
     /// </summary>
     public IReadOnlyDictionary<MemberNode, MemberNodeViewModel> ModelToVm => _modelToVm;
 
@@ -130,9 +129,11 @@ public class MemberTreeViewModel : ViewModelBase
 
     /// <summary>
     /// <c>ActiveDb</c> → its synthetic group root in the multi-DB tree.
-    /// Empty in single-DB sessions. Used by <see cref="FindNodeByPathInDb"/>
-    /// and by the host's <c>ApplyAllFilters</c> to route per-DB filter
-    /// sets to the correct subtree.
+    /// Empty in single-DB sessions (the slice routes those callers
+    /// through <see cref="RootMembers"/> directly). Used by
+    /// <see cref="FindNodeByPathInDb"/> and by the host's
+    /// <c>ApplyAllFilters</c> to route per-DB filter sets to the correct
+    /// subtree.
     /// </summary>
     public IReadOnlyDictionary<ActiveDb, MemberNodeViewModel> DbToSynthetic => _dbToSynthetic;
 
@@ -193,6 +194,12 @@ public class MemberTreeViewModel : ViewModelBase
             // Cross-PLC name collision: two PLCs can each host a DB called
             // "DB_Foo". Tag any colliding synthetic root with its PLC prefix so
             // the user can tell them apart in the tree.
+            //
+            // #82: every ActiveDb (including the anchor) carries its own
+            // PlcName now, so the prefix lookup is uniform — no index-0
+            // special case. The getCurrentPlcName callback is kept for
+            // back-compat with hosts that may still seed the anchor with an
+            // empty PlcName; we prefer db.PlcName when it's non-empty.
             var anchorPlc = _getCurrentPlcName();
             var nameCounts = activeDbs
                 .GroupBy(d => d.Info.Name, StringComparer.Ordinal)
@@ -200,7 +207,9 @@ public class MemberTreeViewModel : ViewModelBase
             for (int i = 0; i < activeDbs.Count; i++)
             {
                 var db = activeDbs[i];
-                var plc = i == 0 ? anchorPlc : db.PlcName;
+                var plc = !string.IsNullOrEmpty(db.PlcName)
+                    ? db.PlcName
+                    : (i == 0 ? anchorPlc : "");
                 bool collides = nameCounts.TryGetValue(db.Info.Name, out var c) && c > 1;
                 var displayName = collides && !string.IsNullOrEmpty(plc)
                     ? $"{plc} / {db.Info.Name}"
@@ -340,10 +349,10 @@ public class MemberTreeViewModel : ViewModelBase
 
     /// <summary>
     /// O(1) resolve of a <see cref="MemberNode"/> to its tree VM via
-    /// <see cref="ModelToVm"/>. Preferred over <see cref="FindNodeByPath"/>
+    /// <see cref="ModelToVm"/>. Preferred over any path-string lookup
     /// when the caller already has the model — same path string in a
     /// different DB is a different model instance, so this disambiguates
-    /// naturally.
+    /// naturally (#82).
     /// </summary>
     public MemberNodeViewModel? FindVmByModel(MemberNode model) =>
         _modelToVm.TryGetValue(model, out var vm) ? vm : null;
@@ -357,44 +366,45 @@ public class MemberTreeViewModel : ViewModelBase
         _modelToDb.TryGetValue(model, out var db) ? db : null;
 
     /// <summary>
-    /// Walks <see cref="RootMembers"/> for a node with the given
-    /// <paramref name="path"/>. In multi-DB sessions prefer
-    /// <see cref="FindNodeByPathInDb"/> — bare path lookup can hit any DB
-    /// that happens to share the path string.
-    /// </summary>
-    public MemberNodeViewModel? FindNodeByPath(string path)
-    {
-        foreach (var root in RootMembers)
-        {
-            var found = FindNodeByPathRecursive(root, path);
-            if (found != null) return found;
-        }
-        return null;
-    }
-
-    /// <summary>
-    /// DB-scoped variant of <see cref="FindNodeByPath"/>. Callers pass this
-    /// when member Paths can repeat across DBs (the stash holds the bare
-    /// member path, not "DbName.MemberPath") — without scoping, a
-    /// reactivate-additive would replay edits onto whichever DB happened
-    /// to be checked first.
+    /// DB-scoped path lookup (#82). The bare-path overload was removed
+    /// because path strings aren't unique across DBs in multi-DB
+    /// sessions — every caller now passes the owning <see cref="ActiveDb"/>
+    /// so the resolution is unambiguous regardless of tree shape.
     ///
-    /// Strict: callers must only invoke this when the active set is in
-    /// multi-DB shape (i.e. after the State cascade has populated
-    /// <see cref="_dbToSynthetic"/> for <paramref name="owner"/>). If the
-    /// synthetic root isn't found, returns null — a future ordering bug
-    /// surfaces as "stashed edit dropped" instead of silently aliasing
-    /// onto another DB. (The diagnostic log call lives on the host;
-    /// the slice intentionally has no <c>Serilog</c> dependency.)
+    /// Works in both tree shapes:
+    /// <list type="bullet">
+    ///   <item>Multi-DB shape: walks <paramref name="owner"/>'s synthetic
+    ///   subtree via <see cref="_dbToSynthetic"/>.</item>
+    ///   <item>Single-DB shape: walks <see cref="RootMembers"/> directly
+    ///   when <paramref name="owner"/> is the (one) active DB. Anything
+    ///   else returns null instead of falling through to a different DB —
+    ///   that's exactly the cross-DB aliasing this method exists to prevent.</item>
+    /// </list>
     /// </summary>
     public MemberNodeViewModel? FindNodeByPathInDb(string path, ActiveDb owner)
     {
-        if (!_dbToSynthetic.TryGetValue(owner, out var synthetic))
-            return null;
-        foreach (var child in synthetic.Children)
+        if (_dbToSynthetic.TryGetValue(owner, out var synthetic))
         {
-            var found = FindNodeByPathRecursive(child, path);
-            if (found != null) return found;
+            foreach (var child in synthetic.Children)
+            {
+                var found = FindNodeByPathRecursive(child, path);
+                if (found != null) return found;
+            }
+            return null;
+        }
+
+        // Single-DB shape: only resolve when owner is the sole active DB.
+        // The lookup dictionaries already pin every model to its owning DB,
+        // so we use _modelToDb as the authoritative "is owner active?" check
+        // without touching the active-set slice.
+        var activeDbs = _getActiveDbs();
+        if (activeDbs.Count == 1 && ReferenceEquals(activeDbs[0], owner))
+        {
+            foreach (var root in RootMembers)
+            {
+                var found = FindNodeByPathRecursive(root, path);
+                if (found != null) return found;
+            }
         }
         return null;
     }

@@ -117,7 +117,10 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     // SelectionScopeViewModel slice (#80 slice 7b). Host accesses via
     // Selection.SelectedFlatMember / SelectedScope / ManualSelectedPaths.
     private string _newValue = "";
-    private readonly HashSet<string> _bulkErrorPaths = new(StringComparer.Ordinal);
+    // VM references — not path strings — because the same Path can exist in
+    // multiple active DBs and ClearBulkRowHighlights must target the exact
+    // node that was painted, not the first-match across roots (#82).
+    private readonly HashSet<MemberNodeViewModel> _bulkErrorNodes = new();
     // True once the user has typed in the NewValue textbox. Prefills from the
     // current selection are skipped while this is true, so user-entered input
     // isn't clobbered by selection changes.
@@ -197,7 +200,16 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         // are wired through callbacks so the slice never reaches into
         // _writer / Tree / Subscription. The host subscribes to
         // StateChanged to drive the cross-slice cascade.
-        var initialDbs = new List<ActiveDb> { new ActiveDb(dataBlockInfo, currentXml, onApply) };
+        // Seed the anchor's PlcName from currentPlcName so index-0's identity
+        // (Name, PlcName) matches every other ActiveDb in the set (#82). Before
+        // this, the anchor was constructed with PlcName="" while AnchorPlcName
+        // held the real PLC, forcing every identity check to special-case
+        // index 0. Aligning them lets FindActiveDb / SyncSelectedDbs drop the
+        // fallback and treat index 0 like any peer.
+        var initialDbs = new List<ActiveDb>
+        {
+            new ActiveDb(dataBlockInfo, currentXml, onApply, plcName: currentPlcName ?? ""),
+        };
         if (additionalActiveDbs != null)
             initialDbs.AddRange(additionalActiveDbs);
         ActiveSet = new ActiveSetViewModel(
@@ -852,22 +864,36 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
-    /// Replays a stash's edits onto the live tree (#78). Pure write — does
-    /// NOT pop the stash entry from <c>State.Stashes</c>. Callers
+    /// Replays a stash's edits onto the live tree (#78, #82). Pure write —
+    /// does NOT pop the stash entry from <c>State.Stashes</c>. Callers
     /// that need the entry popped do that separately, ideally as part of
     /// composing the next <see cref="ActiveSetState"/> so the cascade
     /// fires once.
+    ///
+    /// <para>
+    /// <paramref name="scopedTo"/> is the <see cref="ActiveDb"/> that owns
+    /// the stashed edits. It must be passed even on the solo path: the
+    /// member <c>Path</c> string is not unique across DBs, so a null-scope
+    /// fallback would silently land edits on whichever DB happens to be
+    /// first in <see cref="MemberTreeViewModel.RootMembers"/> (#82).
+    /// </para>
     /// </summary>
     private (int restored, int dropped) RestoreStashOntoLive(StashedDbState state, ActiveDb? scopedTo = null)
     {
+        if (scopedTo == null)
+        {
+            Log.Warning(
+                "RestoreStashOntoLive called without scopedTo for {Db} — " +
+                "every edit will be reported as dropped (#82 identity guard)",
+                state.Summary.Name);
+            return (0, state.Edits.Count);
+        }
         int restored = 0;
         int dropped = 0;
         var validator = BuildValidator();
         foreach (var edit in state.Edits)
         {
-            var node = scopedTo != null
-                ? FindNodeByPathInDb(edit.Path, scopedTo)
-                : Tree.FindNodeByPath(edit.Path);
+            var node = FindNodeByPathInDb(edit.Path, scopedTo);
             if (node is { IsLeaf: true })
             {
                 // Restore-without-quota: setting EditableStartValue would route
@@ -1475,22 +1501,24 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
-    /// Diagnostic wrapper around <see cref="MemberTreeViewModel.FindNodeByPathInDb"/>:
-    /// the slice returns null when the active set isn't in multi-DB shape
-    /// yet (its <c>_dbToSynthetic</c> doesn't have an entry for
-    /// <paramref name="owner"/>), the host adds the warn-log so a future
-    /// ordering bug surfaces as "stashed edit dropped" in the log instead
-    /// of silently aliasing onto another DB. The slice intentionally has
-    /// no <c>Serilog</c> dependency.
+    /// Diagnostic wrapper around <see cref="MemberTreeViewModel.FindNodeByPathInDb"/>.
+    /// The slice already handles both tree shapes (multi-DB synthetic
+    /// subtree, and single-DB flat root when <paramref name="owner"/> is
+    /// the sole active DB); the host wrapper only adds a warn-log when the
+    /// active set doesn't include <paramref name="owner"/> at all — that's
+    /// an ordering bug (e.g. resolving against a DB that was just removed)
+    /// and we want it visible in the log instead of silently dropped. The
+    /// slice intentionally has no <c>Serilog</c> dependency.
     /// </summary>
     private MemberNodeViewModel? FindNodeByPathInDb(string path, ActiveDb owner)
     {
-        if (!Tree.DbToSynthetic.ContainsKey(owner))
+        bool ownerIsActive = AllActiveDbs.Any(d => ReferenceEquals(d, owner));
+        if (!ownerIsActive)
         {
             Log.Warning(
-                "FindNodeByPathInDb({Path}) called for {Db} but no synthetic " +
-                "root is registered — active set may not be in multi-DB shape " +
-                "yet; returning null to avoid cross-DB path aliasing",
+                "FindNodeByPathInDb({Path}) called for {Db} but the DB is " +
+                "not in the active set — returning null to avoid cross-DB " +
+                "path aliasing (#82)",
                 path, owner.Info.Name);
             return null;
         }
@@ -1686,7 +1714,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
                     {
                         node.HasInlineError = true;
                         node.InlineErrorMessage = memberError;
-                        _bulkErrorPaths.Add(node.Path);
+                        _bulkErrorNodes.Add(node);
                     }
                     if (firstError == null)
                     {
@@ -1712,20 +1740,23 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     /// <summary>
     /// Clears row-level error highlights set by manual-mode bulk validation,
     /// without touching rows that have their own pending inline edit error.
+    ///
+    /// <para>Identity is by VM reference (#82): the same path can exist in
+    /// multiple active DBs, so a path-string lookup here would clear the
+    /// highlight on the wrong row in multi-DB sessions.</para>
     /// </summary>
     private void ClearBulkRowHighlights()
     {
-        if (_bulkErrorPaths.Count == 0) return;
-        foreach (var path in _bulkErrorPaths)
+        if (_bulkErrorNodes.Count == 0) return;
+        foreach (var n in _bulkErrorNodes)
         {
-            var n = Tree.FindNodeByPath(path);
-            if (n != null && !n.IsPendingInlineEdit)
+            if (!n.IsPendingInlineEdit)
             {
                 n.HasInlineError = false;
                 n.InlineErrorMessage = null;
             }
         }
-        _bulkErrorPaths.Clear();
+        _bulkErrorNodes.Clear();
     }
 
     /// <summary>
@@ -1955,9 +1986,12 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
 
         return Selection.SelectedScope.MatchingMembers.Count(m =>
         {
-            var node = Tree.FindNodeByPath(m.Path);
-            // Unresolved paths can't be staged by SetPendingOnNodes, so don't
-            // count them — that's exactly the inflation the old label had.
+            // Identity by MemberNode reference (#82): MatchingMembers holds
+            // model refs, FindVmByModel is O(1) and resolves to the right
+            // DB's tree VM even when the same Path string exists in
+            // multiple active DBs. Unresolved models (stale from a prior
+            // tree) can't be staged, so don't count them.
+            var node = Tree.FindVmByModel(m);
             return node != null && WouldChange(node);
         });
     }
