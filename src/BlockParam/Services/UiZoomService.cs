@@ -144,7 +144,11 @@ public class UiZoomService
         }
         catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException)
         {
-            Log.Warning(ex, "UiZoomService: cannot read {Path} — using default zoom", _settingsPath.FullPath);
+            // Same local-copy discipline as PersistenceEnabled — never call an
+            // instance member directly on the readonly StoragePath field, even
+            // in a catch block, or partial trust will reject the IL.
+            var settings = _settingsPath;
+            Log.Warning(ex, "UiZoomService: cannot read {Path} — using default zoom", settings.FullPath);
         }
     }
 
@@ -177,7 +181,8 @@ public class UiZoomService
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            Log.Warning(ex, "UiZoomService: cannot save {Path}", _settingsPath.FullPath);
+            var settings = _settingsPath;
+            Log.Warning(ex, "UiZoomService: cannot save {Path}", settings.FullPath);
         }
     }
 
