@@ -84,8 +84,28 @@ One workflow: `.github/workflows/ci.yml`. Two jobs, both on `windows-latest`:
 
 | Job | Runs |
 |---|---|
-| `v20` | Build + xUnit tests against the V20 stub set |
+| `v20` | Build + xUnit tests + PEVerify against the V20 stub set |
 | `v21` | Build only (V21 output dir `bin\…\v21\` isn't on the Tests/DevLauncher resolution path) |
+
+The `v20` PEVerify step (issue #130) runs `PEVerify.exe /IL /UNIQUE`
+on `src\BlockParam\bin\Release\net48\BlockParam.dll` after tests. It catches
+partial-trust IL patterns (e.g. `ldflda` + `call` on a readonly-struct field)
+that would crash the assembly under TIA's Add-In Loader sandbox but pass
+full-trust CI/DevLauncher. A clean green run prints:
+
+```
+All Classes and Methods in BlockParam.dll Verified.
+```
+
+A failure looks like:
+
+```
+[IL]: Error: [...::get_PersistenceEnabled][offset 0x...] Unmanaged pointers are not a verifiable type.
+```
+
+If a real false positive lands on a compiler-generated type, mask the
+specific diagnostic with `/IGNORE=0x<hex>` and leave a one-line comment per
+masked code in the workflow.
 
 Both jobs build with `-p:UseSiemensStubs=true`. The stubs live in
 `ci/stubs/Siemens.Engineering.Stubs/` (clean-room API-surface only — no

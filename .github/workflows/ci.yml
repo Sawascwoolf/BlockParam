@@ -53,6 +53,45 @@ jobs:
       - name: Test
         run: dotnet test src/BlockParam.Tests/BlockParam.Tests.csproj -c Release --no-build -p:UseSiemensStubs=true --logger "trx;LogFileName=test-results.trx"
 
+      # PEVerify catches partial-trust IL patterns that crash the assembly
+      # under TIA's Add-In Loader sandbox but pass full-trust CI/DevLauncher.
+      # Greatest-hit regression: `ldflda` + `call` on a readonly-struct field
+      # (e.g. `!_settingsPath.IsEmpty` on a readonly StoragePath), which the
+      # .NET Framework 4.8 partial-trust verifier rejects as
+      # `VerificationException: Operation could destabilize the runtime`.
+      # See issue #130 for the full story; #77 is the freeze that exposed it.
+      #
+      # Expected output on a clean build:
+      #   All Classes and Methods in BlockParam.dll Verified.
+      #
+      # If a false positive lands on a compiler-generated type, mask it with
+      # `/IGNORE=0x<hex>` and leave a one-line comment per masked code.
+      - name: PEVerify (catch partial-trust IL regressions)
+        shell: pwsh
+        run: |
+          $peverify = Get-ChildItem 'C:\Program Files (x86)\Microsoft SDKs\Windows\v10.0A\bin\NETFX 4.8 Tools\PEVerify.exe' | Select-Object -First 1
+          if (-not $peverify) { throw "PEVerify.exe not found on the runner — check the NETFX 4.8 Tools path." }
+          New-Item -ItemType Directory -Force -Path peverify-output | Out-Null
+          $logPath = "peverify-output/peverify.log"
+          & $peverify.FullName src\BlockParam\bin\Release\net48\BlockParam.dll /IL /UNIQUE *>&1 | Tee-Object -FilePath $logPath
+          $peExit = $LASTEXITCODE
+          Write-Host ""
+          Write-Host "=== PEVerify exit code: $peExit ==="
+          if ($peExit -ne 0) {
+            Write-Host ""
+            Write-Host "=== First 80 diagnostic lines ==="
+            Get-Content $logPath -TotalCount 80
+            exit 1
+          }
+
+      - name: Upload PEVerify log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: peverify-log
+          path: peverify-output/peverify.log
+          if-no-files-found: ignore
+
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v4
