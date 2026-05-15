@@ -453,4 +453,44 @@ public class SimaticMLParserTests
         allMembers.Should().Contain(m => m.Path == "drive2.blocked.moduleId");
         allMembers.Should().Contain(m => m.Path == "general.transferFailed.moduleId");
     }
+
+    /// <summary>
+    /// Regression for #77: an IDB of a multi-instance FB nests every sub-FB's
+    /// full interface mirror (Input/Output/InOut/Static) under the parent's Static
+    /// section. The InOut content is interface-pointer noise that TIA exports for
+    /// completeness but is not stored in the IDB. Walking it materialised tens of
+    /// thousands of phantom members per sub-FB (the 9 GB freeze in Gen_Main_IDB).
+    ///
+    /// Fixture is a deliberately tiny FB with a 10,000-element DInt array inside an
+    /// InOut UDT, plus two scalar Bools in Static, called once as a multi-instance
+    /// from an outer FB that has the same InOut shape itself. After the fix the
+    /// tree must contain the Static scalars (one outer, two inner) and the inner-FB
+    /// container, and nothing else.
+    /// </summary>
+    [Fact]
+    public void Parse_InstanceDB_MultiInstance_DropsInOutSectionsInsideSubFb()
+    {
+        var xml = TestFixtures.LoadXml("instance-db-multi-instance.xml");
+        var db = _parser.Parse(xml);
+
+        db.BlockType.Should().Be("InstanceDB");
+
+        var allPaths = db.AllMembers().Select(m => m.Path).ToList();
+
+        // What survives: the inner FB instance container + the three Static Bools.
+        allPaths.Should().Contain("instanceInnerFB");
+        allPaths.Should().Contain("instanceInnerFB.innerStaticA");
+        allPaths.Should().Contain("instanceInnerFB.innerStaticB");
+        allPaths.Should().Contain("outerStatic");
+
+        // What must NOT survive: the InOut "bigArray" on the inner sub-FB and any
+        // of its 10,000 array elements. If any path contains "bigArray" we have
+        // walked into a sub-FB's InOut section — the exact #77 regression.
+        allPaths.Should().NotContain(p => p.Contains("bigArray"),
+            "InOut content inside multi-instance sub-FBs is parameter-passing and not editable in the IDB (#77)");
+
+        // Belt: tree size should be small (4 visible members), not the 10,000+
+        // we'd see if the array got expanded.
+        db.AllMembers().Should().HaveCount(4);
+    }
 }
