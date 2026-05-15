@@ -287,6 +287,15 @@ public class SelectionScopeViewModel : ViewModelBase
     /// </summary>
     public void OnNodeSelected(MemberNodeViewModel justSelected)
     {
+        // Guard: synthetic DB-group roots (Datatype == "DB") are tree
+        // structural nodes, not real members. If a future feature ever sets
+        // IsSelected = true on one (e.g. "select-all-in-DB" gesture or a
+        // keyboard shortcut on the DB header), the cascade below would clear
+        // IsSelected on every real leaf across every DB — the exact opposite
+        // of what the user would expect. Bail early so synthetic roots are
+        // inert from the single-focus perspective. (#123)
+        if (justSelected.Datatype == "DB") return;
+
         if (_inSelectionCascade) return;
         _inSelectionCascade = true;
         try
