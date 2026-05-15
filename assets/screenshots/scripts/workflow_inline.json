@@ -436,6 +436,140 @@
       "cursor": { "target": "apply" } },
     { "id": "wf77_apply", "filename": "wf77_apply.png", "beat": "clickRelease", "dialog": "main", "preserveState": true, "click": "release",
       "apply": true },
-    { "id": "wf77a_apply_settled", "filename": "wf77a_apply_settled.png", "beat": "outro", "dialog": "main", "preserveState": true }
+    { "id": "wf77a_apply_settled", "filename": "wf77a_apply_settled.png", "beat": "outro", "dialog": "main", "preserveState": true },
+
+    { "id": "mdb_ch_multi_open", "filename": "mdb_ch_multi_open.png", "beat": "chapterHold",
+      "kind": "chapter", "chapterTitle": "Many DBs", "chapterSubtitle": "add · scope across · stash · reactivate" },
+
+    { "id": "mdb01_plus_hover", "filename": "mdb01_plus_hover.png", "beat": "pointingWithMouse", "dialog": "main",
+      "expand": ["units[1,2]", "units[1,2].modules[1]", "units[1,2].modules[1].valves[1]"],
+      "cursor": { "target": "addDbButton" },
+      "caption": "TIA: one DB at a time · repeat per block" },
+    { "id": "mdb01_plus_press", "filename": "mdb01_plus_press.png", "beat": "clickDown", "dialog": "main", "preserveState": true, "click": "press",
+      "cursor": { "target": "addDbButton" } },
+    { "id": "mdb01_plus_release", "filename": "mdb01_plus_release.png", "beat": "clickRelease", "dialog": "main", "preserveState": true, "click": "release",
+      "cursor": { "target": "addDbButton" } },
+
+    { "id": "mdb02_dropdown_open", "filename": "mdb02_dropdown_open.png", "beat": "readingShort", "dialog": "main", "preserveState": true,
+      "activeSet": { "openAddDropdown": true },
+      "cursor": { "target": "addDbButton" } },
+
+    { "id": "mdb03_filter_typing", "filename": "mdb03_filter_typing.png", "beat": "typingAChar", "dialog": "main", "preserveState": true,
+      "activeSet": { "openAddDropdown": true },
+      "cursor": { "target": "addDbButton" } },
+
+    { "id": "mdb04_peer_hover", "filename": "mdb04_peer_hover.png", "beat": "pointingWithMouse", "dialog": "main", "preserveState": true,
+      "activeSet": { "openAddDropdown": true },
+      "cursor": { "target": "addDbButton" } },
+
+    { "id": "mdb05_peer_check_press", "filename": "mdb05_peer_check_press.png", "beat": "clickDown", "dialog": "main", "preserveState": true, "click": "press",
+      "cursor": { "target": "addDbButton" } },
+    { "id": "mdb05_peer_check_release", "filename": "mdb05_peer_check_release.png", "beat": "clickRelease", "dialog": "main", "preserveState": true, "click": "release",
+      "activeSet": { "addPeer": "DB_ProcessPlant_B1" },
+      "cursor": { "target": "chip:DB_ProcessPlant_B1" } },
+
+    { "id": "mdb06_tree_rebuilds", "filename": "mdb06_tree_rebuilds.png", "beat": "readingBulk", "dialog": "main", "preserveState": true,
+      "cursor": { "target": "chip:DB_ProcessPlant_B1" } },
+
+    { "id": "mdb07_chip_strip_settled", "filename": "mdb07_chip_strip_settled.png", "beat": "readingShort", "dialog": "main", "preserveState": true,
+      "cursor": { "target": "chip:DB_ProcessPlant_A1" } },
+
+    { "id": "mdb08_select_member", "filename": "mdb08_select_member.png", "beat": "pointingWithMouse", "dialog": "main", "preserveState": true,
+      "select": "units[1,2].modules[1].valves[1].valveTag",
+      "cursor": { "target": "cell:units[1,2].modules[1].valves[1].valveTag" } },
+
+    { "id": "mdb09_scope_dropdown_open", "filename": "mdb09_scope_dropdown_open.png", "beat": "readingShort", "dialog": "main", "preserveState": true,
+      "select": "units[1,2].modules[1].valves[1].valveTag",
+      "openScopeDropdown": true,
+      "cursor": { "target": "scope" } },
+
+    { "id": "mdb10_scope_mega_select", "filename": "mdb10_scope_mega_select.png", "beat": "clickRelease", "dialog": "main", "preserveState": true, "click": "release",
+      "select": "units[1,2].modules[1].valves[1].valveTag",
+      "scope": "units",
+      "cursor": { "target": "scope" } },
+
+    { "id": "mdb11_preview_spans_both", "filename": "mdb11_preview_spans_both.png", "beat": "readingBulk", "dialog": "main", "preserveState": true,
+      "select": "units[1,2].modules[1].valves[1].valveTag",
+      "scope": "units",
+      "newValue": "V-10101",
+      "cursor": { "target": "set" } },
+    { "id": "mdb11a_set_click", "filename": "mdb11a_set_click.png", "beat": "clickRelease", "dialog": "main", "preserveState": true, "click": "release",
+      "select": "units[1,2].modules[1].valves[1].valveTag",
+      "scope": "units",
+      "newValue": "V-10101",
+      "stageBulk": true,
+      "cursor": { "target": "set" } },
+    { "id": "mdb11b_staged_settled", "filename": "mdb11b_staged_settled.png", "beat": "readingBulk", "dialog": "main", "preserveState": true },
+
+    { "id": "mdb12_apply_hover", "filename": "mdb12_apply_hover.png", "beat": "pointingWithMouse", "dialog": "main", "preserveState": true,
+      "cursor": { "target": "apply" } },
+    { "id": "mdb12_apply_press", "filename": "mdb12_apply_press.png", "beat": "clickDown", "dialog": "main", "preserveState": true, "click": "press",
+      "cursor": { "target": "apply" } },
+    { "id": "mdb12_apply_release", "filename": "mdb12_apply_release.png", "beat": "clickRelease", "dialog": "main", "preserveState": true, "click": "release",
+      "apply": true },
+
+    { "id": "mdb13_per_db_status", "filename": "mdb13_per_db_status.png", "beat": "afterCommit", "dialog": "main", "preserveState": true },
+
+    { "id": "mdb14_counter_after", "filename": "mdb14_counter_after.png", "beat": "readingShort", "dialog": "main", "preserveState": true },
+
+    { "id": "mdb15_inline_edit_dbA", "filename": "mdb15_inline_edit_dbA.png", "beat": "afterCommit", "dialog": "main", "preserveState": true,
+      "inlineEdit": { "path": "units[1,2].modules[1].valves[1].valveTag", "typed": "W-10101" } },
+
+    { "id": "mdb16_chip_close_hover", "filename": "mdb16_chip_close_hover.png", "beat": "pointingWithMouse", "dialog": "main", "preserveState": true,
+      "inlineEdit": { "path": "units[1,2].modules[1].valves[1].valveTag", "acceptSuggestion": "W-10101" },
+      "cursor": { "target": "chipClose:DB_ProcessPlant_A1" } },
+    { "id": "mdb16_chip_close_press", "filename": "mdb16_chip_close_press.png", "beat": "clickDown", "dialog": "main", "preserveState": true, "click": "press",
+      "cursor": { "target": "chipClose:DB_ProcessPlant_A1" } },
+
+    { "id": "mdb17_three_way_prompt", "filename": "mdb17_three_way_prompt.png", "beat": "readingBulk", "dialog": "main", "preserveState": true,
+      "activeSet": { "closeChip": "DB_ProcessPlant_A1", "promptAnswer": "stash" },
+      "cursor": { "target": "chip:DB_ProcessPlant_B1" },
+      "caption": "Apply / Stash / Cancel — pending edits are safe" },
+
+    { "id": "mdb18_pick_stash", "filename": "mdb18_pick_stash.png", "beat": "pointingWithMouse", "dialog": "main", "preserveState": true,
+      "cursor": { "target": "chip:DB_ProcessPlant_B1" } },
+
+    { "id": "mdb19_stash_header", "filename": "mdb19_stash_header.png", "beat": "readingBulk", "dialog": "main", "preserveState": true,
+      "cursor": { "target": "stashHeader:DB_ProcessPlant_A1" },
+      "caption": "PENDING IN A1 — safe in sidebar · active set continues" },
+
+    { "id": "mdb20_add_dbC", "filename": "mdb20_add_dbC.png", "beat": "afterCommit", "dialog": "main", "preserveState": true,
+      "activeSet": { "addPeer": "DB_ProcessPlant_C1" },
+      "cursor": { "target": "chip:DB_ProcessPlant_C1" } },
+
+    { "id": "mdb21_pending_hover", "filename": "mdb21_pending_hover.png", "beat": "pointingWithMouse", "dialog": "main", "preserveState": true,
+      "cursor": { "target": "stashHeader:DB_ProcessPlant_A1" } },
+    { "id": "mdb21_pending_press", "filename": "mdb21_pending_press.png", "beat": "clickDown", "dialog": "main", "preserveState": true, "click": "press",
+      "cursor": { "target": "stashHeader:DB_ProcessPlant_A1" } },
+
+    { "id": "mdb22_add_or_replace_prompt", "filename": "mdb22_add_or_replace_prompt.png", "beat": "readingBulk", "dialog": "main", "preserveState": true,
+      "activeSet": { "reactivate": "DB_ProcessPlant_A1", "promptAnswer": "add" },
+      "cursor": { "target": "chip:DB_ProcessPlant_A1" },
+      "caption": "Add alongside or replace current session?" },
+
+    { "id": "mdb23_pick_add", "filename": "mdb23_pick_add.png", "beat": "pointingWithMouse", "dialog": "main", "preserveState": true,
+      "cursor": { "target": "chip:DB_ProcessPlant_A1" } },
+
+    { "id": "mdb24_three_dbs_with_edit", "filename": "mdb24_three_dbs_with_edit.png", "beat": "readingBulk", "dialog": "main", "preserveState": true,
+      "cursor": { "target": "chip:DB_ProcessPlant_A1" },
+      "caption": "3 chips · A1's pending row restored" },
+
+    { "id": "mdb25_replace_branch_alt", "filename": "mdb25_replace_branch_alt.png", "beat": "readingShort", "dialog": "main", "preserveState": true,
+      "cursor": { "target": "chip:DB_ProcessPlant_A1" },
+      "caption": "Replace path → session collapses to A1 only" },
+
+    { "id": "mdb26_chip_body_hover", "filename": "mdb26_chip_body_hover.png", "beat": "pointingWithMouse", "dialog": "main", "preserveState": true,
+      "cursor": { "target": "chip:DB_ProcessPlant_C1" } },
+    { "id": "mdb26_chip_body_press", "filename": "mdb26_chip_body_press.png", "beat": "clickDown", "dialog": "main", "preserveState": true, "click": "press",
+      "cursor": { "target": "chip:DB_ProcessPlant_C1" } },
+
+    { "id": "mdb27_collapsed_to_single", "filename": "mdb27_collapsed_to_single.png", "beat": "afterCommit", "dialog": "main", "preserveState": true,
+      "activeSet": { "solo": "DB_ProcessPlant_C1", "promptAnswer": "stash" },
+      "cursor": { "target": "chip:DB_ProcessPlant_C1" },
+      "caption": "Solo via chip body · single-DB title restored" },
+
+    { "id": "mdb28_multi_plc_chips", "filename": "mdb28_multi_plc_chips.png", "beat": "readingShort", "dialog": "main", "preserveState": true,
+      "cursor": { "target": "chip:DB_ProcessPlant_C1" },
+      "caption": "Multi-PLC: chips grouped under PLC headers" }
   ]
 }
