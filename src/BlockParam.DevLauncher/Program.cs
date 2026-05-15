@@ -254,7 +254,13 @@ class Program
             appDataDir,
             serverUrl,
             sharedLicenseFilePath: OnlineLicenseService.DefaultSharedLicenseFilePath);
-        var usageTracker = new LicensedUsageTracker(licenseService, freeTracker);
+
+        // Capture mode bypasses the freemium counter so Apply always works
+        // regardless of how many prior runs have accumulated (#96). Interactive
+        // DevLauncher and the shipped Add-In continue to use the real tracker.
+        IUsageTracker usageTracker = capturePlan is CapturePlan
+            ? new UnlimitedUsageTracker()
+            : new LicensedUsageTracker(licenseService, freeTracker);
 
         // Update check (#61): mirror BulkChangeContextMenu wiring so the badge
         // and dialog are exercisable without TIA. Uses the BlockParam assembly
@@ -274,6 +280,16 @@ class Program
             Log.Error(e.Exception, "UNHANDLED EXCEPTION");
             e.Handled = true; // prevent crash, log instead
         };
+
+        // In capture-script mode inject a ScriptedMessageBoxService so
+        // multi-DB prompts (Apply/Stash/Cancel, Add-or-Replace) return the
+        // scene's canned answer without hanging for user input (#96).
+        // Interactive mode keeps the real WpfMessageBoxService (null → default).
+        BlockParam.UI.IMessageBoxService? messageBoxService =
+            capturePlan is CapturePlan
+                ? new ScriptedMessageBoxService()
+                : null;
+
         // DB-switcher (#59) for DevLauncher: simulate the project block tree
         // by enumerating every *.xml under %TEMP%\BlockParam\ that parses as a
         // SimaticML DB. Lets the dropdown be exercised without a real TIA
@@ -289,6 +305,7 @@ class Program
                 File.WriteAllText(outPath, modifiedXml);
                 Log.Information("Saved to {Path}", outPath);
             },
+            messageBox: messageBoxService,
             tagTableCache: tagTableCache,
             tagTableDir: tagTableDir,
             licenseService: licenseService,

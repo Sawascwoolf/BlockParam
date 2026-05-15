@@ -1,6 +1,7 @@
 using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
 using BlockParam.Diagnostics;
@@ -449,6 +450,32 @@ public partial class BulkChangeDialog : Window
     }
 
     /// <summary>
+    /// Scripted-only: shows the prompt overlay with the given text and button
+    /// labels, mimicking <see cref="ThreeButtonDialog"/> as an in-tree visual
+    /// for <see cref="System.Windows.Media.Imaging.RenderTargetBitmap"/> capture
+    /// (#96). The real <c>Window.ShowDialog</c> lives in a separate HWND and is
+    /// invisible to the headless renderer.
+    /// </summary>
+    internal void ShowPromptOverlayScripted(
+        string message, string primaryLabel, string secondaryLabel, string cancelLabel)
+    {
+        PromptOverlayMessage.Text = message;
+        PromptOverlayPrimary.Content = primaryLabel;
+        PromptOverlaySecondary.Content = secondaryLabel;
+        PromptOverlayCancel.Content = cancelLabel;
+        PromptOverlay.Visibility = Visibility.Visible;
+        // Dim the dialog behind the overlay with a semi-transparent backdrop.
+        PromptBackdrop.Visibility = Visibility.Visible;
+    }
+
+    /// <summary>Scripted-only: hides the prompt overlay.</summary>
+    internal void HidePromptOverlayScripted()
+    {
+        PromptOverlay.Visibility = Visibility.Collapsed;
+        PromptBackdrop.Visibility = Visibility.Collapsed;
+    }
+
+    /// <summary>
     /// Finds the per-row undo (↶) Button for the pending-edit entry whose
     /// node has the given path. Walks the PendingEditsList container
     /// generator + the row's visual tree. Returns null if the entry isn't
@@ -487,6 +514,108 @@ public partial class BulkChangeDialog : Window
         {
             if (item is Services.ScopeLevel s && s.AncestorPath == ancestorPath)
                 return ScopeOverlayList.ItemContainerGenerator.ContainerFromItem(item) as ListBoxItem;
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// Finds the <c>PillTrigger</c> ToggleButton of the PillMultiSelect that
+    /// contains the given DB name. Walks the pill-row ItemsControl, then
+    /// descends into each PillMultiSelect's visual tree looking for a
+    /// "PillTrigger" ToggleButton. The pill that contains <paramref name="dbName"/>
+    /// is the one whose <see cref="PlcPillViewModel.AvailableDbs"/> includes an
+    /// item with that DB name.
+    /// </summary>
+    private ToggleButton? FindPillTriggerForDb(string dbName)
+    {
+        UpdateLayout();
+        foreach (var pill in FindAllDescendants<Controls.PillMultiSelect.PillMultiSelect>(this))
+        {
+            if (PillContainsDb(pill, dbName))
+                return FindDescendant<ToggleButton>(pill, "PillTrigger");
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// Finds the <c>ClearButton</c> Button (the × to clear/close the pill)
+    /// of the PillMultiSelect that contains the given DB name.
+    /// </summary>
+    private Button? FindPillClearButtonForDb(string dbName)
+    {
+        UpdateLayout();
+        foreach (var pill in FindAllDescendants<Controls.PillMultiSelect.PillMultiSelect>(this))
+        {
+            if (PillContainsDb(pill, dbName))
+                return FindDescendant<Button>(pill, "ClearButton");
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// Returns true when any item in <paramref name="pill"/>'s AvailableDbs
+    /// has a Name that matches <paramref name="dbName"/> (case-insensitive).
+    /// </summary>
+    private static bool PillContainsDb(Controls.PillMultiSelect.PillMultiSelect pill, string dbName)
+    {
+        if (pill.DataContext is not PlcPillViewModel vm) return false;
+        return vm.AvailableDbs.Any(item =>
+            string.Equals(item.Name, dbName, System.StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// Finds the "PENDING IN &lt;DbName&gt;" header Button in the stash section
+    /// of the inspector panel. Scrolls the stash list into view first so the
+    /// container is realized, then walks the visual tree of the item's
+    /// <see cref="System.Windows.Controls.ContentPresenter"/> looking for the
+    /// Button whose <c>CommandParameter</c> is the matching
+    /// <see cref="StashedDbState"/>.
+    /// </summary>
+    private Button? FindStashHeaderButton(string dbName)
+    {
+        // Scroll the stash section into the inspector viewport so its
+        // ItemsControl containers are realized and TranslatePoint returns
+        // coordinates inside the captured frame.
+        if (StashedDbsList.Visibility == Visibility.Visible)
+        {
+            StashedDbsList.BringIntoView();
+            InspectorScroll.ScrollToBottom();
+            UpdateLayout();
+        }
+
+        foreach (var item in StashedDbsList.Items)
+        {
+            if (item is not StashedDbState stash) continue;
+            if (!string.Equals(stash.DbName, dbName, System.StringComparison.OrdinalIgnoreCase)) continue;
+
+            // For ItemsControl the generated container is a ContentPresenter,
+            // not a ListBoxItem — cast to FrameworkElement to cover both cases.
+            var container = StashedDbsList.ItemContainerGenerator
+                .ContainerFromItem(item) as FrameworkElement;
+            if (container == null)
+            {
+                // Container not yet realized even after BringIntoView — fall
+                // back to a full-dialog visual-tree walk.
+                Log.Warning(
+                    "FindStashHeaderButton: no container for {Db} — falling back to full tree walk",
+                    dbName);
+                foreach (var btn in FindAllDescendants<Button>(this))
+                {
+                    if (btn.CommandParameter is StashedDbState s
+                        && string.Equals(s.DbName, dbName, System.StringComparison.OrdinalIgnoreCase))
+                        return btn;
+                }
+                return null;
+            }
+
+            // The stash header template has a Button whose CommandParameter
+            // is bound to the item itself (the StashedDbState). Match it.
+            foreach (var btn in FindAllDescendants<Button>(container))
+            {
+                if (btn.CommandParameter is StashedDbState s
+                    && string.Equals(s.DbName, dbName, System.StringComparison.OrdinalIgnoreCase))
+                    return btn;
+            }
         }
         return null;
     }
@@ -609,6 +738,30 @@ public partial class BulkChangeDialog : Window
         {
             element = FindInlineCell(target.Substring("cell:".Length));
             xInset = 20; // over the cell text, not its right-edge dropdown arrow
+        }
+        else if (target == "addDbButton")
+        {
+            // The "+" add-DB button in the pill toolbar (visible when CanAddPlc is true).
+            element = AddDbButton;
+            xInset = AddDbButton.ActualWidth * 0.5;
+        }
+        else if (target.StartsWith("chip:"))
+        {
+            // Pill trigger body for the pill that contains the given DB name.
+            element = FindPillTriggerForDb(target.Substring("chip:".Length));
+            xInset = element != null ? element.ActualWidth * 0.5 : 0;
+        }
+        else if (target.StartsWith("chipClose:"))
+        {
+            // ClearButton (×) on the pill that contains the given DB name.
+            element = FindPillClearButtonForDb(target.Substring("chipClose:".Length));
+            xInset = element != null ? element.ActualWidth * 0.5 : 0;
+        }
+        else if (target.StartsWith("stashHeader:"))
+        {
+            // "PENDING IN <DbName>" header button in the stash section.
+            element = FindStashHeaderButton(target.Substring("stashHeader:".Length));
+            xInset = element != null ? element.ActualWidth * 0.5 : 0;
         }
         else element = null;
 
