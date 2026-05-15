@@ -67,9 +67,12 @@ public class BulkChangeViewModelCommandTests : IDisposable
         var xml = TestFixtures.LoadXml(fixtureName);
         var db = new SimaticMLParser().Parse(xml);
         var analyzer = new HierarchyAnalyzer();
-        var configLoader = ruleJson == null
-            ? new ConfigLoader(null)
-            : CreateConfigLoaderWithRule(ruleJson);
+        // Always back the VM with an isolated temp config (empty ruleset when
+        // no rule is supplied). `new ConfigLoader(null)` would pick up the
+        // developer's ambient %APPDATA%\BlockParam\config.json, making these
+        // tests non-hermetic — see UpdateCommentsCommand_CanExecute_False_
+        // WhenNoCommentConfig for why that bites.
+        var configLoader = CreateConfigLoaderWithRule(ruleJson ?? @"{ ""rules"": [] }");
         var bulkService = new BulkChangeService(new ChangeLogger(), configLoader);
 
         return new BulkChangeViewModel(
