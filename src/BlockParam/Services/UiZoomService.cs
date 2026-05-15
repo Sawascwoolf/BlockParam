@@ -67,7 +67,23 @@ public class UiZoomService
         _settingsPath = settingsPath;
     }
 
-    private bool PersistenceEnabled => !_settingsPath.IsEmpty;
+    private bool PersistenceEnabled
+    {
+        get
+        {
+            // Copy to a local before calling an instance member on the struct.
+            // Calling `_settingsPath.IsEmpty` directly emits `ldflda` on a
+            // readonly struct field, which .NET Framework 4.8's partial-trust
+            // IL verifier (TIA's SandboxDomain) rejects with
+            // `System.Security.VerificationException: Operation could
+            // destabilize the runtime` — crashing the Add-In Loader right after
+            // the dialog window's Loaded event fires ZoomHost.Attach.
+            // Full-trust contexts (CI tests, DevLauncher) don't surface this,
+            // which is why it slipped through the storage refactor.
+            var settings = _settingsPath;
+            return !settings.IsEmpty;
+        }
+    }
 
     public static string DefaultSettingsPath() => AppDirectories.UiSettingsFile;
 
