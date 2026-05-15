@@ -37,7 +37,7 @@ public sealed class PartialTrustSandboxTests
     [Fact]
     public void PersistenceEnabled_is_verifiable_under_partial_trust()
     {
-        var baseDir = ProbeDir();
+        var baseDir = StageAssemblies();
         var domain = CreateTiaLikeSandbox(baseDir);
         try
         {
@@ -55,14 +55,15 @@ public sealed class PartialTrustSandboxTests
         }
         finally
         {
-            AppDomain.Unload(domain);
+            try { AppDomain.Unload(domain); }
+            finally { TryDeleteDir(baseDir); }
         }
     }
 
     [Fact]
     public void Sandbox_actually_enforces_IL_verification()
     {
-        var baseDir = ProbeDir();
+        var baseDir = StageAssemblies();
         var domain = CreateTiaLikeSandbox(baseDir);
         try
         {
@@ -82,28 +83,49 @@ public sealed class PartialTrustSandboxTests
         }
         finally
         {
-            AppDomain.Unload(domain);
+            try { AppDomain.Unload(domain); }
+            finally { TryDeleteDir(baseDir); }
         }
     }
 
-    // ApplicationBase for the sandbox: BlockParam.dll's OWN directory.
-    // Anchoring on the production assembly (not the test assembly) is
-    // deliberate — vstest shadow-copies the test assembly, so its
-    // Location points at a host dir with no BlockParam.dll, whereas
-    // typeof(UiZoomService).Assembly.Location is by definition the dir
-    // that contains BlockParam.dll plus the build-output copy of the
-    // test assembly + deps, so the trusted loader resolves everything
-    // from one ApplicationBase with no AssemblyResolve hook.
-    //
-    // Not a storage-layer concern: this only computes an AppDomain
-    // ApplicationBase for the test harness — no production path literal,
-    // no File.*/Directory.* against a BlockParam data location.
-    private static string ProbeDir()
+    private static string AsmDir(Type t)
     {
-        var loc = typeof(UiZoomService).Assembly.Location;
+        var loc = t.Assembly.Location;
         return !string.IsNullOrEmpty(loc)
             ? Path.GetDirectoryName(loc)!
             : AppDomain.CurrentDomain.BaseDirectory;
+    }
+
+    // vstest shadow-copies the test assembly, so BlockParam.dll and
+    // BlockParam.Tests.dll live in different directories at run time and
+    // no single ApplicationBase contains both. Stage the union of both
+    // output dirs into one temp dir so the sandbox's trusted loader
+    // resolves everything (incl. Newtonsoft) from ApplicationBase — no
+    // AssemblyResolve hook (transparent partial-trust code may not
+    // install one) and no grant beyond Execution. Harness infrastructure,
+    // not subject to the storage-layer guardrail.
+    private static string StageAssemblies()
+    {
+        var staging = Path.Combine(
+            Path.GetTempPath(), "BlockParamPT-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(staging);
+        foreach (var src in new[]
+                 {
+                     AsmDir(typeof(UiZoomService)),
+                     AsmDir(typeof(PartialTrustSandboxTests)),
+                 })
+        {
+            foreach (var dll in Directory.GetFiles(src, "*.dll"))
+                File.Copy(dll, Path.Combine(staging, Path.GetFileName(dll)), overwrite: true);
+        }
+        return staging;
+    }
+
+    private static void TryDeleteDir(string dir)
+    {
+        try { Directory.Delete(dir, recursive: true); }
+        catch (IOException) { }
+        catch (UnauthorizedAccessException) { }
     }
 
     /// <summary>
