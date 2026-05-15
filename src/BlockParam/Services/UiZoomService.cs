@@ -67,7 +67,23 @@ public class UiZoomService
         _settingsPath = settingsPath;
     }
 
-    private bool PersistenceEnabled => !_settingsPath.IsEmpty;
+    private bool PersistenceEnabled
+    {
+        get
+        {
+            // Copy to a local before calling an instance member on the struct.
+            // Calling `_settingsPath.IsEmpty` directly emits `ldflda` on a
+            // readonly struct field, which .NET Framework 4.8's partial-trust
+            // IL verifier (TIA's SandboxDomain) rejects with
+            // `System.Security.VerificationException: Operation could
+            // destabilize the runtime` — crashing the Add-In Loader right after
+            // the dialog window's Loaded event fires ZoomHost.Attach.
+            // Full-trust contexts (CI tests, DevLauncher) don't surface this,
+            // which is why it slipped through the storage refactor.
+            var settings = _settingsPath;
+            return !settings.IsEmpty;
+        }
+    }
 
     public static string DefaultSettingsPath() => AppDirectories.UiSettingsFile;
 
@@ -128,7 +144,11 @@ public class UiZoomService
         }
         catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException)
         {
-            Log.Warning(ex, "UiZoomService: cannot read {Path} — using default zoom", _settingsPath.FullPath);
+            // Same local-copy discipline as PersistenceEnabled — never call an
+            // instance member directly on the readonly StoragePath field, even
+            // in a catch block, or partial trust will reject the IL.
+            var settings = _settingsPath;
+            Log.Warning(ex, "UiZoomService: cannot read {Path} — using default zoom", settings.FullPath);
         }
     }
 
@@ -161,7 +181,8 @@ public class UiZoomService
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            Log.Warning(ex, "UiZoomService: cannot save {Path}", _settingsPath.FullPath);
+            var settings = _settingsPath;
+            Log.Warning(ex, "UiZoomService: cannot save {Path}", settings.FullPath);
         }
     }
 
