@@ -180,6 +180,66 @@ not a recommendation — it is a workaround for exactly this verification proble
 Any addin that pulls in a non-trivial managed dependency stack will hit it
 unless every transitive dependency is partial-trust safe.
 
+#### Own-code IL pattern — `ldflda` on a `readonly` struct field (the zoom crash, #131)
+
+The dependency table above is about *transitive* deps. BlockParam's own
+C# can emit the same unverifiable IL. This is the "zoom control issue":
+opening any dialog crashed the Add-In Loader under TIA V20 (PR #131).
+
+**Symptom.** Dialog opens → `Window.Loaded` fires `ZoomHost.Attach` →
+reads `UiZoomService.ZoomFactor` → `EnsureLoaded()` → `PersistenceEnabled`
+→ `System.Security.VerificationException` ("Operation could destabilize
+the runtime" / "Dieser Vorgang kann die Laufzeit destabilisieren"), and
+TIA silently fails to activate the addin. CI tests and DevLauncher never
+reproduced it because they run **full trust** and the JIT only IL-verifies
+under partial trust.
+
+**Root cause.** `UiZoomService._settingsPath` is a `readonly` field of
+`StoragePath`, which is a **`readonly struct`**. Writing
+`_settingsPath.IsEmpty` (or `.FullPath`) directly makes the C# compiler
+emit `ldflda` — load the *address* of an `initonly` field — outside the
+declaring type's constructor. The CLR's IL verifier only allows `ldflda`
+of an `initonly` field inside that type's ctor; everywhere else it is
+**unverifiable**. With a normal (non-`readonly`) struct the compiler
+instead makes a defensive copy (`ldfld` → `stloc` → `ldloca`), which
+verifies — so the bug is specific to `readonly` field + `readonly struct`.
+It slipped in with the storage refactor (`d4c5338`) that introduced the
+`StoragePath` readonly struct.
+
+**Fix recipe.** Copy the field into a local before touching any instance
+member; the local is a writable slot so the compiler emits the verifiable
+`ldloca`:
+
+```csharp
+// ❌ unverifiable under partial trust
+return !_settingsPath.IsEmpty;
+
+// ✅ verifiable
+var settings = _settingsPath;
+return !settings.IsEmpty;
+```
+
+Applies equally in `catch`/`finally` blocks, to `in` parameters of a
+readonly struct (the `in` ref is itself readonly → same `ldflda`), and to
+`static readonly` fields. Passing the field *by value* to a method
+(`storage.FileExists(_settingsPath)`) is fine — that's `ldfld`, not
+`ldflda`. Reading it through a get-only property/auto-prop is fine too.
+
+**Regression gates (CI).** Two layers, see the CI section of `CLAUDE.md`:
+`PEVerify.exe /IL /UNIQUE` in the `peverify` job (static) catches the
+`ldflda`+`call` pattern; `PartialTrustSandboxTests` (behavioral) re-JITs
+the method in an Execution-only AppDomain. A red `peverify` after a change
+that added `someReadonlyStructField.Member` is this bug regressing, not a
+false positive.
+
+**Repo audit (2026-05).** Only two project `readonly struct` types exist
+(`StoragePath`, `PillTriggerToken`). The sole shipped `readonly` field of
+either is `UiZoomService._settingsPath`, fixed at all three access sites.
+`PillTriggerToken` is only ever a list element (by-value enumeration), never
+a `readonly`/`in`/`ref` field. `FileSystemBlockParamStorageTests._root`
+(`readonly StoragePath`) only uses `operator /` (by-value) and is a
+full-trust test assembly — not shipped, not a concern.
+
 ### Aufruf
 
 ```bash

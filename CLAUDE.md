@@ -276,6 +276,23 @@ unrelated PRs — fix it under the issue that owns the cleanup.
   through `Res.Get` / `Res.Format` against `Strings.resx`. Same key for
   the same concept across files — don't add a near-duplicate key when one
   exists.
+- **Never call an instance member on a `readonly` field of a `readonly
+  struct` — copy to a local first.** This is the "zoom control crash" of
+  PR #131 (the dialog died on open under TIA's sandbox). `_field.Member`
+  / `_field.Prop` where `_field` is a `readonly` field of a `readonly
+  struct` (today: `StoragePath`, `PillTriggerToken`) makes the C#
+  compiler emit `ldflda` on an `initonly` field outside the declaring
+  ctor — **unverifiable IL**. TIA V20's Add-In Loader JIT-verifies the
+  assembly in a partial-trust `SandboxDomain` and throws
+  `System.Security.VerificationException` ("Operation could destabilize
+  the runtime"); CI/DevLauncher run full-trust and never surface it. Fix:
+  `var local = _field; use local.Member;` (a writable local emits the
+  verifiable `ldloca`). Same rule applies in `catch`/`finally`, to `in`
+  params of a readonly struct, and to `static readonly` fields. The
+  `peverify` CI job and `PartialTrustSandboxTests` are the regression
+  gates (see the CI section) — a red `peverify` means this rule was
+  broken, not a "by design" failure. Full root-cause + recipe:
+  `docs/research/06-addin-deployment.md` → "Own-code IL pattern".
 
 ### Default to extracting, not extending, when touching hotspots
 
