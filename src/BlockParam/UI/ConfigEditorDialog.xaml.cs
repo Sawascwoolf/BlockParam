@@ -298,5 +298,24 @@ public partial class ConfigEditorDialog : Window
         return null;
     }
 
-    private record FileSectionVisuals(RuleFileViewModel File, Grid Root, Border Header);
+    // Plain immutable class, not a positional record: a record's `init`
+    // accessors emit `stfld` to an initonly backing field outside .ctor,
+    // which the .NET Framework 4.8 partial-trust verifier rejects
+    // ("Cannot change initonly field outside its .ctor") and crashes the
+    // Add-In under TIA's CAS sandbox. Get-only auto-properties assigned in
+    // the constructor are verifiable. Reference identity + plain property
+    // reads are all this type is used for (no value-equality / with).
+    private sealed class FileSectionVisuals
+    {
+        public FileSectionVisuals(RuleFileViewModel file, Grid root, Border header)
+        {
+            File = file;
+            Root = root;
+            Header = header;
+        }
+
+        public RuleFileViewModel File { get; }
+        public Grid Root { get; }
+        public Border Header { get; }
+    }
 }

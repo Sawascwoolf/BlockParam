@@ -60,6 +60,84 @@ jobs:
           name: test-results
           path: '**/TestResults/*.trx'
 
+  # Split into its own job so Build+Test (above) and the partial-trust IL
+  # gate report as separate check-runs. This job MUST be GREEN: issue #130
+  # is fixed (PR #133), so a clean run prints
+  # "All Classes and Methods in BlockParam.dll Verified." A red here means
+  # a NEW partial-trust IL regression has landed (unverifiable IL that
+  # crashes under TIA's Add-In Loader sandbox but passes full-trust
+  # CI/DevLauncher) — treat it as a real failure, not "by design". The
+  # *runtime* regression gate for the same bug class is
+  # PartialTrustSandboxTests in the v20 job — keep both: PEVerify is the
+  # static net, the AppDomain smoke test is the behavioral one (PEVerify
+  # alone does not flag every variant of this pattern).
+  peverify:
+    name: Partial-trust IL gate (V20 PEVerify)
+    runs-on: windows-latest
+    if: |
+      github.event_name != 'push' ||
+      contains(github.event.head_commit.message, '[run-ci]')
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-v20-${{ hashFiles('**/*.csproj') }}
+          restore-keys: ${{ runner.os }}-nuget-v20-
+
+      - name: Restore
+        run: dotnet restore src/BlockParam/BlockParam.csproj -p:UseSiemensStubs=true
+
+      - name: Build (Release)
+        run: dotnet build src/BlockParam/BlockParam.csproj -c Release --no-restore -p:UseSiemensStubs=true
+
+      # PEVerify catches partial-trust IL patterns that crash the assembly
+      # under TIA's Add-In Loader sandbox but pass full-trust CI/DevLauncher.
+      # Greatest-hit regression: `ldflda` + `call` on a readonly-struct field
+      # (e.g. `!_settingsPath.IsEmpty` on a readonly StoragePath), which the
+      # .NET Framework 4.8 partial-trust verifier rejects as
+      # `VerificationException: Operation could destabilize the runtime`.
+      # See issue #130 for the full story; #77 is the freeze that exposed it.
+      #
+      # Expected output on a clean build:
+      #   All Classes and Methods in BlockParam.dll Verified.
+      #
+      # If a false positive lands on a compiler-generated type, mask it with
+      # `/IGNORE=0x<hex>` and leave a one-line comment per masked code.
+      - name: PEVerify (catch partial-trust IL regressions)
+        shell: pwsh
+        run: |
+          $peverify = Get-ChildItem 'C:\Program Files (x86)\Microsoft SDKs\Windows\v10.0A\bin\NETFX 4.8 Tools\PEVerify.exe' | Select-Object -First 1
+          if (-not $peverify) { throw "PEVerify.exe not found on the runner — check the NETFX 4.8 Tools path." }
+          New-Item -ItemType Directory -Force -Path peverify-output | Out-Null
+          $logPath = "peverify-output/peverify.log"
+          & $peverify.FullName src\BlockParam\bin\Release\net48\BlockParam.dll /IL /UNIQUE *>&1 | Tee-Object -FilePath $logPath
+          $peExit = $LASTEXITCODE
+          Write-Host ""
+          Write-Host "=== PEVerify exit code: $peExit ==="
+          if ($peExit -ne 0) {
+            Write-Host ""
+            Write-Host "=== First 80 diagnostic lines ==="
+            Get-Content $logPath -TotalCount 80
+            exit 1
+          }
+
+      - name: Upload PEVerify log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: peverify-log
+          path: peverify-output/peverify.log
+          if-no-files-found: ignore
+
   v21:
     name: Build (V21, net48)
     runs-on: windows-latest
