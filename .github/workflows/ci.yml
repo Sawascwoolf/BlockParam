@@ -61,13 +61,16 @@ jobs:
           path: '**/TestResults/*.trx'
 
   # Split into its own job so Build+Test (above) and the partial-trust IL
-  # gate report as separate check-runs. This job is EXPECTED RED until the
-  # remaining readonly-struct IL fix lands (issue #130): a red here means
-  # the static gate is catching unverifiable partial-trust IL, NOT that the
-  # build is broken (see PR #133). The *green* runtime regression gate for
-  # the same bug class is PartialTrustSandboxTests in the v20 job — keep
-  # both: PEVerify is the static net, the AppDomain smoke test is the
-  # behavioral one (PEVerify alone does not flag this pattern).
+  # gate report as separate check-runs. This job MUST be GREEN: issue #130
+  # is fixed (PR #133), so a clean run prints
+  # "All Classes and Methods in BlockParam.dll Verified." A red here means
+  # a NEW partial-trust IL regression has landed (unverifiable IL that
+  # crashes under TIA's Add-In Loader sandbox but passes full-trust
+  # CI/DevLauncher) — treat it as a real failure, not "by design". The
+  # *runtime* regression gate for the same bug class is
+  # PartialTrustSandboxTests in the v20 job — keep both: PEVerify is the
+  # static net, the AppDomain smoke test is the behavioral one (PEVerify
+  # alone does not flag every variant of this pattern).
   peverify:
     name: Partial-trust IL gate (V20 PEVerify)
     runs-on: windows-latest

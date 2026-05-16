@@ -92,9 +92,12 @@ The partial-trust IL gate is **two layers, kept separate on purpose**:
 
 - **`peverify` job (static):** runs `PEVerify.exe /IL /UNIQUE` on
   `src\BlockParam\bin\Release\net48\BlockParam.dll`. Split out of `v20`
-  so its conclusion is its own check-run — it is **expected RED** until
-  the remaining readonly-struct IL fix lands (#130); a red here means
-  the gate is catching unverifiable IL, not that the build broke.
+  so its conclusion is its own check-run. It **must be GREEN** — #130 is
+  fixed (PR #133), so a clean run prints
+  `All Classes and Methods in BlockParam.dll Verified.` A red here means
+  a **new** partial-trust IL regression landed (unverifiable IL that
+  crashes under TIA's sandbox but passes full-trust CI) — treat it as a
+  real failure, not "by design".
 - **`PartialTrustSandboxTests` (behavioral, in `v20`):** re-creates TIA's
   Add-In Loader sandbox in a homogeneous Execution-only AppDomain and
   JITs the method under partial trust. PEVerify/ILVerify both *pass*
