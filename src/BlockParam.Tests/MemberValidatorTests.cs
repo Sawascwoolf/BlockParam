@@ -12,6 +12,9 @@ public class MemberValidatorTests
     private static MemberNode IntMember(string path = "db.moduleId") =>
         new("moduleId", "Int", "0", path, null, Array.Empty<MemberNode>());
 
+    private static MemberNode HwMember(string startValue) =>
+        new("a", "HW_INTERFACE", startValue, "db.a", null, Array.Empty<MemberNode>());
+
     private static TagTableCache CacheWithMod()
     {
         var reader = Substitute.For<ITagTableReader>();
@@ -93,6 +96,21 @@ public class MemberValidatorTests
         var error = v.Validate(IntMember(), "9999");
         error.Should().NotBeNull();
         error.Should().Contain("MOD_*");
+    }
+
+    [Fact]
+    public void HwTypedMember_WithSystemConstantName_ProducesNoIssue()
+    {
+        // #63 latent-regression guard. HW_* datatypes carrying PLC/HW system
+        // constant references (e.g. PROFINET port handles) are NOT in
+        // TiaDataTypeValidator.Validators, so Validate falls through to the
+        // "unknown type → no validation" branch and "Existing Issues" stays
+        // clean. If anyone later adds HW_INTERFACE to the Validators dict to
+        // range-check it as a Word, the v1.0.2 false-positive flood comes
+        // back — this flips red first.
+        var v = new MemberValidator(null, null);
+        v.Validate(HwMember("Local~PROFINET-Schnittstelle_1~Port_1"), "Local~PROFINET-Schnittstelle_1~Port_1")
+            .Should().BeNull();
     }
 
     [Fact]
