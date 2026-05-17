@@ -127,13 +127,13 @@ public sealed class DiagnosticsScenarioMenu : ContextMenuAddIn
         Log.Information("{Tag} --- starting scenarios for db={DbName} plc={Plc} ---",
             ScenarioTag, dbName, plcName);
 
-        var ctx = new ScenarioContext(db, dbName, plcName, adapter, exporter, writer, tempDir);
+        var ctx = new ScenarioContext(dbName, plcName, adapter, exporter, writer, tempDir);
 
         foreach (var scenario in Scenarios)
         {
             try
             {
-                scenario.Run(ctx);
+                scenario.Run(db, ctx);
             }
             catch (Exception ex)
             {
@@ -152,16 +152,16 @@ public sealed class DiagnosticsScenarioMenu : ContextMenuAddIn
     /// export_twice — export the block once, then export it again.
     /// This is the #140 evidence: is the second export faster (warm caches)?
     /// </summary>
-    private static void RunExportTwice(ScenarioContext ctx)
+    private static void RunExportTwice(DataBlock db, ScenarioContext ctx)
     {
         // Step 1 — first export.
         string xml1 = "";
         var sw1 = Stopwatch.StartNew();
         try
         {
-            ctx.Exporter.TryExportWithCompilePrompt(ctx.Db,
+            ctx.Exporter.TryExportWithCompilePrompt(db,
                 () => xml1 = System.IO.File.ReadAllText(
-                    ctx.Adapter.ExportBlock(ctx.Db, ctx.TempDir)));
+                    ctx.Adapter.ExportBlock(db, ctx.TempDir)));
             sw1.Stop();
             Log.Information(
                 "{Tag} scenario=export_twice step=export1 db={Db} plc={Plc} ms={Ms} xmlBytes={Bytes}",
@@ -181,9 +181,9 @@ public sealed class DiagnosticsScenarioMenu : ContextMenuAddIn
         var sw2 = Stopwatch.StartNew();
         try
         {
-            ctx.Exporter.TryExportWithCompilePrompt(ctx.Db,
+            ctx.Exporter.TryExportWithCompilePrompt(db,
                 () => xml2 = System.IO.File.ReadAllText(
-                    ctx.Adapter.ExportBlock(ctx.Db, ctx.TempDir)));
+                    ctx.Adapter.ExportBlock(db, ctx.TempDir)));
             sw2.Stop();
             Log.Information(
                 "{Tag} scenario=export_twice step=export2 db={Db} plc={Plc} ms={Ms} xmlBytes={Bytes}",
@@ -202,18 +202,18 @@ public sealed class DiagnosticsScenarioMenu : ContextMenuAddIn
     /// set_export_restore — capture original start value, set a sentinel, export,
     /// restore original, verify. Self-reverting so every run starts clean.
     /// </summary>
-    private static void RunSetExportRestore(ScenarioContext ctx)
+    private static void RunSetExportRestore(DataBlock db, ScenarioContext ctx)
     {
-        RunMutateExportRestore(ctx, "set_export_restore", SentinelValue);
+        RunMutateExportRestore(db, ctx, "set_export_restore", SentinelValue);
     }
 
     /// <summary>
     /// clear_export_restore — capture original start value, clear it, export,
     /// restore original, verify. Self-reverting.
     /// </summary>
-    private static void RunClearExportRestore(ScenarioContext ctx)
+    private static void RunClearExportRestore(DataBlock db, ScenarioContext ctx)
     {
-        RunMutateExportRestore(ctx, "clear_export_restore", newValue: "");
+        RunMutateExportRestore(db, ctx, "clear_export_restore", newValue: "");
     }
 
     /// <summary>
@@ -223,16 +223,16 @@ public sealed class DiagnosticsScenarioMenu : ContextMenuAddIn
     /// those paths; no new path literals — all dirs come from AppDirectories via ctx).
     /// </summary>
     private static void RunMutateExportRestore(
-        ScenarioContext ctx, string scenarioName, string newValue)
+        DataBlock db, ScenarioContext ctx, string scenarioName, string newValue)
     {
         // --- Step 1: export to read current XML and pick target member ---
         string originalXml = "";
         try
         {
             var sw = Stopwatch.StartNew();
-            ctx.Exporter.TryExportWithCompilePrompt(ctx.Db,
+            ctx.Exporter.TryExportWithCompilePrompt(db,
                 () => originalXml = System.IO.File.ReadAllText(
-                    ctx.Adapter.ExportBlock(ctx.Db, ctx.TempDir)));
+                    ctx.Adapter.ExportBlock(db, ctx.TempDir)));
             sw.Stop();
             Log.Information(
                 "{Tag} scenario={Scenario} step=export_read db={Db} plc={Plc} ms={Ms} xmlBytes={Bytes}",
@@ -302,8 +302,8 @@ public sealed class DiagnosticsScenarioMenu : ContextMenuAddIn
         }
 
         // --- Step 4: import mutated XML back into TIA ---
-        var blockGroup = ctx.Adapter.GetBlockGroup(ctx.Db);
-        DataBlock liveDb = ctx.Db; // track live reference across import (#19)
+        var blockGroup = ctx.Adapter.GetBlockGroup(db);
+        DataBlock liveDb = db; // track live reference across import (#19)
         try
         {
             var mutatedPath = System.IO.Path.Combine(
@@ -317,7 +317,7 @@ public sealed class DiagnosticsScenarioMenu : ContextMenuAddIn
 
             // Re-resolve live reference after import (TIA invalidates old handle, #19).
             var blockGroupTyped = (Siemens.Engineering.SW.Blocks.PlcBlockGroup)blockGroup;
-            liveDb = blockGroupTyped.Blocks.Find(ctx.DbName) as DataBlock ?? ctx.Db;
+            liveDb = blockGroupTyped.Blocks.Find(ctx.DbName) as DataBlock ?? db;
 
             // Re-export to measure the post-mutate export time.
             string postMutateXml = "";
@@ -405,7 +405,6 @@ public sealed class DiagnosticsScenarioMenu : ContextMenuAddIn
     private sealed class ScenarioContext
     {
         public ScenarioContext(
-            DataBlock db,
             string dbName,
             string plcName,
             ITiaPortalAdapter adapter,
@@ -413,7 +412,6 @@ public sealed class DiagnosticsScenarioMenu : ContextMenuAddIn
             SimaticMLWriter writer,
             string tempDir)
         {
-            Db       = db;
             DbName   = dbName;
             PlcName  = plcName;
             Adapter  = adapter;
@@ -422,7 +420,6 @@ public sealed class DiagnosticsScenarioMenu : ContextMenuAddIn
             TempDir  = tempDir;
         }
 
-        public DataBlock         Db       { get; }
         public string            DbName   { get; }
         public string            PlcName  { get; }
         public ITiaPortalAdapter Adapter  { get; }
@@ -436,16 +433,16 @@ public sealed class DiagnosticsScenarioMenu : ContextMenuAddIn
     /// </summary>
     private sealed class ScenarioDef
     {
-        public ScenarioDef(string name, Action<ScenarioContext> run)
+        public ScenarioDef(string name, Action<DataBlock, ScenarioContext> run)
         {
             Name = name;
             _run = run;
         }
 
         public string Name { get; }
-        private readonly Action<ScenarioContext> _run;
+        private readonly Action<DataBlock, ScenarioContext> _run;
 
-        public void Run(ScenarioContext ctx) => _run(ctx);
+        public void Run(DataBlock db, ScenarioContext ctx) => _run(db, ctx);
     }
 
     /// <summary>
