@@ -19,6 +19,12 @@ public class BulkChangeAddInProvider : ProjectTreeAddInProvider
     protected override IEnumerable<ContextMenuAddIn> GetContextMenuAddIns()
     {
         yield return new BulkChangeContextMenu(_tiaPortal);
+#if DIAGNOSTICS
+        // DEV-ONLY diagnostics scenario runner. Compiled in only when built
+        // with -p:Diagnostics=true; absent from the shipped marketplace build.
+        // See DiagnosticsScenarioMenu.cs.
+        yield return new DiagnosticsScenarioMenu(_tiaPortal);
+#endif
     }
 }
 
