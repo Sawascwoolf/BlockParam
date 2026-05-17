@@ -1451,7 +1451,13 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         var bulkNodes = BulkPreview.Count > 0
             ? new HashSet<MemberNodeViewModel>(BulkPreview.Entries.Select(e => e.Node))
             : null;
-        Pending.Rebuild(RootMembers, bulkNodes);
+        // #145: thread the collision-safe owning-DB label resolver. The
+        // factory gates on the active-set count (single-DB → empty label)
+        // and routes through Tree.FindActiveDbForModel + the one shared
+        // ActiveDbDisplayName formatter — no DB-display logic on this host.
+        var dbLabelResolver = ActiveDbDisplayName.ResolverFor(
+            Tree, AllActiveDbs, ActiveSet.State.AnchorPlcName);
+        Pending.Rebuild(RootMembers, bulkNodes, dbLabelResolver);
     }
 
     /// <summary>

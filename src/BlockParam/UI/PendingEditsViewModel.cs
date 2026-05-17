@@ -97,10 +97,11 @@ public class PendingEditsViewModel : ViewModelBase
     /// string — so two DBs sharing a path never falsely alias (#82 / #121).
     /// </summary>
     public void Rebuild(IEnumerable<MemberNodeViewModel> roots,
-        HashSet<MemberNodeViewModel>? bulkNodes)
+        HashSet<MemberNodeViewModel>? bulkNodes,
+        Func<MemberNodeViewModel, string>? dbLabelResolver = null)
     {
         PendingEdits.Clear();
-        CollectPendingEntries(roots, bulkNodes);
+        CollectPendingEntries(roots, bulkNodes, dbLabelResolver);
         OnPropertyChanged(nameof(HasPendingEdits));
         RaiseInvalidPendingChanged();
     }
@@ -143,7 +144,8 @@ public class PendingEditsViewModel : ViewModelBase
     }
 
     private void CollectPendingEntries(IEnumerable<MemberNodeViewModel> nodes,
-        HashSet<MemberNodeViewModel>? bulkNodes)
+        HashSet<MemberNodeViewModel>? bulkNodes,
+        Func<MemberNodeViewModel, string>? dbLabelResolver)
     {
         foreach (var node in nodes)
         {
@@ -153,13 +155,20 @@ public class PendingEditsViewModel : ViewModelBase
                 // path string produce two distinct MemberNodeViewModel instances
                 // and will never alias (#82 / #121).
                 bool overwritten = bulkNodes != null && bulkNodes.Contains(node);
+                // #145: resolve the owning DB via the host-supplied resolver
+                // (backed by Tree.FindActiveDbForModel + the shared
+                // ActiveDbDisplayName formatter). The resolver returns "" in
+                // single-DB sessions, so single-DB rows stay unlabeled. We
+                // never scan roots or alias by Path here (#82).
+                var dbLabel = dbLabelResolver?.Invoke(node) ?? "";
                 PendingEdits.Add(new PendingEditEntry(
                     node,
                     node.StartValue ?? "",
                     node.PendingValue ?? "",
-                    willBeOverwrittenByBulk: overwritten));
+                    willBeOverwrittenByBulk: overwritten,
+                    dbLabel: dbLabel));
             }
-            CollectPendingEntries(node.Children, bulkNodes);
+            CollectPendingEntries(node.Children, bulkNodes, dbLabelResolver);
         }
     }
 

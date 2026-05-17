@@ -717,6 +717,10 @@ Examples: en-US, de-DE. Leave empty for the default language.</value>
     <value>{0} pending inline edits</value>
     <comment>{0} = count (&gt; 1)</comment>
   </data>
+  <data name="Pending_DbQualifier" xml:space="preserve">
+    <value>DB: {0}</value>
+    <comment>{0} = collision-safe owning-DB display string (#145). Shown on a pending-edit row only in multi-DB sessions so rows that share a member path across DBs stay distinguishable.</comment>
+  </data>
   <data name="BulkPreview_ConflictWarning_Singular" xml:space="preserve">
     <value>⚠ 1 overlap with pending edits — will be overwritten.</value>
   </data>

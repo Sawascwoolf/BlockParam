@@ -174,6 +174,131 @@ public class PendingEditsViewModelTests
     }
 
     // ─────────────────────────────────────────────────────────────────────
+    // #145 — owning-DB label on each pending row in multi-DB sessions
+    // ─────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public void Rebuild_MultiDb_SharedPath_ResolvesDistinctDbLabelsPerRow()
+    {
+        // Two DBs on different PLCs, BOTH exposing the same member path
+        // "Config.Speed". Before #145 the two pending-edit rows rendered
+        // identically; now each carries its owning-DB label resolved via
+        // the shared ActiveDbDisplayName formatter (no path aliasing, #82).
+        var (dbA, speedA) = MakeDbWithConfigSpeed("DB_Drive", "PLC_1");
+        var (dbB, speedB) = MakeDbWithConfigSpeed("DB_Pump", "PLC_2");
+        var tree = BuildTreeVm(dbA, dbB);
+
+        // Stage an inline edit on Config.Speed in each DB.
+        SpeedVm(tree, speedA).EditableStartValue = "111";
+        SpeedVm(tree, speedB).EditableStartValue = "222";
+
+        var resolver = ActiveDbDisplayName.ResolverFor(
+            tree, new[] { dbA, dbB }, anchorPlcFallback: "PLC_1");
+
+        var vm = new PendingEditsViewModel(() => 2);
+        vm.Rebuild(tree.RootMembers, bulkNodes: null, dbLabelResolver: resolver);
+
+        vm.PendingEdits.Should().HaveCount(2);
+        var labels = vm.PendingEdits.Select(e => e.DbLabel).ToList();
+        labels.Should().OnlyHaveUniqueItems("each row must identify its owning DB");
+        labels.Should().BeEquivalentTo(new[] { "DB_Drive", "DB_Pump" });
+        vm.PendingEdits.Should().OnlyContain(e => e.HasDbLabel);
+        vm.PendingEdits.Select(e => e.DbLabelDisplay)
+            .Should().BeEquivalentTo(new[] { "DB: DB_Drive", "DB: DB_Pump" });
+    }
+
+    [Fact]
+    public void Rebuild_MultiDb_NameCollision_PrefixesPlcMatchingTreeHeader()
+    {
+        // Same DB name on two PLCs → the shared formatter qualifies BOTH
+        // with their PLC, EXACTLY as the tree's synthetic group header does.
+        var (dbA, speedA) = MakeDbWithConfigSpeed("DB_Foo", "PLC_A");
+        var (dbB, speedB) = MakeDbWithConfigSpeed("DB_Foo", "PLC_B");
+        var tree = BuildTreeVm(dbA, dbB);
+
+        SpeedVm(tree, speedA).EditableStartValue = "1";
+        SpeedVm(tree, speedB).EditableStartValue = "2";
+
+        var resolver = ActiveDbDisplayName.ResolverFor(
+            tree, new[] { dbA, dbB }, anchorPlcFallback: "PLC_A");
+
+        var vm = new PendingEditsViewModel(() => 2);
+        vm.Rebuild(tree.RootMembers, null, resolver);
+
+        vm.PendingEdits.Select(e => e.DbLabel)
+            .Should().BeEquivalentTo(new[] { "PLC_A / DB_Foo", "PLC_B / DB_Foo" });
+
+        // Must match the tree's synthetic group-root header verbatim.
+        var headerLabels = tree.RootMembers.Select(r => r.Name).ToList();
+        vm.PendingEdits.Select(e => e.DbLabel)
+            .Should().BeSubsetOf(headerLabels);
+    }
+
+    [Fact]
+    public void Rebuild_SingleDb_NoDbLabelRendered()
+    {
+        // One active DB → the resolver returns "" so single-DB rows stay
+        // unlabeled (the recommended #145 conditional-display design).
+        var (db, speed) = MakeDbWithConfigSpeed("DB_Solo", "PLC_1");
+        var tree = BuildTreeVm(db);
+        SpeedVm(tree, speed).EditableStartValue = "999";
+
+        var resolver = ActiveDbDisplayName.ResolverFor(
+            tree, new[] { db }, anchorPlcFallback: "PLC_1");
+
+        var vm = new PendingEditsViewModel(() => 1);
+        vm.Rebuild(tree.RootMembers, null, resolver);
+
+        vm.PendingEdits.Should().ContainSingle();
+        vm.PendingEdits[0].DbLabel.Should().BeEmpty();
+        vm.PendingEdits[0].HasDbLabel.Should().BeFalse();
+        vm.PendingEdits[0].DbLabelDisplay.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Rebuild_NullResolver_LeavesDbLabelEmpty()
+    {
+        // Back-compat: callers that don't pass a resolver (existing tests /
+        // legacy paths) get the prior behavior — no label, no throw.
+        var root = BuildTree();
+        FindLeaf(root, "Speed").EditableStartValue = "5";
+
+        var vm = new PendingEditsViewModel(() => 1);
+        vm.Rebuild(new[] { root }, bulkNodes: null);
+
+        vm.PendingEdits.Should().ContainSingle()
+            .Which.DbLabel.Should().BeEmpty();
+    }
+
+    private static (ActiveDb db, MemberNode speed) MakeDbWithConfigSpeed(
+        string dbName, string plcName)
+    {
+        var speed = new MemberNode("Speed", "Int", "0", "Config.Speed", null,
+            Array.Empty<MemberNode>());
+        var config = new MemberNode("Config", "Struct", null, "Config", null,
+            new[] { speed });
+        var info = new DataBlockInfo(dbName, 1, "Optimized", "GlobalDB",
+            new[] { config });
+        return (new ActiveDb(info, $"<Block name='{dbName}' />",
+            onApply: null, plcName: plcName), speed);
+    }
+
+    private static MemberTreeViewModel BuildTreeVm(params ActiveDb[] dbs)
+    {
+        var tree = new MemberTreeViewModel(
+            getActiveDbs: () => dbs,
+            getCurrentPlcName: () => "",
+            commentLanguagePolicy: new CommentLanguagePolicy(null, null, new[] { "en-GB" }),
+            subscribeToVm: _ => { });
+        tree.BuildRootMembersFromActiveDbs();
+        return tree;
+    }
+
+    private static MemberNodeViewModel SpeedVm(MemberTreeViewModel tree, MemberNode speedModel) =>
+        tree.FindVmByModel(speedModel)
+            ?? throw new InvalidOperationException("Speed VM not found in tree");
+
+    // ─────────────────────────────────────────────────────────────────────
     // Fixtures
     // ─────────────────────────────────────────────────────────────────────
 

@@ -267,26 +267,16 @@ public class MemberTreeViewModel : ViewModelBase
             // paths still match across DBs.
             // Cross-PLC name collision: two PLCs can each host a DB called
             // "DB_Foo". Tag any colliding synthetic root with its PLC prefix so
-            // the user can tell them apart in the tree.
-            //
-            // #82: every ActiveDb (including the anchor) carries its own
-            // PlcName now, so the prefix lookup is uniform — no index-0
-            // special case. The anchorPlc fallback is kept for back-compat
-            // with hosts that may still seed the anchor with an empty
-            // PlcName; we prefer db.PlcName when it's non-empty.
-            var nameCounts = activeDbs
-                .GroupBy(d => d.Info.Name, StringComparer.Ordinal)
-                .ToDictionary(g => g.Key, g => g.Count(), StringComparer.Ordinal);
+            // the user can tell them apart in the tree. The collision-safe
+            // string is computed by the single shared formatter so the Pending
+            // Edits row label (#145) matches this header exactly — never
+            // duplicate this rule (see ActiveDbDisplayName). The collision
+            // map is built once here, not per DB.
+            var displayNames = new ActiveDbDisplayName(activeDbs, anchorPlc);
             for (int i = 0; i < activeDbs.Count; i++)
             {
                 var db = activeDbs[i];
-                var plc = !string.IsNullOrEmpty(db.PlcName)
-                    ? db.PlcName
-                    : (i == 0 ? anchorPlc : "");
-                bool collides = nameCounts.TryGetValue(db.Info.Name, out var c) && c > 1;
-                var displayName = collides && !string.IsNullOrEmpty(plc)
-                    ? $"{plc} / {db.Info.Name}"
-                    : db.Info.Name;
+                var displayName = displayNames.Resolve(db);
                 var groupVm = BuildDbGroupRoot(
                     db, displayName, commentLanguagePolicy, subscribeToVm,
                     modelToVm, modelToDb);
