@@ -1048,6 +1048,12 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         ValidateValue();
         Autocomplete.ClearFiltered();
         UpdateHighlighting();
+        // Suggestion-accept bypasses the NewValue debounce (cancelled above),
+        // so re-raise the composed Set-button caption/tooltip here — same pair
+        // raised on the typed path (:506-507) and scope/manual seams
+        // (:1169-1170, :1182-1183). #144.
+        OnPropertyChanged(nameof(SetButtonText));
+        OnPropertyChanged(nameof(SetButtonTooltip));
     }
 
     /// <summary>Show suggestions filtered by current text (always opens).</summary>

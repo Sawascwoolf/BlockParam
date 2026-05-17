@@ -94,6 +94,45 @@ public class BulkChangeViewModelTests : IDisposable
     }
 
     /// <summary>
+    /// #144: AcceptSuggestion cancels the NewValue debounce (verified above),
+    /// which is the only re-raise site for SetButtonText/SetButtonTooltip on
+    /// the typed path. Without an explicit re-raise the Set-button caption
+    /// stays frozen at the pre-selection count ("Set 0 in 'X'") even though
+    /// the preview and enable state move on. The fix re-raises both notifications
+    /// inside AcceptSuggestion after UpdateHighlighting().
+    /// </summary>
+    [Fact]
+    public void AcceptSuggestion_updates_SetButtonText_and_raises_notification()
+    {
+        var vm = CreateViewModelWithRule("udt-instances-db.xml", @"{ ""rules"": [] }");
+
+        FlatTreeManager.ExpandAll(vm.Tree.RootMembers);
+        vm.RefreshFlatList();
+
+        var moduleId = vm.Tree.FlatMembers.First(m => m.Name == "ModuleId" && m.IsLeaf);
+        vm.Selection.SelectedFlatMember = moduleId;
+        var dbScope = vm.Selection.AvailableScopes.First(s => s.MatchCount == 4);
+        vm.Selection.SelectedScope = dbScope;
+
+        // Pre-condition: empty value → 0 would change → caption advertises 0.
+        vm.SetButtonText.Should().Contain("0",
+            "with no value typed, nothing would change yet");
+
+        var raised = new List<string?>();
+        ((INotifyPropertyChanged)vm).PropertyChanged += (_, e) => raised.Add(e.PropertyName);
+
+        // Accept a value that differs from the existing "42" — all 4 would change.
+        vm.AcceptSuggestion("99");
+
+        raised.Should().Contain(nameof(BulkChangeViewModel.SetButtonText),
+            "AcceptSuggestion must re-raise the composed Set-button caption");
+        raised.Should().Contain(nameof(BulkChangeViewModel.SetButtonTooltip),
+            "AcceptSuggestion must re-raise the composed Set-button tooltip");
+        vm.SetButtonText.Should().Be("Set 4 in 'UdtInstancesDB'",
+            "the caption must reflect the accepted suggestion's count, not stay frozen at 0");
+    }
+
+    /// <summary>
     /// #26: Pre-existing values that violate a configured rule should be surfaced
     /// in <see cref="BulkChangeViewModel.ExistingIssues"/> on dialog load —
     /// without the user needing to edit them first.
