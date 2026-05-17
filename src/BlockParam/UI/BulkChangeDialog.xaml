@@ -23,6 +23,14 @@
             <local:StringNotEmptyToVisibilityConverter x:Key="StringToVis"/>
             <local:InvertBoolConverter x:Key="InvertBool"/>
 
+            <!-- #148: selected/targeted Value-cell outline. A 2px indigo
+                 border (NOT a fill) so the orthogonal state fill
+                 (green / blue / amber / red) stays visible underneath.
+                 Deliberately distinct from the green #D5F0D5 / #4CAF50
+                 "Already matching" affordance. Single token — no scattered
+                 inline hex. -->
+            <SolidColorBrush x:Key="SelectedCellOutline" Color="#5B21B6"/>
+
         <!-- Trigger-summary overflow rules for the pill row. Mirrors the
              defaults baked into PillOverflowOptions.DataBlockDefault(): keep
              showing full DB names until the joined text passes ~30 chars or
@@ -336,7 +344,15 @@
                     <Border Background="#CCE5FF" Width="12" Height="12" BorderBrush="#2196F3" BorderThickness="3,0,0,0" Margin="0,0,3,0"/>
                     <TextBlock Text="Bulk set" Foreground="#888" FontSize="10" VerticalAlignment="Center" Margin="0,0,10,0"/>
                     <Border Background="#FFCDD2" Width="12" Height="12" BorderBrush="#D32F2F" BorderThickness="3,0,0,0" Margin="0,0,3,0"/>
-                    <TextBlock Text="Invalid" Foreground="#888" FontSize="10" VerticalAlignment="Center"/>
+                    <TextBlock Text="Invalid" Foreground="#888" FontSize="10" VerticalAlignment="Center" Margin="0,0,10,0"/>
+                    <!-- #148: selected/targeted Value cell — a 2px indigo
+                         outline with transparent fill (the state fill shows
+                         through), not another colored fill. Same brush token
+                         as the cell trigger so they can't drift. -->
+                    <Border Background="Transparent" Width="12" Height="12"
+                            BorderBrush="{StaticResource SelectedCellOutline}"
+                            BorderThickness="2" Margin="0,0,3,0"/>
+                    <TextBlock Text="{loc:Loc Legend_Selected}" Foreground="#888" FontSize="10" VerticalAlignment="Center"/>
                 </StackPanel>
 
                 <!-- Member Table fills the rest of the column -->
@@ -517,6 +533,16 @@
                                                     </DataTrigger>
                                                     <DataTrigger Binding="{Binding HasInlineError}" Value="True">
                                                         <Setter Property="Background" Value="#FFCDD2"/>
+                                                    </DataTrigger>
+                                                    <!-- #148: selected/targeted row. Highest priority
+                                                         (declared last) but only touches BorderBrush /
+                                                         BorderThickness — the state fill above keeps its
+                                                         Background and shows through the transparent
+                                                         interior, so a row that is both selected AND
+                                                         "Already matching" is no longer indistinguishable. -->
+                                                    <DataTrigger Binding="{Binding IsSelected}" Value="True">
+                                                        <Setter Property="BorderBrush" Value="{StaticResource SelectedCellOutline}"/>
+                                                        <Setter Property="BorderThickness" Value="2"/>
                                                     </DataTrigger>
                                                 </Style.Triggers>
                                             </Style>

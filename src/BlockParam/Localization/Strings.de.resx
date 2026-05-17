@@ -133,6 +133,7 @@ Nein = Aktuelles (möglicherweise unvollständiges) Ergebnis behalten</value></d
   <data name="Column_Name" xml:space="preserve"><value>Name</value></data>
   <data name="Column_DataType" xml:space="preserve"><value>Datentyp</value></data>
   <data name="Column_StartValue" xml:space="preserve"><value>Startwert</value></data>
+  <data name="Legend_Selected" xml:space="preserve"><value>Ausgewählt</value></data>
   <!-- BulkChangeDialog -->
   <data name="Dialog_BulkEdit" xml:space="preserve"><value>Massenänderung</value></data>
   <data name="Dialog_Set" xml:space="preserve"><value>Setzen</value></data>
