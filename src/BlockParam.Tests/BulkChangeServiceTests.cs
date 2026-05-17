@@ -1,3 +1,5 @@
+using System.Globalization;
+using System.Threading;
 using FluentAssertions;
 using NSubstitute;
 using BlockParam.Config;
@@ -13,6 +15,14 @@ public class BulkChangeServiceTests : IDisposable
     private readonly SimaticMLParser _parser = new();
     private readonly ChangeLogger _logger = new();
     private readonly List<string> _tempDirs = new();
+
+    public BulkChangeServiceTests()
+    {
+        // Scope qualifier text comes from Strings.resx — pin culture so en-US
+        // assertions are stable regardless of the runner's OS language.
+        Thread.CurrentThread.CurrentUICulture = CultureInfo.GetCultureInfo("en-US");
+        Thread.CurrentThread.CurrentCulture = CultureInfo.GetCultureInfo("en-US");
+    }
 
     public void Dispose()
     {
@@ -192,5 +202,71 @@ public class BulkChangeServiceTests : IDisposable
         result.IsSuccess.Should().BeTrue();
         var newDb = _parser.Parse(result.ModifiedXml);
         newDb.Members.First(m => m.Name == "Speed").StartValue.Should().Be("2000");
+    }
+
+    /// <summary>
+    /// #143 / #152: when the scope spans more than one selected DB (IsCrossDb = true),
+    /// the change-log Scope column must carry the cross-DB qualifier appended to the
+    /// concrete AncestorName so an auditor can distinguish a cross-DB bulk apply.
+    /// </summary>
+    [Fact]
+    public void LogChanges_CrossDbScope_ScopeEntryCarriesCrossDbQualifier()
+    {
+        var xml = TestFixtures.LoadXml("udt-instances-db.xml");
+        var db = _parser.Parse(xml);
+        var analyzer = new HierarchyAnalyzer();
+        var moduleId = db.AllMembers().First(m => m.Name == "ModuleId");
+        var withinDbScope = analyzer.Analyze(db, moduleId).Scopes.Last();
+
+        // Promote the within-DB scope to a cross-DB scope (IsCrossDb = true).
+        // Concrete AncestorName is preserved; IsCrossDb is the only change.
+        var crossDbScope = new ScopeLevel(
+            withinDbScope.AncestorName,
+            withinDbScope.AncestorPath,
+            withinDbScope.Depth,
+            withinDbScope.MatchingMembers,
+            withinDbScope.LeafName,
+            isCrossDb: true);
+
+        _logger.Clear();
+        var service = CreateService();
+        var changeSet = new ChangeSet("UdtInstancesDB", "ModuleId", "Int", crossDbScope, "55");
+
+        service.ApplyViaXml(xml, changeSet);
+
+        _logger.Entries.Should().NotBeEmpty();
+        _logger.Entries.Should().OnlyContain(
+            e => e.Scope == withinDbScope.AncestorName + " (all selected DBs)",
+            "cross-DB applies must carry the qualifier so auditors can distinguish them");
+        _logger.Entries.Should().OnlyContain(e => !e.Scope.Contains("*"),
+            "the audit log must record the concrete AncestorName, not the UI wildcard pattern");
+    }
+
+    /// <summary>
+    /// #152: a single-DB scope (IsCrossDb = false) must NOT carry the cross-DB qualifier
+    /// — the Scope column must equal the bare AncestorName, unchanged.
+    /// </summary>
+    [Fact]
+    public void LogChanges_SingleDbScope_ScopeEntryIsBarAncestorName()
+    {
+        var xml = TestFixtures.LoadXml("udt-instances-db.xml");
+        var db = _parser.Parse(xml);
+        var analyzer = new HierarchyAnalyzer();
+        var moduleId = db.AllMembers().First(m => m.Name == "ModuleId");
+        var scope = analyzer.Analyze(db, moduleId).Scopes.Last();
+        scope.IsCrossDb.Should().BeFalse("baseline: within-DB scope must not be flagged cross-DB");
+
+        _logger.Clear();
+        var service = CreateService();
+        var changeSet = new ChangeSet("UdtInstancesDB", "ModuleId", "Int", scope, "42");
+
+        service.ApplyViaXml(xml, changeSet);
+
+        _logger.Entries.Should().NotBeEmpty();
+        _logger.Entries.Should().OnlyContain(
+            e => e.Scope == scope.AncestorName,
+            "single-DB applies must log the bare AncestorName without any qualifier");
+        _logger.Entries.Should().OnlyContain(e => !e.Scope.Contains("(all selected DBs)"),
+            "the cross-DB qualifier must not appear on single-DB log entries");
     }
 }

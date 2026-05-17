@@ -1,4 +1,5 @@
 using BlockParam.Config;
+using BlockParam.Localization;
 using BlockParam.Models;
 using BlockParam.SimaticML;
 
@@ -130,6 +131,16 @@ public class BulkChangeService
 
     private void LogChanges(ChangeSet changeSet, IEnumerable<ValueChange> changes)
     {
+        // Retain the concrete AncestorName for audit traceability (never log the
+        // "*" UI pattern here). When the scope spans more than one selected DB
+        // (IsCrossDb = true), append the cross-DB qualifier so an auditor reading
+        // the log can distinguish a cross-DB bulk apply from a single-DB one.
+        // The qualifier text is sourced from Strings.resx (Scope_CrossDbQualifier)
+        // to satisfy the no-inline-user-visible-strings guardrail. (#143 / #152)
+        var auditScope = changeSet.Scope.IsCrossDb
+            ? changeSet.Scope.AncestorName + Res.Get("Scope_CrossDbQualifier")
+            : changeSet.Scope.AncestorName;
+
         foreach (var change in changes)
         {
             _logger.Log(new ChangeLogEntry(
@@ -139,7 +150,7 @@ public class BulkChangeService
                 change.Datatype,
                 change.OldValue,
                 change.NewValue,
-                changeSet.Scope.AncestorName));
+                auditScope));
         }
     }
 }

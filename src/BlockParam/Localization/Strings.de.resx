@@ -58,6 +58,7 @@
   <data name="Error_NotADataBlock" xml:space="preserve"><value>Das ausgewählte Element ist kein Datenbaustein.</value></data>
   <data name="Error_ProtectedBlock" xml:space="preserve"><value>Dieser Datenbaustein ist schreib- oder Know-how-geschützt.</value></data>
   <!-- Logging -->
+  <data name="Scope_CrossDbQualifier" xml:space="preserve"><value> (alle ausgewählten DBs)</value></data>
   <data name="Log_ValueChanged" xml:space="preserve"><value>'{0}' geändert von '{1}' auf '{2}'</value></data>
   <data name="Log_BulkOperationComplete" xml:space="preserve"><value>Massenoperation abgeschlossen: {0} Werte geändert in '{1}'</value></data>
   <!-- Bereinigung -->

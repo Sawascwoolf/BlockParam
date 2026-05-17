@@ -91,6 +91,14 @@
     <value>This Data Block is write-protected or know-how protected.</value>
   </data>
   <!-- Logging -->
+  <!-- Appended to AncestorName in the change-log Scope column when the bulk
+       operation was applied across more than one selected DB (IsCrossDb = true).
+       Kept as a plain parenthetical so auditors reading the log can distinguish
+       a cross-DB bulk apply from a single-DB one.  (#143 / #152) -->
+  <data name="Scope_CrossDbQualifier" xml:space="preserve">
+    <value> (all selected DBs)</value>
+    <comment>Parenthetical appended to the concrete AncestorName in the audit-log Scope column when IsCrossDb is true. The leading space is intentional so it reads "TP307.drive1 (all selected DBs)" without extra glue code in the caller.</comment>
+  </data>
   <data name="Log_ValueChanged" xml:space="preserve">
     <value>Changed '{0}' from '{1}' to '{2}'</value>
     <comment>{0} = member path, {1} = old value, {2} = new value</comment>
