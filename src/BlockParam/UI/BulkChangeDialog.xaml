@@ -23,13 +23,13 @@
             <local:StringNotEmptyToVisibilityConverter x:Key="StringToVis"/>
             <local:InvertBoolConverter x:Key="InvertBool"/>
 
-            <!-- #148: selected/targeted Value-cell outline. A 2px indigo
-                 border (NOT a fill) so the orthogonal state fill
-                 (green / blue / amber / red) stays visible underneath.
-                 Deliberately distinct from the green #D5F0D5 / #4CAF50
-                 "Already matching" affordance. Single token — no scattered
-                 inline hex. -->
-            <SolidColorBrush x:Key="SelectedCellOutline" Color="#5B21B6"/>
+        <!-- #148: selected/targeted Value-cell outline. A 2px indigo
+             border (NOT a fill) so the orthogonal state fill
+             (green / blue / amber / red) stays visible underneath.
+             Deliberately distinct from the green #D5F0D5 / #4CAF50
+             "Already matching" affordance. Single token — no scattered
+             inline hex. -->
+        <SolidColorBrush x:Key="SelectedCellOutline" Color="#5B21B6"/>
 
         <!-- Trigger-summary overflow rules for the pill row. Mirrors the
              defaults baked into PillOverflowOptions.DataBlockDefault(): keep

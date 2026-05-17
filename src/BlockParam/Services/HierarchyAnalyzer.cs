@@ -276,7 +276,8 @@ public class HierarchyAnalyzer
             depth: -2000, // Sorts last (broadest).
             matchingMembers: matches,
             leafName: name,
-            isCrossDb: true);
+            isCrossDb: true,
+            isAllSelectedDbsScope: true);
     }
 
     /// <summary>
@@ -545,7 +546,8 @@ public class ScopeLevel
         int depth,
         IReadOnlyList<MemberNode> matchingMembers,
         string leafName = "",
-        bool isCrossDb = false)
+        bool isCrossDb = false,
+        bool isAllSelectedDbsScope = false)
     {
         AncestorName = ancestorName;
         AncestorPath = ancestorPath;
@@ -553,6 +555,7 @@ public class ScopeLevel
         MatchingMembers = matchingMembers;
         LeafName = leafName;
         IsCrossDb = isCrossDb;
+        IsAllSelectedDbsScope = isAllSelectedDbsScope;
     }
 
     /// <summary>
@@ -586,6 +589,16 @@ public class ScopeLevel
     /// suffix into the label template (#143) removed that substring.
     /// </summary>
     public bool IsCrossDb { get; }
+
+    /// <summary>
+    /// True only for the "All selected DBs" mega-scope, whose
+    /// <see cref="AncestorName"/> ("All selected DBs") already self-describes
+    /// the cross-DB span. Lets the audit log skip the redundant cross-DB
+    /// qualifier here (it is still appended for cross-DB <em>lift</em> scopes,
+    /// whose AncestorName is a concrete within-DB ancestor). Explicit flag
+    /// rather than substring-matching AncestorName (#152 review).
+    /// </summary>
+    public bool IsAllSelectedDbsScope { get; }
 
     /// <summary>Number of members that would be affected by this bulk operation</summary>
     public int MatchCount => MatchingMembers.Count;

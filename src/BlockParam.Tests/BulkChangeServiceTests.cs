@@ -269,4 +269,44 @@ public class BulkChangeServiceTests : IDisposable
         _logger.Entries.Should().OnlyContain(e => !e.Scope.Contains("(all selected DBs)"),
             "the cross-DB qualifier must not appear on single-DB log entries");
     }
+
+    /// <summary>
+    /// #152 review: the "All selected DBs" mega-scope already self-describes
+    /// via its AncestorName, so the change-log Scope column must stay the clean
+    /// "All selected DBs" — never the doubled "All selected DBs (all selected
+    /// DBs)" stutter. Drives the REAL <c>BuildAllSelectedDbsScope</c> through
+    /// <c>AnalyzeMulti</c> (not a hand-faked ScopeLevel) so the
+    /// <see cref="ScopeLevel.IsAllSelectedDbsScope"/> flag is exercised end to
+    /// end. Without the flag this test reproduces the stutter and fails.
+    /// </summary>
+    [Fact]
+    public void LogChanges_AllSelectedDbsMegaScope_NoDoubledQualifier()
+    {
+        var xml = TestFixtures.LoadXml("flat-db.xml");
+        var db1 = _parser.Parse(xml);
+        var db2 = _parser.Parse(TestFixtures.LoadXml("flat-db.xml"));
+        var analyzer = new HierarchyAnalyzer();
+        var speed = db1.AllMembers().First(m => m.Name == "Speed");
+
+        // The real mega-scope from the analyzer — not a constructed stand-in.
+        var megaScope = analyzer.AnalyzeMulti(new[] { db1, db2 }, db1, speed)
+            .Scopes.Single(s => s.IsAllSelectedDbsScope);
+        megaScope.IsCrossDb.Should().BeTrue("the mega-scope spans every selected DB");
+        megaScope.AncestorName.Should().Be("All selected DBs",
+            "the mega-scope's AncestorName already self-describes the cross-DB span");
+
+        _logger.Clear();
+        var service = CreateService();
+        var changeSet = new ChangeSet("FlatDB", "Speed", "Int", megaScope, "100");
+
+        service.ApplyViaXml(xml, changeSet);
+
+        _logger.Entries.Should().NotBeEmpty();
+        _logger.Entries.Should().OnlyContain(
+            e => e.Scope == "All selected DBs",
+            "the self-describing mega-scope must log its bare AncestorName");
+        _logger.Entries.Should().OnlyContain(
+            e => !e.Scope.Contains("(all selected DBs)"),
+            "the redundant cross-DB qualifier must be suppressed for the mega-scope (#152)");
+    }
 }
