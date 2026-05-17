@@ -131,11 +131,38 @@ public sealed class DiagnosticsScenarioMenu : ContextMenuAddIn
 
         var ctx = new ScenarioContext(dbName, plcName, adapter, exporter, writer, tempDir);
 
+        // Capture the (stable) block group ONCE while db is still a fresh handle.
+        // TIA's ImportBlock(Override) disposes the DataBlock instance (#19), so a
+        // scenario that imports invalidates the handle for the NEXT scenario.
+        // Re-resolving the live block from the group before each scenario keeps
+        // them isolated. The group is a method LOCAL (never a field) per the
+        // Add-In rule against persisting IEngineeringObject.
+        PlcBlockGroup group;
+        try
+        {
+            group = (PlcBlockGroup)adapter.GetBlockGroup(db);
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex,
+                "{Tag} db={Db} plc={Plc} result=fail reason=block_group_resolve",
+                ScenarioTag, dbName, plcName);
+            return;
+        }
+
         foreach (var scenario in Scenarios)
         {
             try
             {
-                scenario.Run(db, ctx);
+                var liveDb = group.Blocks.Find(dbName) as DataBlock;
+                if (liveDb == null)
+                {
+                    Log.Warning(
+                        "{Tag} scenario={Scenario} db={Db} plc={Plc} result=skip reason=block_not_found",
+                        ScenarioTag, scenario.Name, dbName, plcName);
+                    continue;
+                }
+                scenario.Run(liveDb, ctx);
             }
             catch (Exception ex)
             {
