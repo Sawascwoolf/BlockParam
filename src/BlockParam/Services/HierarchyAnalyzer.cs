@@ -124,10 +124,12 @@ public class HierarchyAnalyzer
         if (matches.Count < 2) return null;
 
         return new ScopeLevel(
-            ancestorName: $"all selected DBs.{ancestorPath}",
+            ancestorName: ancestorPath,
             ancestorPath: ancestorPath,
             depth: -1000 + ancestor.Depth,
-            matchingMembers: matches);
+            matchingMembers: matches,
+            leafName: name,
+            isCrossDb: true);
     }
 
     private static List<ScopeLevel> DeduplicateByMatchCount(List<ScopeLevel> scopes)
@@ -232,11 +234,17 @@ public class HierarchyAnalyzer
 
         if (lifted.Count == 0) return null;
 
+        // The " — across all selected DBs" suffix used to be string-appended
+        // onto AncestorName here; #143 folded it into the patterned label
+        // (the leading "*" already says "varies across DBs"). AncestorName
+        // stays the concrete within-DB name for audit/classification.
         return new ScopeLevel(
-            ancestorName: $"{withinDbScope.AncestorName} — across all selected DBs",
+            ancestorName: withinDbScope.AncestorName,
             ancestorPath: withinDbScope.AncestorPath,
             depth: -1000 + withinDbScope.Depth, // Cross-DB scopes sort after their within-DB sibling.
-            matchingMembers: lifted);
+            matchingMembers: lifted,
+            leafName: selectedMember.Name,
+            isCrossDb: true);
     }
 
     /// <summary>
@@ -266,7 +274,10 @@ public class HierarchyAnalyzer
             ancestorName: "All selected DBs",
             ancestorPath: "",
             depth: -2000, // Sorts last (broadest).
-            matchingMembers: matches);
+            matchingMembers: matches,
+            leafName: name,
+            isCrossDb: true,
+            isAllSelectedDbsScope: true);
     }
 
     /// <summary>
@@ -369,11 +380,19 @@ public class HierarchyAnalyzer
                 labelParts[d] = (mask & (1 << d)) != 0 ? selectedIndices[d].ToString() : "*";
             var prefixLabel = $"[{string.Join(",", labelParts)}]";
 
+            // Leaf is meaningful only for array-of-UDT (nested field selected);
+            // when the element itself is the target the index segment already
+            // identifies it.
+            var partialLeaf = ReferenceEquals(arrayElement, selectedMember)
+                ? ""
+                : selectedMember.Name;
+
             result.Add(new ScopeLevel(
                 ancestorName: $"{db.Name}.{arrayParent.Path}{prefixLabel}",
                 ancestorPath: $"{arrayParent.Path}{prefixLabel}",
                 depth: arrayParent.Depth + 1,
-                matchingMembers: members));
+                matchingMembers: members,
+                leafName: partialLeaf));
         }
 
         return result;
@@ -420,7 +439,8 @@ public class HierarchyAnalyzer
                     ancestorName: $"{db.Name}.{ancestor.Path}",
                     ancestorPath: ancestor.Path,
                     depth: ancestor.Depth,
-                    matchingMembers: matchesInScope));
+                    matchingMembers: matchesInScope,
+                    leafName: selectedMember.Name));
             }
         }
 
@@ -431,7 +451,8 @@ public class HierarchyAnalyzer
                 ancestorName: db.Name,
                 ancestorPath: "",
                 depth: -1, // Root level
-                matchingMembers: allMatches));
+                matchingMembers: allMatches,
+                leafName: selectedMember.Name));
         }
 
         // Remove duplicate scopes (where match count is the same as a broader scope)
@@ -523,15 +544,26 @@ public class ScopeLevel
         string ancestorName,
         string ancestorPath,
         int depth,
-        IReadOnlyList<MemberNode> matchingMembers)
+        IReadOnlyList<MemberNode> matchingMembers,
+        string leafName = "",
+        bool isCrossDb = false,
+        bool isAllSelectedDbsScope = false)
     {
         AncestorName = ancestorName;
         AncestorPath = ancestorPath;
         Depth = depth;
         MatchingMembers = matchingMembers;
+        LeafName = leafName;
+        IsCrossDb = isCrossDb;
+        IsAllSelectedDbsScope = isAllSelectedDbsScope;
     }
 
-    /// <summary>Display name of the ancestor (e.g. "TP307.drive1" or "TP307")</summary>
+    /// <summary>
+    /// Concrete DB-qualified ancestor name (e.g. "TP307.drive1" or "TP307").
+    /// Kept concrete on purpose: used for scope classification and as the
+    /// audit-log scope column. The user-facing label is <see cref="Label"/>,
+    /// which renders the <em>pattern</em> via <see cref="ScopeLabelFormatter"/>.
+    /// </summary>
     public string AncestorName { get; }
 
     /// <summary>Full path of the ancestor (empty for DB root)</summary>
@@ -543,8 +575,41 @@ public class ScopeLevel
     /// <summary>All members matching the target name within this scope</summary>
     public IReadOnlyList<MemberNode> MatchingMembers { get; }
 
+    /// <summary>
+    /// Name of the leaf member being written (e.g. "elementId"). Threaded in
+    /// at construction so the patterned <see cref="Label"/> can name the
+    /// field the bulk op actually changes (#143).
+    /// </summary>
+    public string LeafName { get; }
+
+    /// <summary>
+    /// True when this scope spans more than one selected DB (cross-DB lift /
+    /// "all selected DBs" mega-scope). Replaces the old "contains a magic
+    /// substring in AncestorName" classification — folding the cross-DB
+    /// suffix into the label template (#143) removed that substring.
+    /// </summary>
+    public bool IsCrossDb { get; }
+
+    /// <summary>
+    /// True only for the "All selected DBs" mega-scope, whose
+    /// <see cref="AncestorName"/> ("All selected DBs") already self-describes
+    /// the cross-DB span. Lets the audit log skip the redundant cross-DB
+    /// qualifier here (it is still appended for cross-DB <em>lift</em> scopes,
+    /// whose AncestorName is a concrete within-DB ancestor). Explicit flag
+    /// rather than substring-matching AncestorName (#152 review).
+    /// </summary>
+    public bool IsAllSelectedDbsScope { get; }
+
     /// <summary>Number of members that would be affected by this bulk operation</summary>
     public int MatchCount => MatchingMembers.Count;
 
-    public override string ToString() => $"Set all {MatchCount} in '{AncestorName}'";
+    /// <summary>
+    /// The single user-facing label, e.g. <c>Set all 4 in *.resetButton.elementId</c>.
+    /// All render sites (both XAML ItemTemplates, the Set button, its tooltip,
+    /// <see cref="ToString"/>, the context menu) bind/route through this so
+    /// they cannot drift (#143).
+    /// </summary>
+    public string Label => ScopeLabelFormatter.Format(this);
+
+    public override string ToString() => Label;
 }

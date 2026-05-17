@@ -99,14 +99,14 @@ public class HierarchyAnalyzerMultiDbTests
 
         // No cross-DB scope should have a match count larger than the
         // db1-only counts: db2 contributes nothing.
+        // (#143: cross-DB classification moved from a magic AncestorName
+        // substring to the explicit ScopeLevel.IsCrossDb flag.)
         var withinDbMax = result.Scopes
-            .Where(s => s.AncestorName != "All selected DBs"
-                        && !s.AncestorName.Contains("across all selected DBs"))
+            .Where(s => !s.IsCrossDb)
             .Max(s => s.MatchCount);
 
         var crossDbMax = result.Scopes
-            .Where(s => s.AncestorName.Contains("across all selected DBs")
-                        || s.AncestorName == "All selected DBs")
+            .Where(s => s.IsCrossDb)
             .DefaultIfEmpty()
             .Max(s => s?.MatchCount ?? 0);
 
@@ -149,15 +149,15 @@ public class HierarchyAnalyzerMultiDbTests
 
         // For each within-DB scope, there must NOT be a cross-DB sibling
         // with the same MatchCount — that would be a noop sibling.
+        // (#143: classify via ScopeLevel.IsCrossDb, not an AncestorName substring.)
         var withinDbScopes = result.Scopes
-            .Where(s => !s.AncestorName.Contains("across all selected DBs")
-                        && s.AncestorName != "All selected DBs")
+            .Where(s => !s.IsCrossDb)
             .ToList();
 
         foreach (var w in withinDbScopes)
         {
             result.Scopes
-                .Where(s => s.AncestorName.Contains("across all selected DBs"))
+                .Where(s => s.IsCrossDb)
                 .Should().NotContain(s => s.MatchCount == w.MatchCount
                                           && s.AncestorPath == w.AncestorPath,
                     "noop cross-DB sibling must be suppressed when the lift adds no matches");

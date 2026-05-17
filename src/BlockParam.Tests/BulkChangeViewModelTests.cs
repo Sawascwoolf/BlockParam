@@ -94,6 +94,50 @@ public class BulkChangeViewModelTests : IDisposable
     }
 
     /// <summary>
+    /// #144: AcceptSuggestion cancels the NewValue debounce (verified above),
+    /// which is the only re-raise site for SetButtonText/SetButtonTooltip on
+    /// the typed path. Without an explicit re-raise the Set-button caption
+    /// stays frozen at the pre-selection count ("Set 0 in 'X'") even though
+    /// the preview and enable state move on. The fix re-raises both notifications
+    /// inside AcceptSuggestion after UpdateHighlighting().
+    /// </summary>
+    [Fact]
+    public void AcceptSuggestion_updates_SetButtonText_and_raises_notification()
+    {
+        var vm = CreateViewModelWithRule("udt-instances-db.xml", @"{ ""rules"": [] }");
+
+        FlatTreeManager.ExpandAll(vm.Tree.RootMembers);
+        vm.RefreshFlatList();
+
+        var moduleId = vm.Tree.FlatMembers.First(m => m.Name == "ModuleId" && m.IsLeaf);
+        vm.Selection.SelectedFlatMember = moduleId;
+        var dbScope = vm.Selection.AvailableScopes.First(s => s.MatchCount == 4);
+        vm.Selection.SelectedScope = dbScope;
+
+        // Pre-condition: empty value → 0 would change → caption advertises 0.
+        vm.SetButtonText.Should().Contain("0",
+            "with no value typed, nothing would change yet");
+
+        var raised = new List<string?>();
+        ((INotifyPropertyChanged)vm).PropertyChanged += (_, e) => raised.Add(e.PropertyName);
+
+        // Accept a value that differs from the existing "42" — all 4 would change.
+        vm.AcceptSuggestion("99");
+
+        raised.Should().Contain(nameof(BulkChangeViewModel.SetButtonText),
+            "AcceptSuggestion must re-raise the composed Set-button caption");
+        raised.Should().Contain(nameof(BulkChangeViewModel.SetButtonTooltip),
+            "AcceptSuggestion must re-raise the composed Set-button tooltip");
+        // #143: label is now the patterned form (wildcard + leaf), routed
+        // through the localized MenuTitle_SetAll template (assert via Res so
+        // the test is culture-independent — the runner OS may be de). The
+        // #144 fix here is the count moving off 0 + the notification firing.
+        vm.SetButtonText.Should().Be(
+            BlockParam.Localization.Res.Format("MenuTitle_SetAll", 4, "*.ModuleId"),
+            "the caption must reflect the accepted suggestion's count, not stay frozen at 0");
+    }
+
+    /// <summary>
     /// #26: Pre-existing values that violate a configured rule should be surfaced
     /// in <see cref="BulkChangeViewModel.ExistingIssues"/> on dialog load —
     /// without the user needing to edit them first.
@@ -173,13 +217,18 @@ public class BulkChangeViewModelTests : IDisposable
         vm.Selection.SelectedScope = dbScope;
 
         vm.NewValue = "42"; // matches every selected member — 0 would change
-        vm.SetButtonText.Should().Be("Set 0 in 'UdtInstancesDB'",
+        // #143: patterned label (wildcard + leaf) via the localized
+        // MenuTitle_SetAll template — assert through Res so the test is
+        // culture-independent (matches the manual-mode test below).
+        vm.SetButtonText.Should().Be(
+            BlockParam.Localization.Res.Format("MenuTitle_SetAll", 0, "*.ModuleId"),
             "all 4 already hold '42' so the button must advertise 0, not 4");
         vm.SetPendingCommand.CanExecute(null).Should().BeFalse(
             "enable state and label come from the same predicate");
 
         vm.NewValue = "99"; // different — all 4 would change
-        vm.SetButtonText.Should().Be("Set 4 in 'UdtInstancesDB'");
+        vm.SetButtonText.Should().Be(
+            BlockParam.Localization.Res.Format("MenuTitle_SetAll", 4, "*.ModuleId"));
         vm.SetPendingCommand.CanExecute(null).Should().BeTrue();
     }
 

@@ -33,7 +33,7 @@
   <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value></resheader>
   <!-- Kontextmenü -->
   <data name="MenuTitle_BulkChange" xml:space="preserve"><value>BlockParam...</value></data>
-  <data name="MenuTitle_SetAll" xml:space="preserve"><value>Alle {0} in '{1}' setzen</value></data>
+  <data name="MenuTitle_SetAll" xml:space="preserve"><value>Alle {0} in {1} setzen</value></data>
   <data name="MenuTitle_EditStartValues" xml:space="preserve"><value>Startwerte bearbeiten...</value></data>
   <!-- Dialog -->
   <data name="Dialog_Title" xml:space="preserve"><value>BlockParam: {0}</value></data>
@@ -58,6 +58,7 @@
   <data name="Error_NotADataBlock" xml:space="preserve"><value>Das ausgewählte Element ist kein Datenbaustein.</value></data>
   <data name="Error_ProtectedBlock" xml:space="preserve"><value>Dieser Datenbaustein ist schreib- oder Know-how-geschützt.</value></data>
   <!-- Logging -->
+  <data name="Scope_CrossDbQualifier" xml:space="preserve"><value> (alle ausgewählten DBs)</value></data>
   <data name="Log_ValueChanged" xml:space="preserve"><value>'{0}' geändert von '{1}' auf '{2}'</value></data>
   <data name="Log_BulkOperationComplete" xml:space="preserve"><value>Massenoperation abgeschlossen: {0} Werte geändert in '{1}'</value></data>
   <!-- Bereinigung -->
@@ -133,6 +134,7 @@ Nein = Aktuelles (möglicherweise unvollständiges) Ergebnis behalten</value></d
   <data name="Column_Name" xml:space="preserve"><value>Name</value></data>
   <data name="Column_DataType" xml:space="preserve"><value>Datentyp</value></data>
   <data name="Column_StartValue" xml:space="preserve"><value>Startwert</value></data>
+  <data name="Legend_Selected" xml:space="preserve"><value>Ausgewählt</value></data>
   <!-- BulkChangeDialog -->
   <data name="Dialog_BulkEdit" xml:space="preserve"><value>Massenänderung</value></data>
   <data name="Dialog_Set" xml:space="preserve"><value>Setzen</value></data>
@@ -144,9 +146,9 @@ Dies kann nicht rückgängig gemacht werden.</value></data>
   <data name="Dialog_Constants" xml:space="preserve"><value>Konstanten</value></data>
   <data name="Dialog_RefreshConstants" xml:space="preserve"><value>Konstanten aktualisieren</value></data>
   <data name="Dialog_SetTooltip" xml:space="preserve"><value>Bulk-Werte als ausstehend markieren (gelb)</value></data>
-  <data name="Dialog_SetTooltip_ScopeIdle" xml:space="preserve"><value>{0} Element(e) in '{1}'</value></data>
+  <data name="Dialog_SetTooltip_ScopeIdle" xml:space="preserve"><value>{0} Element(e) in {1}</value></data>
   <data name="Dialog_SetTooltip_ManualIdle" xml:space="preserve"><value>{0} Element(e) ausgewählt</value></data>
-  <data name="Dialog_SetTooltip_ScopeBreakdown" xml:space="preserve"><value>{0} von {1} in '{2}' werden gesetzt · {3} bereits auf diesem Wert</value></data>
+  <data name="Dialog_SetTooltip_ScopeBreakdown" xml:space="preserve"><value>{0} von {1} in {2} werden gesetzt · {3} bereits auf diesem Wert</value></data>
   <data name="Dialog_SetTooltip_ManualBreakdown" xml:space="preserve"><value>{0} von {1} ausgewählten werden gesetzt · {2} bereits auf diesem Wert</value></data>
   <data name="Dialog_LimitReachedOverlay_Title" xml:space="preserve"><value>Tägliches Gratis-Limit erreicht</value></data>
   <data name="Dialog_LimitReachedOverlay_Text" xml:space="preserve"><value>Upgrade auf Pro für unbegrenzte Massenänderungen, oder bis morgen warten.</value></data>
