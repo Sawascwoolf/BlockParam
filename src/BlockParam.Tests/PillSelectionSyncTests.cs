@@ -570,16 +570,29 @@ public class PillSelectionSync_Combined_Tests
 
 // ─────────────────────────────────────────────────────────────────────────────
 // #141 — DP-callback ordering: SelectedItems set BEFORE any rows exist
+//
+// Regression guard for the symptom-A scenario in #141 (numberless instance DB).
+// These pin the EXISTING behaviour: the per-row seed in
+// PillSelectionSync.OnRowAdded reconciles each new row against SelectedItems
+// membership by reference identity AS THE ROW MATERIALISES, so the closed
+// trigger summary becomes correct even when the SelectedItems DP callback
+// fired before the ItemsSource DP callback built any rows. No deferred
+// reconcile / popup-open is involved — verified by reverting
+// PillSelectionSync.cs to origin/main (the per-row seed alone still passes
+// every assertion here); see PR #153 discussion. They lock the behaviour so
+// a future refactor of OnRowAdded can't silently reintroduce the v1.0.14
+// blank-pill regression that was already fixed on main by 7882cc1.
 // ─────────────────────────────────────────────────────────────────────────────
 
 public class PillSelectionSync_OrderIndependence_Tests
 {
     /// <summary>
-    /// Repro of the #141 root cause in the pure sync seam: the
-    /// <c>SelectedItems</c> DP callback fires before the <c>ItemsSource</c>
-    /// callback has built any rows, so <c>ReconcileRowsFromSelectedItems</c>
-    /// is a no-op. The closed trigger summary must still become correct the
-    /// moment rows materialise — WITHOUT a popup-open / deferred re-sync.
+    /// The <c>SelectedItems</c> DP callback fires before the
+    /// <c>ItemsSource</c> callback has built any rows, so the initial
+    /// <c>ReconcileRowsFromSelectedItems</c> pass is a no-op. The closed
+    /// trigger summary must still become correct the moment rows
+    /// materialise — driven purely by the per-row seed in
+    /// <c>OnRowAdded</c>, with no popup-open and no deferred re-sync.
     /// </summary>
     [Fact]
     public void SelectedItems_set_before_rows_still_selects_matching_rows_on_row_add()
@@ -597,12 +610,13 @@ public class PillSelectionSync_OrderIndependence_Tests
         sync.SetSelectedItems(selected);
         state.Items.Should().BeEmpty("ItemsSource callback hasn't fired yet");
 
-        // 2) ItemsSource arrives SECOND — rows materialise now.
+        // 2) ItemsSource arrives SECOND — rows materialise now. The per-row
+        // seed in OnRowAdded marks src1's row IsCheckedTrue immediately.
         itemSource.ItemsSource = new ObservableCollection<object> { src1, src2 };
 
-        // The deferred reconcile must have run on first row-add: the closed
-        // trigger summary (Items.Where(IsCheckedTrue)) is now correct with
-        // no popup ever opened.
+        // The closed trigger summary (Items.Where(IsCheckedTrue) →
+        // RaiseAggregatesChanged INPC push) is now correct with no popup
+        // ever opened and no OnIsOpenFlippedToTrue re-sync.
         state.Items[0].IsSelected.Should().BeTrue("src1 was pre-selected");
         state.Items[1].IsSelected.Should().BeFalse();
         state.SelectedCount.Should().Be(1);
@@ -611,7 +625,7 @@ public class PillSelectionSync_OrderIndependence_Tests
     }
 
     [Fact]
-    public void Deferred_reconcile_fires_only_once_per_SelectedItems_set()
+    public void PerRowSeed_marks_each_pre_selected_row_once_as_rows_arrive()
     {
         var state = new PillMultiSelectInternalState();
         var resolver = new MemberPathResolver();
@@ -623,9 +637,9 @@ public class PillSelectionSync_OrderIndependence_Tests
 
         sync.SetSelectedItems(new ObservableCollection<object> { src1 });
 
-        // Add rows incrementally so OnRowAdded fires per row. The armed
-        // deferred-reconcile flag must self-clear after the first add and
-        // not re-run for src2.
+        // Add rows incrementally so OnRowAdded fires per row. Each row is
+        // seeded independently from SelectedItems membership; src2 (not
+        // pre-selected) must stay unchecked.
         var sources = new ObservableCollection<object>();
         itemSource.ItemsSource = sources;
         sources.Add(src1);
@@ -636,10 +650,11 @@ public class PillSelectionSync_OrderIndependence_Tests
     }
 
     [Fact]
-    public void Empty_SelectedItems_before_rows_does_not_arm_deferred_reconcile()
+    public void Empty_SelectedItems_before_rows_leaves_rows_unchecked_then_edge_a_still_works()
     {
-        // An empty SelectedItems needs no recovery; later toggles must still
-        // work normally (no stale armed flag interfering).
+        // An empty SelectedItems selects nothing; a later add to the
+        // collection must still flip the matching row (Edge A) normally —
+        // no stale internal state from the empty-then-populate path.
         var state = new PillMultiSelectInternalState();
         var resolver = new MemberPathResolver();
         var itemSource = new PillItemSource(state, resolver);
@@ -653,7 +668,7 @@ public class PillSelectionSync_OrderIndependence_Tests
 
         state.Items[0].IsSelected.Should().BeFalse();
 
-        // Normal Edge-A still works after the no-arm path.
+        // Normal Edge-A still works after the empty-seed path.
         selected.Add(src);
         state.Items[0].IsSelected.Should().BeTrue();
     }

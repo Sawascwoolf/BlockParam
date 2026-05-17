@@ -57,12 +57,6 @@ public class PlcPillViewModel : ViewModelBase
         AvailableDbs = new ObservableCollection<DataBlockListItem>(initialActiveItems);
 
         // SelectedDbs starts with the currently active DBs for this PLC.
-        // These are the SAME instances as AvailableDbs (by reference), so the
-        // closed trigger can render the selection summary immediately —
-        // PillSelectionSync reconciles row IsChecked by reference identity.
-        // This is the #141 decoupling: the closed-pill summary no longer
-        // depends on the first popup-open re-sync (OnIsOpenFlippedToTrue);
-        // that path now only does the lazy *full PLC list* fetch.
         SelectedDbs = new ObservableCollection<object>(initialActiveItems);
         SelectedDbs.CollectionChanged += OnSelectedDbsChanged;
 

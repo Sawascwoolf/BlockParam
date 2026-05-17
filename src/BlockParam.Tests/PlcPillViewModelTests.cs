@@ -113,8 +113,21 @@ public class PlcPillViewModelTests
     }
 
     // ─────────────────────────────────────────────────────────────────────
-    // #141 — numberless instance DB: closed pill must render its selection
-    // WITHOUT a first popup-open, and a trigger click must toggle IsOpen.
+    // #141 — numberless instance DB regression guards.
+    //
+    // #141 was filed against v1.0.14 (two symptoms for a numberless instance
+    // DB like Gen_Main_IDB: A = closed pill renders blank; B = clicking the
+    // pill doesn't open the popup). Both were ALREADY FIXED on main before
+    // PR #153 — symptom A by 7882cc1 ("always-on PLC label" + overflow
+    // formatter Display-fallback for empty abbreviations + pre-populating
+    // AvailableDbs with initialActiveItems), and symptom B works through the
+    // standard ToggleButton.IsChecked → _internalState.IsOpen → IsOpen DP →
+    // PlcPillViewModel.IsOpen two-way chain. These tests are regression
+    // guards that pin BOTH working behaviours so neither can silently
+    // regress; they pass on origin/main and on this branch (see PR #153
+    // discussion for the fail-on-main investigation that found no remaining
+    // defect — the prior #141 deferred-reconcile was non-load-bearing dead
+    // code and was removed).
     // ─────────────────────────────────────────────────────────────────────
 
     [Fact]
@@ -135,9 +148,10 @@ public class PlcPillViewModelTests
         vm.IsOpen.Should().BeFalse();
         vm.IsLoaded.Should().BeFalse("the lazy PLC-list fetch has not run");
 
-        // The active DB is seeded into SelectedDbs by the SAME reference as
-        // AvailableDbs, so PillSelectionSync can mark the row IsCheckedTrue
-        // and the closed trigger renders the summary — no OnIsOpenFlippedToTrue.
+        // AvailableDbs is pre-populated with initialActiveItems (7882cc1) and
+        // SelectedDbs is seeded with the SAME reference, so PillSelectionSync's
+        // per-row seed can mark the row IsCheckedTrue and the closed trigger
+        // renders the summary — no OnIsOpenFlippedToTrue / popup-open needed.
         vm.SelectedDbs.Should().ContainSingle().Which.Should().BeSameAs(idb);
         vm.AvailableDbs.Should().ContainSingle().Which.Should().BeSameAs(idb);
         vm.Label.Should().NotBeNull();
@@ -159,8 +173,9 @@ public class PlcPillViewModelTests
                     new List<DataBlockListItem> { idb });
             });
 
-        // Simulate the trigger click result: the IsChecked→IsOpen chain
-        // ends at PlcPillViewModel.IsOpen = true.
+        // The IsChecked→IsOpen chain ends at PlcPillViewModel.IsOpen = true;
+        // the end-to-end click is covered by the [UIFact] below — this asserts
+        // the VM-side contract (open drives the lazy load exactly once).
         vm.IsOpen = true;
 
         vm.IsOpen.Should().BeTrue("the click must flip IsOpen end-to-end");
@@ -178,12 +193,15 @@ public class PlcPillViewModelTests
     [UIFact]
     public void ClosedPill_NumberlessInstanceDb_RendersSummaryWithoutOpen_FullControlPath()
     {
-        // End-to-end through the real PillMultiSelect control with the
-        // exact BulkChangeDialog binding shape:
+        // Symptom A regression guard, end-to-end through the real
+        // PillMultiSelect control with the exact BulkChangeDialog binding
+        // shape:
         //   ItemsSource  = AvailableDbs
         //   SelectedItems = SelectedDbs (Mode=OneWay)
         //   IsOpen        = TwoWay
-        // The control must show HasSelection on the CLOSED trigger.
+        // The CLOSED trigger must show HasSelection and the DB name without
+        // any popup-open — driven purely by PillSelectionSync's per-row seed
+        // + RaiseAggregatesChanged INPC push (no deferred reconcile exists).
         var idb = InstanceDbItem("Gen_Main_IDB", "CPU_1");
         var vm = new PlcPillViewModel(
             plcName: "CPU_1",
@@ -216,31 +234,98 @@ public class PlcPillViewModelTests
     }
 
     [UIFact]
-    public void TriggerClick_DrivesIsOpen_ThroughControl_ToViewModel()
+    public void RealTriggerClick_NumberlessInstanceDb_TogglesViewModelIsOpen_EndToEnd()
     {
+        // Symptom B regression guard: a REAL ToggleButton "click" on the
+        // closed pill must toggle the popup open end-to-end to the host VM
+        // for the numberless instance DB. Exercises the full production
+        // chain: ToggleButtonAutomationPeer.Toggle() → ToggleButton.OnToggle
+        // → IsChecked TwoWay binding → _internalState.IsOpen → OnInternal-
+        // StatePropertyChanged → IsOpen DP → host TwoWay binding →
+        // PlcPillViewModel.IsOpen → OnIsOpenFlippedToTrue (lazy load once).
         var idb = InstanceDbItem("Gen_Main_IDB", "CPU_1");
+        int loadCalls = 0;
         var vm = new PlcPillViewModel(
             plcName: "CPU_1",
             isAnchor: true,
             initialActiveItems: new List<DataBlockListItem> { idb },
-            loadDbs: _ => Task.FromResult<IReadOnlyList<DataBlockListItem>>(
-                new List<DataBlockListItem> { idb }));
+            loadDbs: _ =>
+            {
+                loadCalls++;
+                return Task.FromResult<IReadOnlyList<DataBlockListItem>>(
+                    new List<DataBlockListItem> { idb });
+            });
 
         var pill = new BlockParam.UI.Controls.PillMultiSelect.PillMultiSelect
         {
             DisplayMemberPath = nameof(DataBlockListItem.Display),
+            AbbreviationMemberPath = nameof(DataBlockListItem.Abbreviation),
+            OverflowOptions =
+                BlockParam.UI.Controls.PillMultiSelect.PillOverflowOptions.DataBlockDefault(),
         };
-        pill.ItemsSource = vm.AvailableDbs;
-        pill.SelectedItems = vm.SelectedDbs;
 
-        // Simulate the trigger click: it flips _internalState.IsOpen, which
-        // bridges to the IsOpen DP. Set via InternalState.IsOpen to model
-        // the ToggleButton.IsChecked TwoWay write (the same seam the click
-        // exercises).
-        pill.InternalState.IsOpen = true;
+        // Mirror BulkChangeDialog.xaml exactly: the DataTemplate DataContext
+        // is the PlcPillViewModel; IsOpen is a TwoWay binding to vm.IsOpen,
+        // SelectedItems is OneWay, ItemsSource bound to AvailableDbs.
+        pill.DataContext = vm;
+        pill.SetBinding(
+            BlockParam.UI.Controls.PillMultiSelect.PillMultiSelect.ItemsSourceProperty,
+            new System.Windows.Data.Binding(nameof(PlcPillViewModel.AvailableDbs)));
+        pill.SetBinding(
+            BlockParam.UI.Controls.PillMultiSelect.PillMultiSelect.SelectedItemsProperty,
+            new System.Windows.Data.Binding(nameof(PlcPillViewModel.SelectedDbs))
+            { Mode = System.Windows.Data.BindingMode.OneWay });
+        pill.SetBinding(
+            BlockParam.UI.Controls.PillMultiSelect.PillMultiSelect.IsOpenProperty,
+            new System.Windows.Data.Binding(nameof(PlcPillViewModel.IsOpen))
+            { Mode = System.Windows.Data.BindingMode.TwoWay });
 
-        pill.IsOpen.Should().BeTrue(
-            "the trigger click must round-trip through the DP to the host");
+        var win = new System.Windows.Window { Width = 400, Height = 300, Content = pill };
+        win.Show();
+        try
+        {
+            pill.Measure(new System.Windows.Size(400, 300));
+            pill.Arrange(new System.Windows.Rect(0, 0, 400, 300));
+            pill.UpdateLayout();
+
+            var trigger = FindVisualChild<System.Windows.Controls.Primitives.ToggleButton>(pill);
+            trigger.Should().NotBeNull("the pill trigger ToggleButton is realised in the visual tree");
+
+            vm.IsOpen.Should().BeFalse("popup starts closed");
+
+            // REAL click via the ToggleButton's automation peer (the same
+            // path WPF input drives): IToggleProvider.Toggle() → OnToggle().
+            var peer = new System.Windows.Automation.Peers.ToggleButtonAutomationPeer(trigger);
+            var toggle = (System.Windows.Automation.Provider.IToggleProvider)
+                peer.GetPattern(System.Windows.Automation.Peers.PatternInterface.Toggle);
+            toggle.Toggle();
+
+            win.Dispatcher.Invoke(() => { },
+                System.Windows.Threading.DispatcherPriority.Background);
+
+            vm.IsOpen.Should().BeTrue(
+                "a real trigger click toggles the popup open end-to-end to the host VM");
+            loadCalls.Should().Be(1,
+                "first open drives the lazy PLC-list fetch exactly once");
+        }
+        finally
+        {
+            win.Close();
+        }
+    }
+
+    private static T? FindVisualChild<T>(System.Windows.DependencyObject root)
+        where T : System.Windows.DependencyObject
+    {
+        if (root is T hit) return hit;
+        int n = System.Windows.Media.VisualTreeHelper.GetChildrenCount(root);
+        for (int i = 0; i < n; i++)
+        {
+            var child = System.Windows.Media.VisualTreeHelper.GetChild(root, i);
+            var found = FindVisualChild<T>(child);
+            if (found != null) return found;
+        }
+        return null;
     }
 
     // ---------- helpers (copied locally; no shared state) ----------

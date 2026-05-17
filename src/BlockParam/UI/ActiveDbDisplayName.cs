@@ -21,9 +21,13 @@ namespace BlockParam.UI;
 /// <para>
 /// The collision lookup depends only on the active-DB set, so a caller that
 /// formats many DBs (the tree builder loop, the per-row pending resolver)
-/// builds one <see cref="ActiveDbDisplayName"/> instance and reuses it,
-/// keeping the per-item cost O(1) instead of rebuilding the name-count map
-/// per call.
+/// builds one <see cref="ActiveDbDisplayName"/> instance and reuses it: the
+/// name-count map is computed once in the constructor (O(dbs)) rather than
+/// rebuilt per call. Each <see cref="Resolve"/> is O(dbs), not O(1) — it
+/// runs a <see cref="object.ReferenceEquals"/> scan over the active-DB list
+/// to recover the index for the anchor-PLC fallback. With the realistic
+/// handful of active DBs this is negligible; if the active set ever grows
+/// large, pass the index in and drop the scan.
 /// </para>
 /// </summary>
 internal sealed class ActiveDbDisplayName
