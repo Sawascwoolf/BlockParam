@@ -44,8 +44,8 @@
     <value>BlockParam...</value>
   </data>
   <data name="MenuTitle_SetAll" xml:space="preserve">
-    <value>Set all {0} in '{1}'</value>
-    <comment>{0} = count, {1} = scope name</comment>
+    <value>Set all {0} in {1}</value>
+    <comment>{0} = match count, {1} = scope match pattern (e.g. *.resetButton.elementId). Single source of truth for the bulk-scope label; rendered by ScopeLabelFormatter and reused by the dropdown, Set button, tooltip, ToString and context menu (#143).</comment>
   </data>
   <!-- Context menu action item label (#50). The submenu root is MenuTitle_BulkChange ("BlockParam..."); this is the leaf the user clicks. -->
   <data name="MenuTitle_EditStartValues" xml:space="preserve">
@@ -358,16 +358,16 @@ This cannot be undone.</value>
     <value>Stage bulk values as pending (yellow)</value>
   </data>
   <data name="Dialog_SetTooltip_ScopeIdle" xml:space="preserve">
-    <value>{0} member(s) in '{1}'</value>
-    <comment>{0} = total scope size, {1} = ancestor name. Shown when no value is typed.</comment>
+    <value>{0} member(s) in {1}</value>
+    <comment>{0} = total scope size, {1} = scope match pattern. Shown when no value is typed.</comment>
   </data>
   <data name="Dialog_SetTooltip_ManualIdle" xml:space="preserve">
     <value>{0} member(s) selected</value>
     <comment>{0} = total manual selection. Shown when no value is typed.</comment>
   </data>
   <data name="Dialog_SetTooltip_ScopeBreakdown" xml:space="preserve">
-    <value>{0} of {1} in '{2}' will be staged · {3} already at this value</value>
-    <comment>{0} = will-stage count, {1} = total scope, {2} = ancestor name, {3} = already-match count</comment>
+    <value>{0} of {1} in {2} will be staged · {3} already at this value</value>
+    <comment>{0} = will-stage count, {1} = total scope, {2} = scope match pattern, {3} = already-match count</comment>
   </data>
   <data name="Dialog_SetTooltip_ManualBreakdown" xml:space="preserve">
     <value>{0} of {1} selected will be staged · {2} already at this value</value>

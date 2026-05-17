@@ -128,7 +128,12 @@ public class BulkChangeViewModelTests : IDisposable
             "AcceptSuggestion must re-raise the composed Set-button caption");
         raised.Should().Contain(nameof(BulkChangeViewModel.SetButtonTooltip),
             "AcceptSuggestion must re-raise the composed Set-button tooltip");
-        vm.SetButtonText.Should().Be("Set 4 in 'UdtInstancesDB'",
+        // #143: label is now the patterned form (wildcard + leaf), routed
+        // through the localized MenuTitle_SetAll template (assert via Res so
+        // the test is culture-independent — the runner OS may be de). The
+        // #144 fix here is the count moving off 0 + the notification firing.
+        vm.SetButtonText.Should().Be(
+            BlockParam.Localization.Res.Format("MenuTitle_SetAll", 4, "*.ModuleId"),
             "the caption must reflect the accepted suggestion's count, not stay frozen at 0");
     }
 
@@ -212,13 +217,18 @@ public class BulkChangeViewModelTests : IDisposable
         vm.Selection.SelectedScope = dbScope;
 
         vm.NewValue = "42"; // matches every selected member — 0 would change
-        vm.SetButtonText.Should().Be("Set 0 in 'UdtInstancesDB'",
+        // #143: patterned label (wildcard + leaf) via the localized
+        // MenuTitle_SetAll template — assert through Res so the test is
+        // culture-independent (matches the manual-mode test below).
+        vm.SetButtonText.Should().Be(
+            BlockParam.Localization.Res.Format("MenuTitle_SetAll", 0, "*.ModuleId"),
             "all 4 already hold '42' so the button must advertise 0, not 4");
         vm.SetPendingCommand.CanExecute(null).Should().BeFalse(
             "enable state and label come from the same predicate");
 
         vm.NewValue = "99"; // different — all 4 would change
-        vm.SetButtonText.Should().Be("Set 4 in 'UdtInstancesDB'");
+        vm.SetButtonText.Should().Be(
+            BlockParam.Localization.Res.Format("MenuTitle_SetAll", 4, "*.ModuleId"));
         vm.SetPendingCommand.CanExecute(null).Should().BeTrue();
     }
 

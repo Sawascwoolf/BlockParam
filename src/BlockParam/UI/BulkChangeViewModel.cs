@@ -548,8 +548,14 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         {
             if (Selection.IsManualMode)
                 return Res.Format("Dialog_SetManualCount", CountWouldChangeMembers());
+            // #143: single source of truth — the patterned scope label.
+            // CountWouldChangeMembers() (not MatchCount) is the staged count;
+            // route it through the same MenuTitle_SetAll template the dropdown
+            // / ToString use so the wording can't drift.
             return Selection.SelectedScope != null
-                ? $"Set {CountWouldChangeMembers()} in '{Selection.SelectedScope.AncestorName}'"
+                ? Res.Format("MenuTitle_SetAll",
+                    CountWouldChangeMembers(),
+                    ScopeLabelFormatter.Pattern(Selection.SelectedScope))
                 : "Set";
         }
     }
@@ -575,18 +581,27 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             {
                 breakdown = Selection.IsManualMode
                     ? Res.Format("Dialog_SetTooltip_ManualIdle", total)
-                    : Res.Format("Dialog_SetTooltip_ScopeIdle", total, Selection.SelectedScope?.AncestorName ?? "");
+                    : Res.Format("Dialog_SetTooltip_ScopeIdle", total,
+                        ScopePattern(Selection.SelectedScope));
             }
             else
             {
                 breakdown = Selection.IsManualMode
                     ? Res.Format("Dialog_SetTooltip_ManualBreakdown", willChange, total, alreadyMatch)
                     : Res.Format("Dialog_SetTooltip_ScopeBreakdown",
-                        willChange, total, Selection.SelectedScope?.AncestorName ?? "", alreadyMatch);
+                        willChange, total, ScopePattern(Selection.SelectedScope), alreadyMatch);
             }
             return action + "\n" + breakdown;
         }
     }
+
+    /// <summary>
+    /// Null-safe wrapper over <see cref="ScopeLabelFormatter.Pattern"/> so the
+    /// Set-button tooltip shows the same patterned segment the dropdown /
+    /// caption use (#143). Single seam — not count/label logic.
+    /// </summary>
+    private static string ScopePattern(ScopeLevel? scope) =>
+        scope == null ? "" : ScopeLabelFormatter.Pattern(scope);
 
     // IsManualMode / ManualSelectionCount / ManualSelectedPaths / CanEdit /
     // ManualSelectionSummary / IsSelectionTypeHomogeneous / SelectedMemberDisplay
