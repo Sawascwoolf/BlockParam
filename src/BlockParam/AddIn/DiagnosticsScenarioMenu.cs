@@ -37,8 +37,10 @@ public sealed class DiagnosticsScenarioMenu : ContextMenuAddIn
     // Machine-parseable prefix for all structured log lines this runner emits.
     private const string ScenarioTag = "SCENARIO";
 
-    // Sentinel value written in place of the original during set_export_restore.
-    private const string SentinelValue = "42";
+    // Marker telling RunMutateExportRestore to derive a TYPE-SAFE new value
+    // from the chosen member (a blind constant like "42" fails to compile on
+    // Bool/range-constrained members — "value out of scope 0 and 1").
+    private const string DeriveValueMarker = "derive";
 
     private readonly TiaPortal _tiaPortal;
 
@@ -204,7 +206,7 @@ public sealed class DiagnosticsScenarioMenu : ContextMenuAddIn
     /// </summary>
     private static void RunSetExportRestore(DataBlock db, ScenarioContext ctx)
     {
-        RunMutateExportRestore(db, ctx, "set_export_restore", SentinelValue);
+        RunMutateExportRestore(db, ctx, "set_export_restore", DeriveValueMarker);
     }
 
     /// <summary>
@@ -279,11 +281,19 @@ public sealed class DiagnosticsScenarioMenu : ContextMenuAddIn
             "{Tag} scenario={Scenario} step=target_selected db={Db} plc={Plc} member={Member} originalValue={OrigVal}",
             ScenarioTag, scenarioName, ctx.DbName, ctx.PlcName, target.Path, originalValue);
 
+        // Type-safe value: a blind constant fails to compile on Bool / range-
+        // constrained members. "clear" passes "" (kept verbatim); "set" passes
+        // the derive marker and we pick a valid value from the member's type.
+        var effectiveValue = newValue == DeriveValueMarker ? ChooseSafeNewValue(target) : newValue;
+        Log.Information(
+            "{Tag} scenario={Scenario} step=mutate_plan db={Db} plc={Plc} dtype={Dt}",
+            ScenarioTag, scenarioName, ctx.DbName, ctx.PlcName, Category(target.Datatype));
+
         // --- Step 3: mutate XML in memory ---
         string mutatedXml;
         try
         {
-            var result = ctx.Writer.ModifyStartValues(originalXml, new[] { target }, newValue);
+            var result = ctx.Writer.ModifyStartValues(originalXml, new[] { target }, effectiveValue);
             if (result.HasErrors)
             {
                 Log.Warning(
@@ -392,6 +402,56 @@ public sealed class DiagnosticsScenarioMenu : ContextMenuAddIn
             Log.Error(ex,
                 "{Tag} scenario={Scenario} step=restore db={Db} plc={Plc} restoreOk=false result=fail",
                 ScenarioTag, scenarioName, ctx.DbName, ctx.PlcName);
+        }
+    }
+
+    // ---------------------------------------------------------------------------
+    // Type-safe value selection
+    // ---------------------------------------------------------------------------
+
+    private static readonly HashSet<string> IntTypes = new(StringComparer.OrdinalIgnoreCase)
+    { "SInt","USInt","Int","UInt","DInt","UDInt","LInt","ULInt","Byte","Word","DWord","LWord" };
+
+    /// <summary>Coarse type bucket — also the sanitizer-safe value logged as dtype=
+    /// (a generic category, never a member name or a UDT type name).</summary>
+    private static string Category(string datatype)
+    {
+        var dt = (datatype ?? "").Trim();
+        if (dt.Equals("Bool", StringComparison.OrdinalIgnoreCase)) return "bool";
+        if (IntTypes.Contains(dt)) return "int";
+        if (dt.Equals("Real", StringComparison.OrdinalIgnoreCase) ||
+            dt.Equals("LReal", StringComparison.OrdinalIgnoreCase)) return "real";
+        if (dt.StartsWith("String", StringComparison.OrdinalIgnoreCase) ||
+            dt.StartsWith("WString", StringComparison.OrdinalIgnoreCase)) return "string";
+        if (dt.Equals("Char", StringComparison.OrdinalIgnoreCase) ||
+            dt.Equals("WChar", StringComparison.OrdinalIgnoreCase)) return "char";
+        return "other";
+    }
+
+    /// <summary>
+    /// A valid, different start value for the member's type. 0/1 toggles for
+    /// int, true/false for Bool, etc. Unknown/complex types (Time, Date, DTL,
+    /// enums) fall back to re-applying the original value — guaranteed valid,
+    /// still round-trips through import/compile/export for timing.
+    /// </summary>
+    private static string ChooseSafeNewValue(MemberNode m)
+    {
+        var orig = (m.StartValue ?? "").Trim();
+        switch (Category(m.Datatype))
+        {
+            case "bool":
+                var o = orig.Trim('"').ToLowerInvariant();
+                return (o == "true" || o == "1") ? "false" : "true";
+            case "int":
+                return orig == "1" ? "0" : "1";
+            case "real":
+                return orig == "1.0" ? "0.0" : "1.0";
+            case "string":
+                return orig == "'BP'" ? "'BPx'" : "'BP'";
+            case "char":
+                return orig == "'A'" ? "'B'" : "'A'";
+            default:
+                return m.StartValue ?? "";
         }
     }
 
