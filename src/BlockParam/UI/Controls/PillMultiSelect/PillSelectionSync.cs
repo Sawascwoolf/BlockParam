@@ -76,6 +76,15 @@ internal sealed class PillSelectionSync
     // fire once at the end of the cycle rather than once per row mutation.
     private bool _pendingSelectionChanged;
 
+    // #141: set when SetSelectedItems ran while there were zero rows
+    // (the DP-callback order put SelectedItems before ItemsSource, so
+    // ReconcileRowsFromSelectedItems was a no-op). When the first rows
+    // materialise via OnRowAdded we run a full reconcile so the CLOSED
+    // trigger summary is correct WITHOUT waiting for a first popup-open.
+    // This is what decouples the selection re-sync from
+    // PlcPillViewModel.OnIsOpenFlippedToTrue.
+    private bool _selectedItemsAwaitingRows;
+
     // Raised by this class when the selection set changes. The UserControl
     // converts this into a routed RoutedEvent.
     internal event EventHandler? SelectionChanged;
@@ -120,6 +129,14 @@ internal sealed class PillSelectionSync
             newNcc.CollectionChanged += OnSelectedItemsCollectionChanged;
 
         // Reconcile rows against the new collection (Edge A initial sync).
+        // If no rows exist yet (SelectedItems DP callback fired before the
+        // ItemsSource DP callback built any rows), this is a no-op — arm a
+        // deferred reconcile so the first OnRowAdded triggers a full pass
+        // and the closed trigger renders correctly without a popup-open
+        // (#141). A non-empty SelectedItems is what makes the wait
+        // meaningful; an empty one needs no recovery.
+        _selectedItemsAwaitingRows =
+            _state.Items.Count == 0 && _selectedItems != null && _selectedItems.Count > 0;
         ReconcileRowsFromSelectedItems();
     }
 
@@ -183,6 +200,20 @@ internal sealed class PillSelectionSync
 
         if (_isSelectedMemberPath != null)
             SubscribeSourceInpc(row.Source);
+
+        // #141 deferred reconcile: SetSelectedItems ran before any rows
+        // existed (SelectedItems DP callback before ItemsSource), so its
+        // ReconcileRowsFromSelectedItems was a no-op. Now that rows are
+        // materialising, run one authoritative full pass. This makes the
+        // CLOSED trigger summary correct independently of popup-open /
+        // OnIsOpenFlippedToTrue. Cleared so it fires exactly once per
+        // SelectedItems set; _syncing guards against re-entrancy from the
+        // per-row seed above.
+        if (_selectedItemsAwaitingRows && !_syncing)
+        {
+            _selectedItemsAwaitingRows = false;
+            ReconcileRowsFromSelectedItems();
+        }
     }
 
     private void OnRowRemoved(PillRowViewModel row)

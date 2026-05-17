@@ -569,6 +569,97 @@ public class PillSelectionSync_Combined_Tests
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// #141 — DP-callback ordering: SelectedItems set BEFORE any rows exist
+// ─────────────────────────────────────────────────────────────────────────────
+
+public class PillSelectionSync_OrderIndependence_Tests
+{
+    /// <summary>
+    /// Repro of the #141 root cause in the pure sync seam: the
+    /// <c>SelectedItems</c> DP callback fires before the <c>ItemsSource</c>
+    /// callback has built any rows, so <c>ReconcileRowsFromSelectedItems</c>
+    /// is a no-op. The closed trigger summary must still become correct the
+    /// moment rows materialise — WITHOUT a popup-open / deferred re-sync.
+    /// </summary>
+    [Fact]
+    public void SelectedItems_set_before_rows_still_selects_matching_rows_on_row_add()
+    {
+        var state = new PillMultiSelectInternalState();
+        var resolver = new MemberPathResolver();
+        var itemSource = new PillItemSource(state, resolver);
+        var sync = new PillSelectionSync(state, itemSource, resolver);
+
+        var src1 = new object();
+        var src2 = new object();
+
+        // 1) SelectedItems arrives FIRST, while there are zero rows.
+        var selected = new ObservableCollection<object> { src1 };
+        sync.SetSelectedItems(selected);
+        state.Items.Should().BeEmpty("ItemsSource callback hasn't fired yet");
+
+        // 2) ItemsSource arrives SECOND — rows materialise now.
+        itemSource.ItemsSource = new ObservableCollection<object> { src1, src2 };
+
+        // The deferred reconcile must have run on first row-add: the closed
+        // trigger summary (Items.Where(IsCheckedTrue)) is now correct with
+        // no popup ever opened.
+        state.Items[0].IsSelected.Should().BeTrue("src1 was pre-selected");
+        state.Items[1].IsSelected.Should().BeFalse();
+        state.SelectedCount.Should().Be(1);
+        state.HasSelection.Should().BeTrue(
+            "the closed pill renders the summary without OnIsOpenFlippedToTrue");
+    }
+
+    [Fact]
+    public void Deferred_reconcile_fires_only_once_per_SelectedItems_set()
+    {
+        var state = new PillMultiSelectInternalState();
+        var resolver = new MemberPathResolver();
+        var itemSource = new PillItemSource(state, resolver);
+        var sync = new PillSelectionSync(state, itemSource, resolver);
+
+        var src1 = new object();
+        var src2 = new object();
+
+        sync.SetSelectedItems(new ObservableCollection<object> { src1 });
+
+        // Add rows incrementally so OnRowAdded fires per row. The armed
+        // deferred-reconcile flag must self-clear after the first add and
+        // not re-run for src2.
+        var sources = new ObservableCollection<object>();
+        itemSource.ItemsSource = sources;
+        sources.Add(src1);
+        sources.Add(src2);
+
+        state.Items[0].IsSelected.Should().BeTrue();
+        state.Items[1].IsSelected.Should().BeFalse();
+    }
+
+    [Fact]
+    public void Empty_SelectedItems_before_rows_does_not_arm_deferred_reconcile()
+    {
+        // An empty SelectedItems needs no recovery; later toggles must still
+        // work normally (no stale armed flag interfering).
+        var state = new PillMultiSelectInternalState();
+        var resolver = new MemberPathResolver();
+        var itemSource = new PillItemSource(state, resolver);
+        var sync = new PillSelectionSync(state, itemSource, resolver);
+
+        var selected = new ObservableCollection<object>();
+        sync.SetSelectedItems(selected);
+
+        var src = new object();
+        itemSource.ItemsSource = new ObservableCollection<object> { src };
+
+        state.Items[0].IsSelected.Should().BeFalse();
+
+        // Normal Edge-A still works after the no-arm path.
+        selected.Add(src);
+        state.Items[0].IsSelected.Should().BeTrue();
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // WPF DP smoke tests (require STA thread via Xunit.StaFact)
 // ─────────────────────────────────────────────────────────────────────────────
 
