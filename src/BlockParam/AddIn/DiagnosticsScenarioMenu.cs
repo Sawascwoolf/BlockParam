@@ -262,9 +262,10 @@ public sealed class DiagnosticsScenarioMenu : ContextMenuAddIn
             return;
         }
 
-        // Pick the first top-level scalar leaf with a defined start value.
+        // Pick the first scalar leaf anywhere in the tree (real DBs are often
+        // instance/structured with no TOP-LEVEL scalar — scalars are nested).
         // Deterministic: same member chosen on every run against the same DB.
-        var target = info.Members.FirstOrDefault(m => m.IsLeaf && !m.IsArray);
+        var target = info.AllMembers().FirstOrDefault(m => m.IsLeaf && !m.IsArray);
         if (target == null)
         {
             Log.Warning(
