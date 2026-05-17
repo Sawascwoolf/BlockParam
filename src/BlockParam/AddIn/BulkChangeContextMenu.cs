@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.IO;
 using System.Threading;
 using Siemens.Engineering;
@@ -108,6 +109,8 @@ public class BulkChangeContextMenu : ContextMenuAddIn
     private void OnClick(MenuSelectionProvider<IEngineeringObject> provider)
     {
         var prompt = new MessageBoxUserPrompt();
+        var totalSw = Stopwatch.StartNew();
+        long buildMs = 0, configMs = 0;
         try
         {
             // Multi-DB selection (#58). Index 0 is the anchor (display role
@@ -142,19 +145,32 @@ public class BulkChangeContextMenu : ContextMenuAddIn
             var udtCacheRefresher = new UdtCacheRefresher(prompt);
 
             var plcSoftware = discovery.FindPlcSoftware(allSelected[0]);
+            var plcName = plcSoftware != null ? ProjectDiscovery.SafeGetPlcName(plcSoftware) : "";
 
+            // Stage (a): UDT cache refresh.
             // Refresh UDT cache before parsing — out-of-date UDT XML produces wrong
             // setpoint / comment defaults at the leaf level.
-            if (plcSoftware != null)
+            int udtRefreshedCount = 0;
+            using (var t = OpenTiming.Stage("udtRefresh", $"plc={plcName}"))
             {
-                var refreshed = udtCacheRefresher.Refresh(plcSoftware, udtDir);
-                Log.Information("UDT cache validation: {Refreshed} stale file(s) re-exported", refreshed);
+                if (plcSoftware != null)
+                {
+                    udtRefreshedCount = udtCacheRefresher.Refresh(plcSoftware, udtDir);
+                    Log.Information("UDT cache validation: {Refreshed} stale file(s) re-exported", udtRefreshedCount);
+                }
+                t.AddPredictors($"staleFlushed={udtRefreshedCount}");
             }
+
+            // Stage (b): UDT resolver load.
             var udtResolver = new UdtSetPointResolver();
-            udtResolver.LoadFromDirectory(udtDir);
             var commentResolver = new UdtCommentResolver();
-            commentResolver.LoadFromDirectory(udtDir);
-            Log.Information("UDT cache loaded: {TypeCount} types from {Dir}", udtResolver.TypeCount, udtDir);
+            using (var t = OpenTiming.Stage("udtLoad", $"plc={plcName}"))
+            {
+                udtResolver.LoadFromDirectory(udtDir);
+                commentResolver.LoadFromDirectory(udtDir);
+                Log.Information("UDT cache loaded: {TypeCount} types from {Dir}", udtResolver.TypeCount, udtDir);
+                t.AddPredictors($"typeCount={udtResolver.TypeCount}");
+            }
 
             // Optional constant resolver from any previously cached tag tables so
             // symbolic array bounds (Array[1..MAX_VALVES]) expand. Empty cache → null,
@@ -174,25 +190,34 @@ public class BulkChangeContextMenu : ContextMenuAddIn
                 blockExporter, adapter, tempDir,
                 constantResolver, udtResolver, commentResolver);
 
+            // Stage (c): per-DB ActiveDb build loop (overall).
             // Focused DB. Wrapped in a single-element holder so the in-dialog
             // DB switcher (#59) can swap which ActiveDb the VM's onApply targets
             // without re-entering the VM construction path.
-            var focused = dbFactory.Build(allSelected[0], displayPlcName);
+            ActiveDb? focused;
+            var additionalDbs = new List<ActiveDb>();
+            var buildSw = Stopwatch.StartNew();
+            focused = dbFactory.Build(allSelected[0], displayPlcName);
             if (focused == null) return;
             var currentFocused = focused;
 
             // Additional active DBs (#58). Skipped if export fails (declined
             // compile, etc.).
-            var additionalDbs = new List<ActiveDb>();
             for (int i = 1; i < allSelected.Count; i++)
             {
                 var c = dbFactory.Build(allSelected[i], displayPlcName);
                 if (c != null) additionalDbs.Add(c);
             }
+            buildSw.Stop();
+            buildMs = buildSw.ElapsedMilliseconds;
+            Log.Information("OPEN-TIMING stage=buildAll plc={Plc} dbCount={DbCount} ms={Ms}",
+                plcName, allSelected.Count, buildMs);
             if (additionalDbs.Count > 0)
                 Log.Information("Multi-DB session: {N} additional DB(s) active alongside {Primary}",
                     additionalDbs.Count, focused.Info.Name);
 
+            // Stage (d): config / project languages / licensing init.
+            var configSw = Stopwatch.StartNew();
             // Build the rest of the VM dependencies (config / project languages /
             // licensing / update check). Pure construction — no TIA tree walks.
             var (configLoader, projectLanguages, editingLanguage, referenceLanguage) =
@@ -207,6 +232,9 @@ public class BulkChangeContextMenu : ContextMenuAddIn
                 sharedLicenseFilePath: OnlineLicenseService.DefaultSharedLicenseFilePath);
             var usageTracker = new LicensedUsageTracker(licenseService, freeTracker);
             var updateCheckService = TryBuildUpdateCheckService(appDataDir, configLoader);
+            configSw.Stop();
+            configMs = configSw.ElapsedMilliseconds;
+            Log.Information("OPEN-TIMING stage=config plc={Plc} ms={Ms}", plcName, configMs);
 
             var vm = new BulkChangeViewModel(
                 focused.Info, focused.Xml, analyzer, bulkService, usageTracker, configLoader,
@@ -274,6 +302,13 @@ public class BulkChangeContextMenu : ContextMenuAddIn
                     : null);
 
             licenseService.StartHeartbeat();
+
+            // Stage (e): TOTAL — handler entry to just before ShowDialog.
+            totalSw.Stop();
+            Log.Information(
+                "OPEN-TIMING stage=total plc={Plc} dbCount={DbCount} buildMs={BuildMs} configMs={ConfigMs} totalMs={TotalMs}",
+                plcName, allSelected.Count, buildMs, configMs, totalSw.ElapsedMilliseconds);
+
             var dialog = new BulkChangeDialog(vm);
             dialog.ShowDialog();
             licenseService.StopHeartbeat();

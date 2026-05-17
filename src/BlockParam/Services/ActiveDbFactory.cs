@@ -1,6 +1,7 @@
 using System.IO;
 using Siemens.Engineering.SW.Blocks;
 using BlockParam.Diagnostics;
+using BlockParam.Models;
 using BlockParam.SimaticML;
 using BlockParam.UI;
 
@@ -65,17 +66,39 @@ public sealed class ActiveDbFactory : IActiveDbFactory
         // re-assignment is visible on the next Apply call (#19).
         DataBlock liveDb = initialSelection;
 
-        string xmlPath = null!;
-        if (!_exporter.TryExportWithCompilePrompt(liveDb,
-                () => xmlPath = _adapter.ExportBlock(liveDb, _tempDir)))
-        {
-            Log.Information("DB skipped (user declined compile): {DbName}", initialSelection.Name);
-            return null;
-        }
-        var xml = File.ReadAllText(xmlPath);
+        using var buildTimer = OpenTiming.Stage("build",
+            $"db={initialSelection.Name} plc={plcName}");
 
-        var parser = new SimaticMLParser(_constantResolver, _udtResolver, _commentResolver);
-        var info = parser.Parse(xml);
+        string xmlPath = null!;
+        using (var exportTimer = OpenTiming.Stage("export",
+            $"db={initialSelection.Name} plc={plcName}"))
+        {
+            if (!_exporter.TryExportWithCompilePrompt(liveDb,
+                    () => xmlPath = _adapter.ExportBlock(liveDb, _tempDir)))
+            {
+                Log.Information("DB skipped (user declined compile): {DbName}", initialSelection.Name);
+                return null;
+            }
+        }
+
+        string xml;
+        using (var readTimer = OpenTiming.Stage("read",
+            $"db={initialSelection.Name} plc={plcName}"))
+        {
+            xml = File.ReadAllText(xmlPath);
+            readTimer.AddPredictors($"xmlBytes={xml.Length}");
+        }
+
+        DataBlockInfo info;
+        using (var parseTimer = OpenTiming.Stage("parse",
+            $"db={initialSelection.Name} plc={plcName}"))
+        {
+            var parser = new SimaticMLParser(_constantResolver, _udtResolver, _commentResolver);
+            info = parser.Parse(xml);
+            var totalMembers = info.AllMembers().Count();
+            parseTimer.AddPredictors($"topMembers={info.Members.Count} totalMembers={totalMembers}");
+        }
+
         if (info.UnresolvedUdts.Count > 0)
         {
             Log.Information("DB {Name} references {Count} UDT(s) not in cache: {Types}",
