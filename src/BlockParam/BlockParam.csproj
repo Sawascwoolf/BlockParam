@@ -27,6 +27,14 @@
     <DefineConstants>$(DefineConstants);TIA_V21</DefineConstants>
   </PropertyGroup>
 
+  <!-- DIAGNOSTICS: dev/test-only in-TIA scenario-runner menu + OPEN-TIMING
+       instrumentation. Build with `-p:Diagnostics=true`. MUST NOT be set for
+       the shipped marketplace package — the diagnostics menu and all timing
+       log output are compiled out when this constant is undefined. -->
+  <PropertyGroup Condition="'$(Diagnostics)' == 'true'">
+    <DefineConstants>$(DefineConstants);DIAGNOSTICS</DefineConstants>
+  </PropertyGroup>
+
   <ItemGroup>
     <Resource Include="Resources\BlockParam_logo.ico" />
     <Resource Include="Resources\BlockParam_logo_256.png" />
