@@ -19,6 +19,12 @@
     <Reference Include="PresentationCore" />
     <Reference Include="PresentationFramework" />
     <Reference Include="System.Xaml" />
+    <!-- UIAutomation* let WPF UIFact tests drive a real control via its
+         AutomationPeer / IToggleProvider — used by the #141 regression test
+         that performs an actual ToggleButton "click" instead of poking
+         internal state directly. -->
+    <Reference Include="UIAutomationTypes" />
+    <Reference Include="UIAutomationProvider" />
   </ItemGroup>
 
   <ItemGroup>
