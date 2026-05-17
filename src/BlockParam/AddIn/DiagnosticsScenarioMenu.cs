@@ -447,16 +447,20 @@ public sealed class DiagnosticsScenarioMenu : ContextMenuAddIn
     }
 
     /// <summary>
-    /// A no-op <see cref="IUserPrompt"/> for the scenario runner — we never want
-    /// an interactive compile prompt blocking a scripted run. If a block is
-    /// inconsistent the export action throws and the step is logged as failed.
+    /// A non-interactive <see cref="IUserPrompt"/> for the scenario runner.
+    /// AskYesNo auto-ACCEPTS (returns true): the compile prompt fires when a
+    /// freshly-imported block is inconsistent, and declining it aborts the
+    /// re-export (xmlBytes=0), leaves the block inconsistent, and contaminates
+    /// the next scenario. Accepting authorizes the compile programmatically
+    /// (still no UI), so the import→export→restore→verify round-trip actually
+    /// completes and scenarios stay isolated.
     /// </summary>
     private sealed class SilentUserPrompt : IUserPrompt
     {
         public bool AskYesNo(string title, string message)
         {
-            Log.Warning("{Tag} SilentUserPrompt: compile prompt suppressed ({Title})", ScenarioTag, title);
-            return false;
+            Log.Information("{Tag} SilentUserPrompt: compile prompt auto-accepted ({Title})", ScenarioTag, title);
+            return true;
         }
 
         public void ShowError(string title, string message)
