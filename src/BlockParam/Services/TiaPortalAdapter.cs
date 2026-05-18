@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.IO;
 using BlockParam.Diagnostics;
 using Siemens.Engineering;
@@ -91,6 +92,29 @@ public class TiaPortalAdapter : ITiaPortalAdapter
     {
         var engineeringObject = (IEngineeringObject)member;
         engineeringObject.SetAttribute("StartValue", value);
+    }
+
+    public string? TryGetModifiedToken(object dataBlock)
+    {
+        // Defensive on purpose (mirrors UdtCacheRefresher's ModifiedDate
+        // handling): any failure to read a usable timestamp returns null so
+        // ActiveDbFactory falls back to an unconditional re-export rather than
+        // risk serving a stale cached parse. UTC round-trip ("o") keeps the
+        // token stable across DST, matching the GetLastWriteTime UTC fix.
+        try
+        {
+            var raw = ((DataBlock)dataBlock).GetAttribute("ModifiedDate");
+            if (raw == null) return null;
+            if (raw is DateTime dt)
+                return dt.ToUniversalTime().ToString("o", CultureInfo.InvariantCulture);
+            return Convert.ToDateTime(raw, CultureInfo.InvariantCulture)
+                .ToUniversalTime().ToString("o", CultureInfo.InvariantCulture);
+        }
+        catch (Exception ex)
+        {
+            Log.Warning(ex, "Could not read ModifiedDate for DB — export cache disabled for this open");
+            return null;
+        }
     }
 
     public string GetBlockName(object dataBlock)

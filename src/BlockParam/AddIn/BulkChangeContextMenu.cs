@@ -23,6 +23,11 @@ public class BulkChangeContextMenu : ContextMenuAddIn
     private readonly TiaPortal _tiaPortal;
     private static int _tempCacheCleanupRan;
 
+    // One cache per TIA Add-In load; OnClick is reused per right-click, so this
+    // survives across opens and makes re-opening an unchanged DB skip the slow
+    // Openness export + parse (#140).
+    private readonly DbExportCache _dbExportCache = new DbExportCache();
+
     /// <summary>
     /// Reads the optional <c>language</c> override from %APPDATA%\BlockParam\config.json
     /// (#50) and, if set, applies it to <c>Thread.CurrentUICulture</c>. When unset,
@@ -192,7 +197,8 @@ public class BulkChangeContextMenu : ContextMenuAddIn
             // for every selected DB so OnClick no longer carries that logic.
             var dbFactory = new ActiveDbFactory(
                 blockExporter, adapter, tempDir,
-                constantResolver, udtResolver, commentResolver);
+                constantResolver, udtResolver, commentResolver,
+                _dbExportCache, scope);
 
             // Stage (c): per-DB ActiveDb build loop (overall).
             // Focused DB. Wrapped in a single-element holder so the in-dialog

@@ -29,8 +29,11 @@ public interface IActiveDbFactory
     /// Returns null if the initial export fails — typically because the user
     /// declined the "compile inconsistent block" prompt. The dialog opens
     /// without that DB.
+    ///
+    /// <paramref name="forceRefresh"/> bypasses the export XML cache (#140) and
+    /// always re-exports from TIA Openness.
     /// </summary>
-    ActiveDb? Build(DataBlock initialSelection, string plcName);
+    ActiveDb? Build(DataBlock initialSelection, string plcName, bool forceRefresh = false);
 }
 
 public sealed class ActiveDbFactory : IActiveDbFactory
@@ -41,6 +44,8 @@ public sealed class ActiveDbFactory : IActiveDbFactory
     private readonly IConstantResolver? _constantResolver;
     private readonly UdtSetPointResolver _udtResolver;
     private readonly UdtCommentResolver _commentResolver;
+    private readonly IDbExportCache _cache;
+    private readonly string _projectScope;
 
     public ActiveDbFactory(
         IBlockExporter exporter,
@@ -48,7 +53,9 @@ public sealed class ActiveDbFactory : IActiveDbFactory
         string tempDir,
         IConstantResolver? constantResolver,
         UdtSetPointResolver udtResolver,
-        UdtCommentResolver commentResolver)
+        UdtCommentResolver commentResolver,
+        IDbExportCache cache,
+        string projectScope)
     {
         _exporter = exporter;
         _adapter = adapter;
@@ -56,9 +63,11 @@ public sealed class ActiveDbFactory : IActiveDbFactory
         _constantResolver = constantResolver;
         _udtResolver = udtResolver;
         _commentResolver = commentResolver;
+        _cache = cache;
+        _projectScope = projectScope;
     }
 
-    public ActiveDb? Build(DataBlock initialSelection, string plcName)
+    public ActiveDb? Build(DataBlock initialSelection, string plcName, bool forceRefresh = false)
     {
         // TIA's ImportBlock(Override) disposes the previous DataBlock instance
         // on every Apply, so we re-resolve after each import. The captured
@@ -69,24 +78,57 @@ public sealed class ActiveDbFactory : IActiveDbFactory
         using var buildTimer = OpenTiming.Stage("build",
             $"db={initialSelection.Name} plc={plcName}");
 
-        string xmlPath = null!;
-        using (var exportTimer = OpenTiming.Stage("export",
-            $"db={initialSelection.Name} plc={plcName}"))
-        {
-            if (!_exporter.TryExportWithCompilePrompt(liveDb,
-                    () => xmlPath = _adapter.ExportBlock(liveDb, _tempDir)))
-            {
-                Log.Information("DB skipped (user declined compile): {DbName}", initialSelection.Name);
-                return null;
-            }
-        }
+        var cacheKey = DbExportCache.KeyFor(
+            _projectScope, plcName, initialSelection.Name, initialSelection.Number);
+
+        // Change-discriminator: a freshness token derived from the block's
+        // Openness ModifiedDate. null => unreadable timestamp => cache disabled
+        // for this open (always re-export) so a stale parse can never be served
+        // (#140). Mirrors the UDT cache's ModifiedDate gating.
+        var freshToken = _adapter.TryGetModifiedToken(initialSelection);
+        var cacheUsable = !forceRefresh && freshToken != null;
 
         string xml;
-        using (var readTimer = OpenTiming.Stage("read",
-            $"db={initialSelection.Name} plc={plcName}"))
+        if (cacheUsable && _cache.TryGet(cacheKey, freshToken!, out var cachedXml))
         {
-            xml = File.ReadAllText(xmlPath);
-            readTimer.AddPredictors($"xmlBytes={xml.Length}");
+            xml = cachedXml;
+            Log.Information("DB cache hit (skipping export+parse re-export) for {DbName}", initialSelection.Name);
+            buildTimer.AddPredictors("cache=hit");
+        }
+        else
+        {
+            // hit failed: cold miss, stale (ModifiedDate moved), forced, or
+            // token unreadable — the OPEN-TIMING value tells which, which is
+            // exactly what the TIA-required verification of this fix needs.
+            buildTimer.AddPredictors(
+                freshToken == null ? "cache=disabled"
+                : forceRefresh ? "cache=forced"
+                : _cache.HasEntry(cacheKey) ? "cache=stale"
+                : "cache=miss");
+
+            string xmlPath = null!;
+            using (var exportTimer = OpenTiming.Stage("export",
+                $"db={initialSelection.Name} plc={plcName}"))
+            {
+                if (!_exporter.TryExportWithCompilePrompt(liveDb,
+                        () => xmlPath = _adapter.ExportBlock(liveDb, _tempDir)))
+                {
+                    Log.Information("DB skipped (user declined compile): {DbName}", initialSelection.Name);
+                    return null;
+                }
+            }
+
+            using (var readTimer = OpenTiming.Stage("read",
+                $"db={initialSelection.Name} plc={plcName}"))
+            {
+                xml = File.ReadAllText(xmlPath);
+                readTimer.AddPredictors($"xmlBytes={xml.Length}");
+            }
+
+            // Only worth caching when we have a token to validate it against;
+            // a tokenless entry could never produce a future hit.
+            if (freshToken != null)
+                _cache.Set(cacheKey, freshToken, xml);
         }
 
         DataBlockInfo info;
@@ -138,6 +180,8 @@ public sealed class ActiveDbFactory : IActiveDbFactory
                     "Could not re-resolve DataBlock '{DbName}' after import — next Apply may fail",
                     info.Name);
             }
+            // The DB content changed — next open of this identity must re-export (#140).
+            _cache.Invalidate(cacheKey);
             Log.Information("Import completed for {DbName}", info.Name);
         };
 
