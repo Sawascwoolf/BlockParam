@@ -1520,24 +1520,43 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     {
         var commentTargets = new List<MemberNodeViewModel>();
         CollectPendingCommentNodes(RootMembers, commentTargets);
+        return ApplyCommentPreviews(xml, commentTargets);
+    }
 
+    /// <summary>
+    /// Overload that takes a pre-collected target list so the caller's
+    /// "are there comment previews?" check (#159 H3 fast-path gate) and the
+    /// write itself share a single tree walk instead of two back-to-back.
+    /// </summary>
+    internal string ApplyCommentPreviews(
+        string xml, IReadOnlyList<MemberNodeViewModel> commentTargets)
+    {
         if (commentTargets.Count == 0) return xml;
 
         var config = _configLoader.GetConfig();
         EnsureTagTableCache();
         var templateGen = config != null ? new TemplateCommentGenerator(config, _tagTableCache) : null;
 
-        foreach (var node in commentTargets)
+        // #159 H1 (minor): batch all comment writes for a language into one
+        // ModifyComments call (one parse/serialize) instead of calling
+        // ModifyComment per node per language (a full XDocument cycle each).
+        foreach (var lang in _projectLanguages)
         {
-            var rule = config?.GetCommentRule(node.Model);
-            if (rule?.CommentTemplate == null) continue;
-
-            foreach (var lang in _projectLanguages)
+            var members = new List<MemberNode>();
+            var comments = new List<string>();
+            foreach (var node in commentTargets)
             {
+                var rule = config?.GetCommentRule(node.Model);
+                if (rule?.CommentTemplate == null) continue;
+
                 var comment = templateGen!.Generate(_active.Info, node.Model, rule.CommentTemplate, lang, ResolvePendingValue);
-                xml = _writer.ModifyComment(xml, node.Model, comment, lang);
+                members.Add(node.Model);
+                comments.Add(comment);
                 Log.Information("Comment updated: {Path} → {Comment} ({Lang})", node.Model.Path, comment, lang);
             }
+
+            if (members.Count > 0)
+                xml = _writer.ModifyComments(xml, members, comments, lang);
         }
 
         return xml;
@@ -1554,6 +1573,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             CollectPendingCommentNodes(node.Children, result);
         }
     }
+
 
     /// <summary>
     /// Diagnostic wrapper around <see cref="MemberTreeViewModel.FindNodeByPathInDb"/>.
@@ -2303,29 +2323,37 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
 
         try
         {
-            int totalChanged = 0;
+            // #159 H1: one parse + serialize for the whole pending batch
+            // instead of a full XDocument cycle per edit (was O(n) parses
+            // for n edits; a 10k-element array meant 10k re-parses of a
+            // multi-MB document). ModifyStartValues applies every edit it
+            // can and reports the rest in Errors — same net effect as the
+            // old per-edit loop, which also skipped-and-logged failures
+            // without aborting the batch.
+            var writeResult = _writer.ModifyStartValues(_active.Xml, pendingEdits);
+            _active.Xml = writeResult.ModifiedXml;
+            int totalChanged = writeResult.Changes.Count;
+            foreach (var error in writeResult.Errors)
+                Log.Warning("Apply skipped: {Error}", error);
 
-            // Apply all pending edits to XML
-            foreach (var (member, value) in pendingEdits)
-            {
-                var writeResult = _writer.ModifyStartValues(
-                    _active.Xml, new[] { member }, value);
+            // Apply comment previews. Collect the target nodes once and
+            // reuse the list for both the fast-path gate and the write —
+            // avoids a second full tree walk in the common (value-only) path.
+            var commentTargets = new List<MemberNodeViewModel>();
+            CollectPendingCommentNodes(RootMembers, commentTargets);
+            bool hadCommentPreviews = commentTargets.Count > 0;
+            _active.Xml = ApplyCommentPreviews(_active.Xml, commentTargets);
 
-                if (writeResult.IsSuccess)
-                {
-                    _active.Xml = writeResult.ModifiedXml;
-                    totalChanged++;
-                    Log.Information("Applied: {Path} → {Value}", member.Path, value);
-                }
-                else
-                {
-                    Log.Warning("Failed for {Path}: {Errors}",
-                        member.Path, string.Join("; ", writeResult.Errors));
-                }
-            }
-
-            // Apply comment previews
-            _active.Xml = ApplyCommentPreviews(_active.Xml);
+            // #159 H3 gate. The in-place patch below is only sound when the
+            // re-parsed tree would be structurally identical to the current
+            // one. Two ways that fails: (a) a comment was written (changes
+            // the tree's comment state, not captured by ValueChange); (b) an
+            // edit errored — only the successful edits are in _active.Xml and
+            // writeResult.Changes, so the errored members' models would keep
+            // stale StartValues if patched piecemeal. Either case takes the
+            // full RefreshTree re-parse instead.
+            bool structurePreserved =
+                writeResult.Errors.Count == 0 && !hadCommentPreviews;
 
             StatusText = Res.Format("Status_Changed", totalChanged, _active.Info.Name);
             _lastApplySucceeded = true;
@@ -2369,10 +2397,24 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
                     totalChanged);
             }
 
-            // Re-export from TIA to get the canonical XML after import
-            RefreshTree(_active.Xml);
+            // #159 H3: a value-only Apply does not change the XML structure
+            // (no members added/removed — only StartValue text), so the
+            // existing parsed tree is still valid. Re-parsing the whole
+            // (multi-MB) document and re-allocating every MemberNodeViewModel
+            // just to refresh start values re-paid the entire #154 open-path
+            // cost on every Apply. Patch the affected nodes in place instead;
+            // fall back to the full re-parse only when comments were written
+            // or some edits failed (structure may differ).
+            if (structurePreserved)
+            {
+                PatchTreeAfterApply(writeResult.Changes);
+            }
+            else
+            {
+                RefreshTree(_active.Xml);
+            }
 
-            // RefreshTree rebuilds RootMembers (all PendingValue=null), but computed
+            // RefreshTree/PatchTreeAfterApply clear PendingValue, but computed
             // properties only refresh their bindings when PropertyChanged is raised.
             RefreshPendingAndPreview();
         }
@@ -2459,22 +2501,15 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             // through, no TIA mutation has happened so the abort is clean.
             foreach (var (db, edits) in perDb)
             {
-                foreach (var (member, value) in edits)
-                {
-                    var writeResult = _writer.ModifyStartValues(
-                        db.Xml, new[] { member }, value);
-                    if (writeResult.IsSuccess)
-                    {
-                        db.Xml = writeResult.ModifiedXml;
-                        totalChanged++;
-                    }
-                    else
-                    {
-                        Log.Warning("Failed for {Db}/{Path}: {Errors}",
-                            db.Info.Name, member.Path,
-                            string.Join("; ", writeResult.Errors));
-                    }
-                }
+                // #159 H1: batch each DB's edits into a single parse +
+                // serialize instead of one per edit (mirrors the single-DB
+                // path). Failed members are reported in Errors without
+                // aborting the rest, exactly as the old per-edit loop did.
+                var writeResult = _writer.ModifyStartValues(db.Xml, edits);
+                db.Xml = writeResult.ModifiedXml;
+                totalChanged += writeResult.Changes.Count;
+                foreach (var error in writeResult.Errors)
+                    Log.Warning("Failed for {Db}: {Error}", db.Info.Name, error);
             }
 
             _lastApplySucceeded = true;
@@ -2910,6 +2945,70 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             node.ClearPending();
             ClearAllPendingInlineEdits(node.Children);
         }
+    }
+
+    /// <summary>
+    /// Post-Apply fast path (#159 H3). A successful value-only Apply leaves
+    /// the DB XML structurally identical to the already-parsed tree (only
+    /// StartValue text changed), so the heavy <see cref="RefreshTree"/>
+    /// pipeline — full re-parse (#154 H1 O(n^2)), re-allocating every
+    /// <see cref="MemberNodeViewModel"/> (#154 H2), and the path-based
+    /// selection/scope restore needed only because re-parse mints new model
+    /// instances — is pure waste. Instead, patch the committed nodes in
+    /// place and refresh only the derived/flat state.
+    ///
+    /// The patched value mirrors what a re-parse would yield: the writer
+    /// stores a constant as its raw name and a literal as its text, and the
+    /// parser reads exactly that back, so <see cref="ValueChange.NewValue"/>
+    /// is faithful; a cleared value (empty NewValue) maps to a null
+    /// StartValue, matching the parser's "no &lt;StartValue&gt; element"
+    /// result. Selection and scope keep their live model references (the
+    /// instances survive), so no save/restore dance is required.
+    /// </summary>
+    private void PatchTreeAfterApply(IReadOnlyList<ValueChange> changes)
+    {
+        // Iterating `changes` (not the pending store) is sufficient to clear
+        // every staged VM: the only store entry that would NOT appear in
+        // `changes` is a no-op clear (empty value on a member with no
+        // <StartValue>), and that can never be staged in the first place —
+        // MemberNodeViewModel.EditableStartValue's no-op guard calls
+        // ClearPending() instead of creating a pending edit when clearing an
+        // already-empty value. So every store entry yields a ValueChange here.
+        foreach (var change in changes)
+        {
+            var vm = FindNodeByPathInDb(change.MemberPath, _active);
+            if (vm == null) continue;
+
+            // Empty NewValue == cleared start value; the parser represents
+            // that as a null StartValue (no <StartValue> element).
+            vm.Model.ApplyCommittedStartValue(
+                string.IsNullOrEmpty(change.NewValue) ? null : change.NewValue);
+            // Committed → the staged edit is no longer pending; also clears
+            // any inline validation error on the row.
+            vm.ClearPending();
+            vm.NotifyCommittedStartValueChanged();
+        }
+
+        // The committed edits' MemberNode keys are still live (no re-parse),
+        // but they are no longer pending — drop them so the store doesn't
+        // re-seed them onto the tree as staged.
+        _pendingEditStore.ClearAll();
+
+        // Values changed, so rule hints + existing-issue findings must be
+        // recomputed against the new committed state. These are O(n) tree
+        // walks, not the O(n^2) re-parse — they are not the #159 bottleneck.
+        RefreshRuleHints();
+        RebuildExistingIssues();
+        ApplyAllFilters();
+        RefreshFlatList();
+
+        // Mirror RefreshTree's post-Apply reset (#8): the just-committed
+        // value would misrepresent the current state if left in the input.
+        Autocomplete.SuppressSuggestions = true;
+        _newValueTouched = false;
+        _newValue = "";
+        OnPropertyChanged(nameof(NewValue));
+        Autocomplete.SuppressSuggestions = false;
     }
 
     private void RefreshTree(

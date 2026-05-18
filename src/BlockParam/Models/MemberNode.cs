@@ -51,8 +51,21 @@ public class MemberNode
 
     public string Name { get; }
     public string Datatype { get; }
-    public string? StartValue { get; }
+    public string? StartValue { get; private set; }
     public string Path { get; }
+
+    /// <summary>
+    /// Post-Apply fast path (#159 H3). A successful value-only Apply has
+    /// already written the new start value into the DB XML, so the model can
+    /// be updated in place rather than re-parsing the whole (multi-MB)
+    /// document just to refresh the tree. This is the ONLY sanctioned
+    /// mutation of an otherwise parser-immutable model: callers must
+    /// guarantee the XML structure is unchanged (a pure StartValue edit,
+    /// which is exactly what <see cref="SimaticML.SimaticMLWriter"/> yields),
+    /// and the value passed must match what a re-parse would produce
+    /// (constant name or literal text; <c>null</c> for a cleared value).
+    /// </summary>
+    internal void ApplyCommittedStartValue(string? value) => StartValue = value;
     public MemberNode? Parent { get; }
     public IReadOnlyList<MemberNode> Children { get; }
 

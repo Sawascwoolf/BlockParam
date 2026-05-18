@@ -1,3 +1,5 @@
+using System.Diagnostics;
+using System.Text;
 using FluentAssertions;
 using BlockParam.SimaticML;
 using Xunit;
@@ -449,5 +451,136 @@ public class SimaticMLWriterTests
             + "phantom change would charge quota and audit-log a write that changed nothing");
         second.ModifiedXml.Should().NotContain("<StartValue></StartValue>");
         second.ModifiedXml.Should().NotContain("<StartValue />");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // #159 — batch overload (H1) + O(n) Subelement indexing (H2)
+    // ─────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// #159 H1: the batch overload assigns a distinct value per member in a
+    /// single parse/serialize pass. Verifies each member gets its own value
+    /// (not a shared one) and the change set is complete.
+    /// </summary>
+    [Fact]
+    public void WriteBatch_PerMemberDistinctValues_AllApplied()
+    {
+        var xml = TestFixtures.LoadXml("udt-instances-db.xml");
+        var db = _parser.Parse(xml);
+        var moduleIds = db.AllMembers().Where(m => m.Name == "ModuleId").ToList();
+        moduleIds.Count.Should().BeGreaterThan(1);
+
+        var edits = moduleIds
+            .Select((m, i) => (Member: m, Value: (1000 + i).ToString()))
+            .ToList();
+
+        var result = _writer.ModifyStartValues(xml, edits);
+
+        result.IsSuccess.Should().BeTrue();
+        result.Changes.Should().HaveCount(edits.Count);
+
+        var modified = _parser.Parse(result.ModifiedXml);
+        var reModuleIds = modified.AllMembers().Where(m => m.Name == "ModuleId").ToList();
+        for (int i = 0; i < reModuleIds.Count; i++)
+            reModuleIds[i].StartValue.Should().Be((1000 + i).ToString());
+    }
+
+    /// <summary>
+    /// #159 H1: a member missing from the XML is reported in Errors without
+    /// aborting the batch — the valid edits in the same call still apply.
+    /// Mirrors the old per-edit Apply loop's skip-and-log behaviour.
+    /// </summary>
+    [Fact]
+    public void WriteBatch_MissingMember_RecordedAsError_OthersStillApplied()
+    {
+        var xml = TestFixtures.LoadXml("flat-db.xml");
+        var db = _parser.Parse(xml);
+        var speed = db.Members.First(m => m.Name == "Speed");
+        var ghost = new BlockParam.Models.MemberNode(
+            "Ghost", "Int", "0", "DoesNotExist", null,
+            new List<BlockParam.Models.MemberNode>());
+
+        var result = _writer.ModifyStartValues(
+            xml, new[] { (speed, "2000"), (ghost, "5") });
+
+        result.Changes.Should().ContainSingle(c => c.MemberPath == "Speed");
+        result.Errors.Should().ContainSingle().Which.Should().Contain("DoesNotExist");
+
+        var modified = _parser.Parse(result.ModifiedXml);
+        modified.Members.First(m => m.Name == "Speed").StartValue.Should().Be("2000");
+    }
+
+    /// <summary>
+    /// #159 H1+H2 regression gate. A 10,000-element <c>Array Of DInt</c> with
+    /// an explicit StartValue on every element is the issue's reproduction
+    /// case. The pre-fix Apply path re-parsed + re-serialized the whole
+    /// multi-MB document once per edit (H1, O(n) document cycles) and rescanned
+    /// every Subelement linearly per edit (H2, O(n^2) comparisons), taking
+    /// seconds-to-minutes. The batch overload is one parse/serialize with an
+    /// O(1) Subelement index, so this completes in well under the (generous,
+    /// CI-jitter-tolerant) ceiling. A revert to either O(n) pattern blows
+    /// past it by orders of magnitude.
+    /// </summary>
+    [Fact]
+    public void WriteBatch_TenThousandElementArray_AppliesCorrectlyAndFast()
+    {
+        const int n = 10_000;
+        var xml = BuildLargeArrayDbXml(n);
+        var db = _parser.Parse(xml);
+        var arr = db.Members.First(m => m.Name == "BigArray");
+        arr.Children.Should().HaveCount(n, "the parser expands arrays up to 100k elements");
+
+        // Distinct value per element so a shared-value bug can't pass.
+        var edits = arr.Children
+            .Select((c, i) => (Member: c, Value: (i + 1).ToString()))
+            .ToList();
+
+        var sw = Stopwatch.StartNew();
+        var result = _writer.ModifyStartValues(xml, edits);
+        sw.Stop();
+
+        result.IsSuccess.Should().BeTrue();
+        result.Changes.Should().HaveCount(n);
+        sw.Elapsed.TotalSeconds.Should().BeLessThan(10,
+            "#159 H1+H2: batched single parse + O(1) Subelement index — a "
+            + "regression to per-edit parse (O(n)) or linear Subelement scan "
+            + "(O(n^2)) would take far longer than this generous ceiling");
+
+        var modified = _parser.Parse(result.ModifiedXml);
+        var reArr = modified.Members.First(m => m.Name == "BigArray");
+        reArr.Children[0].StartValue.Should().Be("1");
+        reArr.Children[n / 2].StartValue.Should().Be((n / 2 + 1).ToString());
+        reArr.Children[n - 1].StartValue.Should().Be(n.ToString());
+    }
+
+    /// <summary>
+    /// Builds a SimaticML GlobalDB whose only member is
+    /// <c>BigArray : Array[1..n] Of DInt</c> with an explicit
+    /// <c>&lt;Subelement Path="i"&gt;&lt;StartValue&gt;</c> for every element —
+    /// the synthetic XML the #159 reproduction steps describe.
+    /// </summary>
+    private static string BuildLargeArrayDbXml(int n)
+    {
+        var sb = new StringBuilder(n * 64);
+        sb.Append("<?xml version=\"1.0\" encoding=\"utf-8\"?>\n");
+        sb.Append("<Document>\n");
+        sb.Append("  <SW.Blocks.GlobalDB ID=\"0\">\n");
+        sb.Append("    <AttributeList>\n");
+        sb.Append("      <Interface>\n");
+        sb.Append("        <Sections xmlns=\"http://www.siemens.com/automation/Openness/SW/Interface/v5\">\n");
+        sb.Append("          <Section Name=\"Static\">\n");
+        sb.Append($"            <Member Name=\"BigArray\" Datatype=\"Array[1..{n}] of DInt\" Accessibility=\"Public\">\n");
+        for (int i = 1; i <= n; i++)
+            sb.Append($"              <Subelement Path=\"{i}\"><StartValue>{i}</StartValue></Subelement>\n");
+        sb.Append("            </Member>\n");
+        sb.Append("          </Section>\n");
+        sb.Append("        </Sections>\n");
+        sb.Append("      </Interface>\n");
+        sb.Append("      <Name>BigArrayDb</Name>\n");
+        sb.Append("      <Number>1</Number>\n");
+        sb.Append("    </AttributeList>\n");
+        sb.Append("  </SW.Blocks.GlobalDB>\n");
+        sb.Append("</Document>\n");
+        return sb.ToString();
     }
 }
