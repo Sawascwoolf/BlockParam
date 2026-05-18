@@ -87,6 +87,12 @@ public class TiaPortalAdapter : ITiaPortalAdapter
         return _tiaPortal.ExclusiveAccess(description);
     }
 
+    /// <summary>
+    /// Sets a member's StartValue via the Openness Direct API. Callers must
+    /// NOT pass an empty/whitespace value: SetAttribute("StartValue", "")
+    /// does not revert to default. Clears are routed to the XML strategy by
+    /// BulkChangeService.RecommendStrategy (issue #142).
+    /// </summary>
     public void SetStartValueDirect(object member, string value)
     {
         var engineeringObject = (IEngineeringObject)member;

@@ -357,4 +357,97 @@ public class SimaticMLWriterTests
         SimaticMLWriter.TokenizePath("Plain.Name")
             .Should().Equal("Plain", "Name");
     }
+
+    [Fact]
+    public void Write_ClearDirectMember_RemovesStartValueElement()
+    {
+        var xml = TestFixtures.LoadXml("flat-db.xml");
+        var db = _parser.Parse(xml);
+        var speed = db.Members.First(m => m.Name == "Speed");
+
+        var result = _writer.ModifyStartValues(xml, new[] { speed }, "");
+
+        result.IsSuccess.Should().BeTrue();
+        result.Changes.Should().HaveCount(1);
+        result.Changes[0].OldValue.Should().Be("1500");
+        result.Changes[0].NewValue.Should().Be("");
+
+        // No empty <StartValue> emitted anywhere.
+        result.ModifiedXml.Should().NotContain("<StartValue></StartValue>");
+        result.ModifiedXml.Should().NotContain("<StartValue />");
+
+        var modified = _parser.Parse(result.ModifiedXml);
+        modified.Members.First(m => m.Name == "Speed").StartValue.Should().BeNull();
+        // Siblings untouched.
+        modified.Members.First(m => m.Name == "Temperature").StartValue.Should().Be("25.5");
+        modified.Members.First(m => m.Name == "Enable").StartValue.Should().Be("true");
+    }
+
+    [Fact]
+    public void Write_ClearUdtInstanceMember_RemovesStartValue_SiblingsUntouched()
+    {
+        var xml = TestFixtures.LoadXml("udt-instances-db.xml");
+        var db = _parser.Parse(xml);
+        var moduleId = db.AllMembers()
+            .First(m => m.Path == "Drive1.Msg_CommError.ModuleId");
+
+        var result = _writer.ModifyStartValues(xml, new[] { moduleId }, "");
+
+        result.IsSuccess.Should().BeTrue();
+        result.Changes[0].OldValue.Should().Be("42");
+        result.ModifiedXml.Should().NotContain("<StartValue></StartValue>");
+        result.ModifiedXml.Should().NotContain("<StartValue />");
+
+        var modified = _parser.Parse(result.ModifiedXml);
+        modified.AllMembers().First(m => m.Path == "Drive1.Msg_CommError.ModuleId")
+            .StartValue.Should().BeNull();
+        // A different UDT-instance's ModuleId is unaffected.
+        modified.AllMembers().First(m => m.Path == "Sensor1.Msg_CommError.ModuleId")
+            .StartValue.Should().Be("42");
+    }
+
+    [Fact]
+    public void Write_ClearArrayElement_PrunesSubelement_SiblingsUntouched()
+    {
+        var xml = TestFixtures.LoadXml("mixed-types-db.xml");
+        var db = _parser.Parse(xml);
+        var elem3 = db.Members.First(m => m.Name == "MyArray").Children[3]; // [3]
+
+        var result = _writer.ModifyStartValues(xml, new[] { elem3 }, "");
+
+        result.IsSuccess.Should().BeTrue();
+        result.Changes[0].OldValue.Should().Be("400");
+        result.ModifiedXml.Should().NotContain("<StartValue></StartValue>");
+        result.ModifiedXml.Should().NotContain("<StartValue />");
+
+        var modified = _parser.Parse(result.ModifiedXml);
+        modified.Members.First(m => m.Name == "MyArray").Children[3].StartValue.Should().BeNull();
+        // Sibling indices keep their values.
+        modified.Members.First(m => m.Name == "MyArray").Children[0].StartValue.Should().Be("100");
+        modified.Members.First(m => m.Name == "MyArray").Children[4].StartValue.Should().Be("500");
+    }
+
+    [Fact]
+    public void Write_ClearWhenNoStartValuePresent_IsIdempotentNoEmptyElement()
+    {
+        // Clear the same direct member twice; the second clear has nothing
+        // to remove and must not create an empty element or error.
+        var xml = TestFixtures.LoadXml("flat-db.xml");
+        var db = _parser.Parse(xml);
+        var speed = db.Members.First(m => m.Name == "Speed");
+
+        var first = _writer.ModifyStartValues(xml, new[] { speed }, "");
+        first.IsSuccess.Should().BeTrue();
+
+        var db2 = _parser.Parse(first.ModifiedXml);
+        var speed2 = db2.Members.First(m => m.Name == "Speed");
+        var second = _writer.ModifyStartValues(first.ModifiedXml, new[] { speed2 }, "");
+
+        second.IsSuccess.Should().BeTrue();
+        second.Changes.Should().BeEmpty(
+            "a clear with no <StartValue> to remove is a genuine no-op — recording a "
+            + "phantom change would charge quota and audit-log a write that changed nothing");
+        second.ModifiedXml.Should().NotContain("<StartValue></StartValue>");
+        second.ModifiedXml.Should().NotContain("<StartValue />");
+    }
 }

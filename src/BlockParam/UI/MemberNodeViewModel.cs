@@ -292,8 +292,16 @@ public class MemberNodeViewModel : ViewModelBase
             if (value != _editableStartValue)
             {
                 _editableStartValue = value;
-                // Same as original → clear pending instead of creating one
-                if (value == StartValue)
+                // No net change → clear pending instead of creating one.
+                // Two no-change shapes: (a) the cell equals the original
+                // value; (b) the cell is emptied but the member never had a
+                // start value (StartValue == null/"") — "clearing" something
+                // already empty changes nothing. Without (b), clearing a
+                // UDT-instance leaf whose value isn't materialized (#142
+                // domain) would stage a phantom edit that gets counted and
+                // charged on Apply for a no-op write.
+                if (value == StartValue
+                    || (string.IsNullOrEmpty(value) && string.IsNullOrEmpty(StartValue)))
                     ClearPending();
                 else
                     PendingValue = value;

@@ -320,6 +320,92 @@ public class BulkChangeViewModelTests : IDisposable
     }
 
     /// <summary>
+    /// #142: clearing a member that HAS a start value is a genuine
+    /// revert-to-default pending edit — not a "discard my edit" gesture.
+    /// Regression: the cleared row appeared in the Pending Edits list (built
+    /// from tree nodes) while the store-backed counter stayed 0, so Apply
+    /// was disabled and the staged clear could never be applied.
+    /// </summary>
+    [Fact]
+    public void ClearingStartValue_StagesPendingEdit_CounterAndApplyAgree()
+    {
+        var vm = CreateViewModel();
+        var speed = vm.Tree.RootMembers.Single(m => m.Name == "Speed");
+        speed.StartValue.Should().Be("1500", "fixture precondition");
+
+        // User deletes the cell text → empty value.
+        speed.EditableStartValue = "";
+
+        speed.IsPendingInlineEdit.Should().BeTrue(
+            "clearing a member that had a value is a genuine revert-to-default edit");
+        vm.Pending.PendingEdits.Should().Contain(e => e.Node == speed,
+            "the cleared row must appear in the Pending Edits list");
+        vm.Pending.PendingInlineEditCount.Should().Be(1,
+            "the store-backed counter must agree with the list (#142 regression: was 0)");
+        vm.ApplyCommand.CanExecute(null).Should().BeTrue(
+            "Apply must be enabled for a staged clear (#142 regression: was disabled)");
+    }
+
+    /// <summary>
+    /// #142 guard: clearing then typing the original value back is still a
+    /// revert (no net change) — store, counter and list all return to empty.
+    /// Protects against over-correcting the clear fix into "clears never
+    /// revert".
+    /// </summary>
+    [Fact]
+    public void ClearingThenRestoringOriginal_IsRevert_NoPending()
+    {
+        var vm = CreateViewModel();
+        var speed = vm.Tree.RootMembers.Single(m => m.Name == "Speed");
+
+        speed.EditableStartValue = "";          // clear → genuine pending edit
+        vm.Pending.PendingInlineEditCount.Should().Be(1);
+
+        speed.EditableStartValue = "1500";      // back to original → revert
+        speed.IsPendingInlineEdit.Should().BeFalse();
+        vm.Pending.PendingEdits.Should().NotContain(e => e.Node == speed);
+        vm.Pending.PendingInlineEditCount.Should().Be(0,
+            "restoring the original value is a no-net-change revert");
+    }
+
+    /// <summary>
+    /// #142 review follow-up: clearing a member that NEVER had a start value
+    /// (UDT-instance leaf whose value isn't materialized → StartValue == null)
+    /// is a no-op, not a stageable edit. Regression guard: the clear fix must
+    /// not stage/charge a phantom pending edit, and the tree-derived list must
+    /// stay in sync with the store-backed counter (no divergence).
+    /// </summary>
+    [Fact]
+    public void ClearingMemberThatNeverHadStartValue_IsNoOp_NotStaged()
+    {
+        var xml = TestFixtures.LoadXml("v20-real-export-db.xml");
+        var parser = new SimaticMLParser();
+        var db = parser.Parse(xml);
+        var analyzer = new HierarchyAnalyzer();
+        var configLoader = new ConfigLoader(null);
+        var bulkService = new BulkChangeService(new ChangeLogger(), configLoader);
+        var usageTracker = Substitute.For<IUsageTracker>();
+        usageTracker.GetStatus().Returns(new UsageStatus(0, 200)); // ample quota — isolate pending logic
+        usageTracker.RecordUsage(Arg.Any<int>()).Returns(true);
+        var vm = new BulkChangeViewModel(db, xml, analyzer, bulkService, usageTracker, configLoader);
+
+        FlatTreeManager.ExpandAll(vm.Tree.RootMembers);
+        vm.RefreshFlatList();
+        var bmkId = vm.Tree.FlatMembers.First(m => m.Name == "bmkId" && m.IsLeaf);
+        bmkId.StartValue.Should().BeNull("fixture: bmkId has no <StartValue> element");
+
+        // User clicks into the empty cell and "clears" it — no actual change.
+        bmkId.EditableStartValue = "";
+
+        bmkId.IsPendingInlineEdit.Should().BeFalse(
+            "clearing a member that never had a value is a no-op, not a pending edit");
+        vm.Pending.PendingEdits.Should().NotContain(e => e.Node == bmkId,
+            "a no-op clear must not appear in the Pending Edits list");
+        vm.Pending.PendingInlineEditCount.Should().Be(0,
+            "store-backed counter must not count a no-op clear (would charge quota for nothing)");
+    }
+
+    /// <summary>
     /// Builds a VM with a configurable usage status and optional license service —
     /// the ApplyTooltip tests vary remaining quota and Pro state, so the standard
     /// helper isn't flexible enough.

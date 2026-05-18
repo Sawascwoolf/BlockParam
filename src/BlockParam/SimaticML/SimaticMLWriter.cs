@@ -33,6 +33,20 @@ public class SimaticMLWriter
                 continue;
             }
 
+            if (string.IsNullOrWhiteSpace(newValue))
+            {
+                var oldCleared = location.ClearStartValue(ns);
+                // ClearStartValue returns null only when there was no
+                // <StartValue> element to remove → a genuine no-op. Don't
+                // record a phantom ValueChange: it would be counted toward
+                // the daily quota and written to the audit log for a write
+                // that changed nothing (bulk-clear over a scope where some
+                // members have no explicit start value hits this).
+                if (oldCleared != null)
+                    changes.Add(new ValueChange(target.Path, target.Datatype, oldCleared, ""));
+                continue;
+            }
+
             var startValueElement = location.GetOrCreateStartValue(ns);
 
             // Read old value (from ConstantName attribute or text)
@@ -292,6 +306,47 @@ public class SimaticMLWriter
                 sub.Add(inner);
             }
             return inner;
+        }
+
+        /// <summary>
+        /// Clears a member's start value by REMOVING the &lt;StartValue&gt; element
+        /// (the SimaticML representation of "no explicit start value → revert to
+        /// default"). Emitting an empty &lt;StartValue&gt;&lt;/StartValue&gt; is
+        /// invalid for re-import (issue #142). For a directly-declared DB member
+        /// TIA then falls back to the type default; for a member inside a UDT
+        /// instance it falls back to the UDT-defined default — both are expressed
+        /// by the same "element absent" XML, so no per-member-kind branching is
+        /// needed here. When the value lived under a &lt;Subelement&gt; (array /
+        /// per-instance override) the now-childless &lt;Subelement&gt; is pruned
+        /// too. Returns the prior value, or null if there was nothing to clear.
+        /// </summary>
+        public string? ClearStartValue(XNamespace ns)
+        {
+            XElement? sv;
+            XElement? owningSubelement = null;
+
+            if (SubelementPath == null)
+            {
+                sv = Member.Element(ns + SE.StartValue);
+            }
+            else
+            {
+                owningSubelement = LocalElements(Member, SE.Subelement)
+                    .FirstOrDefault(e => e.Attribute(SE.Path)?.Value == SubelementPath);
+                sv = owningSubelement == null ? null : LocalElement(owningSubelement, SE.StartValue);
+            }
+
+            if (sv == null) return null;
+
+            var prior = sv.Attribute(SE.ConstantName)?.Value?.Trim('"') ?? sv.Value;
+            sv.Remove();
+
+            // Prune a Subelement that only existed to carry this StartValue. Keep
+            // it if it still holds other content (e.g. a per-instance <Comment>).
+            if (owningSubelement != null && !owningSubelement.Elements().Any())
+                owningSubelement.Remove();
+
+            return prior;
         }
     }
 
