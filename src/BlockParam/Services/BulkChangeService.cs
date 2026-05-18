@@ -37,6 +37,13 @@ public class BulkChangeService
     /// </summary>
     public BulkStrategy RecommendStrategy(ChangeSet changeSet)
     {
+        // A "clear" (revert-to-default) can only be expressed by REMOVING the
+        // <StartValue> element via the XML path. The Openness Direct API's
+        // SetAttribute("StartValue", "") cannot revert to default (issue #142),
+        // so clears always take the XML strategy regardless of scope size.
+        if (string.IsNullOrWhiteSpace(changeSet.NewValue))
+            return BulkStrategy.XmlExportImport;
+
         return changeSet.Scope.MatchCount <= DirectApiThreshold
             ? BulkStrategy.DirectApi
             : BulkStrategy.XmlExportImport;
@@ -78,6 +85,13 @@ public class BulkChangeService
         if (validationError != null)
         {
             return new DirectApiResult(new[] { validationError }, Array.Empty<ValueChange>());
+        }
+
+        if (string.IsNullOrWhiteSpace(changeSet.NewValue))
+        {
+            return new DirectApiResult(
+                new[] { "Clearing a start value requires the XML strategy (cannot revert to default via the Direct API)." },
+                Array.Empty<ValueChange>());
         }
 
         var changes = new List<ValueChange>();

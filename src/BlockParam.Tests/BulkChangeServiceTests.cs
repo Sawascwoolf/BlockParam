@@ -242,6 +242,25 @@ public class BulkChangeServiceTests : IDisposable
             "the audit log must record the concrete AncestorName, not the UI wildcard pattern");
     }
 
+    [Fact]
+    public void RecommendStrategy_ClearValue_ForcesXmlStrategy()
+    {
+        var xml = TestFixtures.LoadXml("udt-instances-db.xml");
+        var db = _parser.Parse(xml);
+        var analyzer = new HierarchyAnalyzer();
+        var moduleId = db.AllMembers().First(m => m.Path == "Drive1.Msg_CommError.ModuleId");
+        var scope = analyzer.Analyze(db, moduleId).Scopes.First(); // narrowest scope
+
+        var service = CreateService();
+        var clearSet = new ChangeSet("UdtInstancesDB", "ModuleId", "Int", scope, "");
+        var setSet = new ChangeSet("UdtInstancesDB", "ModuleId", "Int", scope, "7");
+
+        // Sanity: a non-clear narrow scope would normally use the Direct API.
+        service.RecommendStrategy(setSet).Should().Be(BulkStrategy.DirectApi);
+        // A clear must override that and take the XML path.
+        service.RecommendStrategy(clearSet).Should().Be(BulkStrategy.XmlExportImport);
+    }
+
     /// <summary>
     /// #152: a single-DB scope (IsCrossDb = false) must NOT carry the cross-DB qualifier
     /// — the Scope column must equal the bare AncestorName, unchanged.
