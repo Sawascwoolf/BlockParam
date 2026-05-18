@@ -1024,4 +1024,29 @@ Continue?</value>
     <value>+ PLC</value>
     <comment>Button that opens the project-wide DB picker to add a PLC's pill to the row</comment>
   </data>
+  <!-- Loading splash (#125) -->
+  <data name="Splash_Title" xml:space="preserve">
+    <value>Bulk Change</value>
+  </data>
+  <data name="Splash_Preparing" xml:space="preserve">
+    <value>Preparing…</value>
+  </data>
+  <data name="Splash_RefreshingUdtCache" xml:space="preserve">
+    <value>Refreshing UDT cache…</value>
+  </data>
+  <data name="Splash_LoadingUdtCache" xml:space="preserve">
+    <value>Loading UDT cache…</value>
+  </data>
+  <data name="Splash_ExportingDb" xml:space="preserve">
+    <value>Exporting {0}…</value>
+  </data>
+  <data name="Splash_ParsingDb" xml:space="preserve">
+    <value>Parsing {0}…</value>
+  </data>
+  <data name="Splash_LoadingConfig" xml:space="preserve">
+    <value>Loading configuration…</value>
+  </data>
+  <data name="Splash_Counter" xml:space="preserve">
+    <value>({0} of {1})</value>
+  </data>
 </root>

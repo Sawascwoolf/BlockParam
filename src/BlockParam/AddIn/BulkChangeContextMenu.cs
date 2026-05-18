@@ -111,6 +111,7 @@ public class BulkChangeContextMenu : ContextMenuAddIn
     private void OnClick(MenuSelectionProvider<IEngineeringObject> provider)
     {
         var prompt = new MessageBoxUserPrompt();
+        LoadingSplashController? splash = null;
 #if DIAGNOSTICS
         var totalSw = Stopwatch.StartNew();
         long buildMs = 0, configMs = 0;
@@ -130,6 +131,14 @@ public class BulkChangeContextMenu : ContextMenuAddIn
                 allSelected.Count > 1 ? $" (+{allSelected.Count - 1} additional DB(s))" : "");
             Log.Information("UI culture: {Culture} (ResourceManager picks Strings.<lang>.resx satellite)",
                 System.Threading.Thread.CurrentThread.CurrentUICulture.Name);
+
+            // #125: indeterminate splash on its own STA dispatcher thread so
+            // it keeps painting while the synchronous Openness export/parse
+            // below blocks the TIA UI thread. Flash-guarded (no window if
+            // prep is fast); strings are localized here and pushed in.
+            splash = new LoadingSplashController(Res.Get("Splash_Title"));
+            splash.Show();
+            splash.Report(Res.Get("Splash_Preparing"));
 
             // Per-project scope so parallel TIA instances / switched projects cannot share cache dirs (#14).
             var project = _tiaPortal.Projects.FirstOrDefault();
@@ -154,6 +163,7 @@ public class BulkChangeContextMenu : ContextMenuAddIn
             // Stage (a): UDT cache refresh.
             // Refresh UDT cache before parsing — out-of-date UDT XML produces wrong
             // setpoint / comment defaults at the leaf level.
+            splash.Report(Res.Get("Splash_RefreshingUdtCache"));
             int udtRefreshedCount = 0;
             using (var t = OpenTiming.Stage("udtRefresh", $"plc={plcName}"))
             {
@@ -166,6 +176,7 @@ public class BulkChangeContextMenu : ContextMenuAddIn
             }
 
             // Stage (b): UDT resolver load.
+            splash.Report(Res.Get("Splash_LoadingUdtCache"));
             var udtResolver = new UdtSetPointResolver();
             var commentResolver = new UdtCommentResolver();
             using (var t = OpenTiming.Stage("udtLoad", $"plc={plcName}"))
@@ -203,7 +214,9 @@ public class BulkChangeContextMenu : ContextMenuAddIn
 #if DIAGNOSTICS
             var buildSw = Stopwatch.StartNew();
 #endif
-            focused = dbFactory.Build(allSelected[0], displayPlcName);
+            var totalDbs = allSelected.Count;
+            splash.SetCounter(totalDbs > 1 ? Res.Format("Splash_Counter", 1, totalDbs) : string.Empty);
+            focused = dbFactory.Build(allSelected[0], displayPlcName, splash);
             if (focused == null) return;
             var currentFocused = focused;
 
@@ -211,9 +224,11 @@ public class BulkChangeContextMenu : ContextMenuAddIn
             // compile, etc.).
             for (int i = 1; i < allSelected.Count; i++)
             {
-                var c = dbFactory.Build(allSelected[i], displayPlcName);
+                splash.SetCounter(Res.Format("Splash_Counter", i + 1, totalDbs));
+                var c = dbFactory.Build(allSelected[i], displayPlcName, splash);
                 if (c != null) additionalDbs.Add(c);
             }
+            splash.SetCounter(string.Empty);
 #if DIAGNOSTICS
             buildSw.Stop();
             buildMs = buildSw.ElapsedMilliseconds;
@@ -228,6 +243,7 @@ public class BulkChangeContextMenu : ContextMenuAddIn
 #if DIAGNOSTICS
             var configSw = Stopwatch.StartNew();
 #endif
+            splash.Report(Res.Get("Splash_LoadingConfig"));
             // Build the rest of the VM dependencies (config / project languages /
             // licensing / update check). Pure construction — no TIA tree walks.
             var (configLoader, projectLanguages, editingLanguage, referenceLanguage) =
@@ -324,6 +340,9 @@ public class BulkChangeContextMenu : ContextMenuAddIn
 #endif
 
             var dialog = new BulkChangeDialog(vm);
+            // Hand off splash → dialog only once the dialog has actually
+            // painted, so there is no flash of empty desktop between them (#125).
+            dialog.ContentRendered += (_, _) => splash?.Close();
             dialog.ShowDialog();
             licenseService.StopHeartbeat();
             licenseService.Dispose();
@@ -332,6 +351,12 @@ public class BulkChangeContextMenu : ContextMenuAddIn
         {
             Log.Error(ex, "Error in Bulk Change OnClick");
             prompt.ShowError(Res.Get("Rollback_Title"), ex.ToString());
+        }
+        finally
+        {
+            // Safety net for early-return / exception paths where the dialog
+            // never opened. Idempotent with the handoff above.
+            splash?.Close();
         }
     }
 
