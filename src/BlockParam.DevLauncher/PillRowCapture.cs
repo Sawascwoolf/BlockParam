@@ -159,32 +159,38 @@ internal static class PillRowCapture
     private static IReadOnlyList<SceneDef> BuildSceneDefs(
         IReadOnlyList<DataBlockSummary> realDbs)
     {
+        var scenes = new List<SceneDef>();
+
         if (realDbs.Count == 0)
         {
-            return new List<SceneDef>
-            {
-                new("No real fixtures found",
-                    $"Expected DBs in {Path.Combine(Path.GetTempPath(), "BlockParam")}",
-                    () => BuildEmptyScene()),
-            };
+            // Hosted CI runners have no %TEMP%\BlockParam\ exports, so the
+            // real-fixtures section is empty there. Emit one placeholder for
+            // context, then fall through to the synthetic + #141 scenes so
+            // --capture-pill-row is still meaningful on CI (which is the only
+            // place the screenshots job actually runs). Before this, an empty
+            // %TEMP% short-circuited the WHOLE capture to just this placeholder
+            // — the synthetic showcase never rendered on CI at all.
+            scenes.Add(new("No real fixtures found",
+                $"Expected DBs in {Path.Combine(Path.GetTempPath(), "BlockParam")} — synthetic + #141 scenes follow.",
+                () => BuildEmptyScene(),
+                SectionHeader: "Real fixtures (from %TEMP%\\BlockParam\\)"));
         }
-
-        // Anchor = first real DB. The user's interactive session lands on
-        // this DB by default (BulkChangeDialog opens with index 0 active).
-        var anchor = realDbs[0];
-        var firstThree = realDbs.Take(Math.Min(3, realDbs.Count)).ToList();
-        var firstHalf = realDbs.Take((realDbs.Count + 1) / 2).ToList();
-        var secondHalf = realDbs.Skip((realDbs.Count + 1) / 2).ToList();
-
-        // DevLauncher fixtures don't carry a real PLC name; rebrand to a
-        // demo label so the always-on PLC label policy is visible in the
-        // composite. Real TIA Openness sessions populate the PLC name
-        // for free.
-        const string demoPlc = "PLC_1";
-
-        var scenes = new List<SceneDef>
+        else
         {
-            new("Real fixtures · single DB active (anchor only)",
+            // Anchor = first real DB. The user's interactive session lands on
+            // this DB by default (BulkChangeDialog opens with index 0 active).
+            var anchor = realDbs[0];
+            var firstThree = realDbs.Take(Math.Min(3, realDbs.Count)).ToList();
+            var firstHalf = realDbs.Take((realDbs.Count + 1) / 2).ToList();
+            var secondHalf = realDbs.Skip((realDbs.Count + 1) / 2).ToList();
+
+            // DevLauncher fixtures don't carry a real PLC name; rebrand to a
+            // demo label so the always-on PLC label policy is visible in the
+            // composite. Real TIA Openness sessions populate the PLC name
+            // for free.
+            const string demoPlc = "PLC_1";
+
+            scenes.Add(new("Real fixtures · single DB active (anchor only)",
                 $"Active set: {anchor.Name}. Matches the dialog's launch state.",
                 () => BuildRowScene(new[]
                 {
@@ -193,9 +199,9 @@ internal static class PillRowCapture
                         Source: realDbs,
                         ActiveNames: new[] { anchor.Name }),
                 }, openIndex: -1, openAddPlc: false),
-                SectionHeader: "Real fixtures (from %TEMP%\\BlockParam\\)"),
+                SectionHeader: "Real fixtures (from %TEMP%\\BlockParam\\)"));
 
-            new("Real fixtures · multiple DBs active (same PLC)",
+            scenes.Add(new("Real fixtures · multiple DBs active (same PLC)",
                 $"Active set: {string.Join(", ", firstThree.Select(d => d.Name))}",
                 () => BuildRowScene(new[]
                 {
@@ -203,9 +209,9 @@ internal static class PillRowCapture
                         OverridePlc: demoPlc,
                         Source: realDbs,
                         ActiveNames: firstThree.Select(d => d.Name).ToList()),
-                }, openIndex: -1, openAddPlc: false)),
+                }, openIndex: -1, openAddPlc: false)));
 
-            new("Real fixtures · first pill's popup open",
+            scenes.Add(new("Real fixtures · first pill's popup open",
                 "Reproduces the 'no abbreviations in row' state when DB.Number is null.",
                 () => BuildRowScene(new[]
                 {
@@ -213,14 +219,23 @@ internal static class PillRowCapture
                         OverridePlc: demoPlc,
                         Source: realDbs,
                         ActiveNames: new[] { anchor.Name }),
-                }, openIndex: 0, openAddPlc: false)),
-        };
+                }, openIndex: 0, openAddPlc: false)));
+
+            // firstHalf / secondHalf are kept from earlier scene drafts;
+            // unused locals are tolerated here (parity with prior behaviour).
+            _ = (firstHalf, secondHalf);
+        }
 
         // ── Synthetic multi-PLC showcase ─────────────────────────────────────
         // Pure synthetic data (numbers + PLC labels are made up) so the
         // overflow / wrap / multi-PLC visuals can be iterated on without
         // depending on what the developer happens to have in %TEMP%.
         scenes.AddRange(BuildSyntheticShowcaseScenes());
+
+        // #141 regression repro — numberless instance DB, closed pill, NO
+        // OverflowOptions. Always rendered (it's synthetic, not gated on
+        // %TEMP% fixtures) so the screenshots job verifies the fix on CI.
+        scenes.Add(BuildIssue141NumberlessScene());
 
         return scenes;
     }
@@ -364,6 +379,41 @@ internal static class PillRowCapture
         };
     }
 
+    /// <summary>
+    /// #141 regression repro. A numberless instance DB
+    /// (<c>Gen_Main_IDB</c> — <c>_IDB</c> suffix, no DB number → empty
+    /// <see cref="DataBlockListItem.Abbreviation"/>) in a CLOSED pill built
+    /// WITHOUT <c>OverflowOptions</c>. That is the exact path the fix
+    /// repairs: the default <c>PillTriggerToken</c> summary (no
+    /// <c>_displayFormatter</c>). Pre-fix the trigger rendered BLANK (only
+    /// the count badge + ×); post-fix it falls back to the full DB name.
+    /// Pure synthetic so it renders on every run, including hosted CI where
+    /// there are no <c>%TEMP%\BlockParam\</c> fixtures.
+    /// </summary>
+    private static SceneDef BuildIssue141NumberlessScene() =>
+        new("#141 · numberless instance DB · closed pill, no OverflowOptions",
+            "Gen_Main_IDB has no DB number so its abbreviation is empty. "
+            + "With no OverflowOptions wired the trigger summary uses the "
+            + "default token path — pre-fix this rendered blank, post-fix it "
+            + "falls back to the full DB name.",
+            () => BuildRowScene(new[]
+            {
+                new PillSeed(
+                    OverridePlc: "CPU_1",
+                    Source: new[]
+                    {
+                        new DataBlockSummary(
+                            name: "Gen_Main_IDB",
+                            folderPath: "",
+                            blockType: "InstanceDB",
+                            isInstanceDb: true,
+                            plcName: "CPU_1",
+                            number: null),
+                    },
+                    ActiveNames: new[] { "Gen_Main_IDB" }),
+            }, openIndex: -1, openAddPlc: false, wireOverflowOptions: false),
+            SectionHeader: "#141 regression — closed-pill default-path summary");
+
     // ── Window construction ──────────────────────────────────────────────────
 
     private static (Window Window, FrameworkElement? PopupHost) BuildRowScene(
@@ -372,7 +422,8 @@ internal static class PillRowCapture
         bool openAddPlc,
         bool showAddButton = false,
         IReadOnlyList<DataBlockSummary>? addPlcSource = null,
-        int hoverTooltipIndex = -1)
+        int hoverTooltipIndex = -1,
+        bool wireOverflowOptions = true)
     {
         // Route pill construction through PlcPillGroupsService.Build so the
         // capture stays honest if Build's ordering / anchor / extraPlcs
@@ -456,12 +507,18 @@ internal static class PillRowCapture
                 AbbreviationMemberPath = nameof(DataBlockListItem.Abbreviation),
                 Icon = Geometry.Parse(DatabaseIconPath),
                 TooltipMode = PillTooltipMode.FullNames,
-                // Mirror BulkChangeDialog.xaml's DbPillOverflowOptions so the
-                // trigger renders full DB names until they exceed ~30 chars
-                // or 4 entries, then degrades to abbreviations.
-                OverflowOptions = PillOverflowOptions.DataBlockDefault(),
                 Margin = new Thickness(0, 0, 8, 0),
             };
+            if (wireOverflowOptions)
+            {
+                // Mirror BulkChangeDialog.xaml's DbPillOverflowOptions so the
+                // trigger renders full DB names until they exceed ~30 chars
+                // or 4 entries, then degrades to abbreviations. The #141 repro
+                // scene passes wireOverflowOptions:false to exercise the
+                // DEFAULT token path (no _displayFormatter) — the exact path
+                // the fix repairs for a numberless instance DB.
+                ms.OverflowOptions = PillOverflowOptions.DataBlockDefault();
+            }
             if (i == openIndex)
             {
                 // Set IsOpen on the control directly so PlcPillViewModel's
