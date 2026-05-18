@@ -346,6 +346,11 @@ public class SimaticMLParser
             elementPathWithinUdt = pathWithinUdt;
         }
 
+        // #154 H1: index the <Subelement> children ONCE for the whole array
+        // instead of letting each element re-scan them linearly (O(n²) when
+        // every element has an explicit start value — the 10k-element freeze).
+        var subByPath = BuildSubelementIndex(memberElement);
+
         foreach (var indexTuple in EnumerateIndexTuples(resolvedRanges))
         {
             var indexLabel = $"[{string.Join(",", indexTuple)}]";
@@ -357,7 +362,7 @@ public class SimaticMLParser
 
             if (elementIsPrimitive)
             {
-                var sv = ReadSubelementValue(memberElement, ns, string.Join(",", childIndexStack));
+                var sv = ReadSubelementValue(subByPath, string.Join(",", childIndexStack));
                 var leaf = new MemberNode(
                     name: indexLabel,
                     datatype: elementType,
@@ -528,6 +533,44 @@ public class SimaticMLParser
             return LocalElement(sub, Comment);
         }
         return null;
+    }
+
+    /// <summary>
+    /// #154 H1: builds a one-shot <c>Path attribute → &lt;Subelement&gt;</c>
+    /// index for an array Member. <see cref="ExpandArrayMember"/> used to call
+    /// <see cref="ReadSubelementValue(XElement,XNamespace,string)"/> once per
+    /// element, and each call re-scanned every <c>&lt;Subelement&gt;</c>
+    /// linearly — O(n·k), i.e. O(n²) when all n elements carry an explicit
+    /// start value (the 10 000-element repro). Indexing the children once and
+    /// doing O(1) lookups per element collapses that to O(n + k). "First wins"
+    /// reproduces the original <c>foreach … return</c> first-match semantics.
+    /// </summary>
+    private static Dictionary<string, XElement> BuildSubelementIndex(XElement memberElement)
+    {
+        var map = new Dictionary<string, XElement>(StringComparer.Ordinal);
+        foreach (var sub in LocalElements(memberElement, Subelement))
+        {
+            var p = sub.Attribute(Path)?.Value;
+            if (p != null && !map.ContainsKey(p))
+                map[p] = sub;
+        }
+        return map;
+    }
+
+    private static string? ReadSubelementValue(
+        IReadOnlyDictionary<string, XElement> subByPath, string subelementPath)
+    {
+        if (!subByPath.TryGetValue(subelementPath, out var sub)) return null;
+        var sv = LocalElement(sub, StartValue);
+        return sv?.Attribute(ConstantName)?.Value?.Trim('"') ?? sv?.Value;
+    }
+
+    private static XElement? ReadSubelementComment(
+        IReadOnlyDictionary<string, XElement> subByPath, string subelementPath)
+    {
+        return subByPath.TryGetValue(subelementPath, out var sub)
+            ? LocalElement(sub, Comment)
+            : null;
     }
 
     private static IEnumerable<int[]> EnumerateIndexTuples(List<(int low, int high)> ranges)

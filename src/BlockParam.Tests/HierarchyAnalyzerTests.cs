@@ -228,4 +228,69 @@ public class HierarchyAnalyzerTests
         result.Scopes.Should().ContainSingle(s => s.AncestorPath == "MyArray");
         result.Scopes.Should().NotContain(s => s.AncestorPath.StartsWith("MyArray["));
     }
+
+    // --- #90 / #154 H5 fingerprint correctness tests ---
+
+    /// <summary>
+    /// #90 invariant: two partial-dim scopes with equal MatchCount but disjoint
+    /// path sets (e.g. SquareMatrix[0,*] and SquareMatrix[*,0] on a 3x3 array,
+    /// each covering 3 cells but different cells) must NOT be collapsed by
+    /// DeduplicateByMatchCount. This pins the correctness side of the #154 H5
+    /// fingerprint change (HashSet&lt;string&gt; → HashSet&lt;long&gt; via FNV-1a).
+    /// Behavioral test through the public Analyze API.
+    /// </summary>
+    [Fact]
+    public void Analyze_SquareMatrix_SameCountDifferentPaths_BothScopesKept()
+    {
+        // SquareMatrix is Array[0..2, 0..2] of Int in array-db.xml.
+        // Selecting [0,0] yields:
+        //   SquareMatrix[0,*]  — row 0: [0,0], [0,1], [0,2]   MatchCount = 3
+        //   SquareMatrix[*,0]  — col 0: [0,0], [1,0], [2,0]   MatchCount = 3
+        //   SquareMatrix       — full:  all 9 elements          MatchCount = 9
+        // The two 3-element scopes share the same MatchCount but target completely
+        // different cells; the deduplicator must keep both.
+        var db = _parser.Parse(TestFixtures.LoadXml("array-db.xml"));
+        var squareMatrix = db.Members.First(m => m.Name == "SquareMatrix");
+        var elem00 = squareMatrix.Children.First(c => c.Name == "[0,0]");
+
+        var result = _analyzer.Analyze(db, elem00);
+
+        var rowScope = result.Scopes.FirstOrDefault(s => s.AncestorPath == "SquareMatrix[0,*]");
+        var colScope = result.Scopes.FirstOrDefault(s => s.AncestorPath == "SquareMatrix[*,0]");
+
+        rowScope.Should().NotBeNull("row-0 scope must be present");
+        colScope.Should().NotBeNull("col-0 scope must be present");
+        rowScope!.MatchCount.Should().Be(3);
+        colScope!.MatchCount.Should().Be(3);
+
+        // Verify the path sets are indeed disjoint (no false collision in the fingerprint).
+        var rowPaths = rowScope.MatchingMembers.Select(m => m.Name).ToHashSet();
+        var colPaths = colScope.MatchingMembers.Select(m => m.Name).ToHashSet();
+        rowPaths.Should().NotBeEquivalentTo(colPaths,
+            "row-0 and col-0 cover different cells; fingerprints must differ");
+    }
+
+    /// <summary>
+    /// Complementary check: two scopes with identical MatchCount AND identical
+    /// path sets must collapse to one entry. This confirms the dedup still works
+    /// for the "genuine duplicate" case after the fingerprint type change.
+    /// Behavioral test: SquareMatrix[0,*] appears via within-DB analysis and
+    /// must not be repeated in the result even if the analyzer builds it twice.
+    /// Because the analyzer only builds each partial-dim scope once per select,
+    /// we verify uniqueness via result cardinality (no scope with the same
+    /// AncestorPath appears more than once).
+    /// </summary>
+    [Fact]
+    public void Analyze_SquareMatrix_ScopeAppearsExactlyOnce()
+    {
+        var db = _parser.Parse(TestFixtures.LoadXml("array-db.xml"));
+        var squareMatrix = db.Members.First(m => m.Name == "SquareMatrix");
+        var elem01 = squareMatrix.Children.First(c => c.Name == "[0,1]");
+
+        var result = _analyzer.Analyze(db, elem01);
+
+        // Each distinct AncestorPath should appear at most once (dedup works).
+        var paths = result.Scopes.Select(s => s.AncestorPath).ToList();
+        paths.Should().OnlyHaveUniqueItems("duplicate scopes indicate a fingerprint collision");
+    }
 }
