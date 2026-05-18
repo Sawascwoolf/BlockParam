@@ -26,11 +26,15 @@ namespace BlockParam.Services;
 /// </para>
 ///
 /// <para>
-/// Bounded LRU (<see cref="MaxEntries"/>): each entry retains the full export
-/// XML (multi-MB for large DBs), so an unbounded map would let a long session
-/// that browses many DBs grow without limit. The least-recently-used entry is
-/// evicted past the cap; the #140 "re-open the same DB" pattern keeps hot
-/// entries resident because every hit refreshes recency.
+/// Bounded by a <b>total-XML-size budget</b> (<see cref="MaxTotalChars"/>),
+/// not just an entry count: a single 17k-member DB exports to multi-MB XML
+/// (~tens of MB as a UTF-16 string), so an entry-count cap could still pin
+/// hundreds of MB inside an already memory-hungry TIA process. The
+/// least-recently-used entries are evicted until both the size budget and a
+/// small hard entry cap (<see cref="MaxEntries"/>) hold; the #140 "re-open the
+/// same DB" pattern keeps hot entries resident because every hit refreshes
+/// recency. At least one entry is always retained (a lone DB larger than the
+/// whole budget is still worth caching for its own re-open).
 /// </para>
 /// </summary>
 public interface IDbExportCache
@@ -46,8 +50,10 @@ public interface IDbExportCache
 
     /// <summary>
     /// Stores <paramref name="xml"/> for <paramref name="key"/> tagged with
-    /// <paramref name="freshnessToken"/> (most-recently-used). A later
-    /// <see cref="TryGet"/> only hits while the caller presents the same token.
+    /// <paramref name="freshnessToken"/> (most-recently-used), then evicts
+    /// least-recently-used entries until within the size + entry bounds. A
+    /// later <see cref="TryGet"/> only hits while the caller presents the same
+    /// token.
     /// </summary>
     void Set(string key, string freshnessToken, string xml);
 
@@ -65,12 +71,19 @@ public interface IDbExportCache
 public sealed class DbExportCache : IDbExportCache
 {
     /// <summary>
-    /// Max retained exports. ~32 multi-MB XML strings is a sane desktop ceiling;
-    /// re-opening within a working set of this size still hits the cache.
+    /// Primary bound: total characters of cached XML. ~24M chars ≈ 48 MB of
+    /// UTF-16 — a modest, predictable ceiling for an add-in inside TIA's
+    /// process regardless of how large or how many DBs get opened.
     /// </summary>
-    internal const int MaxEntries = 32;
+    internal const long MaxTotalChars = 24_000_000;
+
+    /// <summary>Secondary hard cap so tiny DBs can't pin unbounded entries.</summary>
+    internal const int MaxEntries = 12;
 
     private readonly object _lock = new object();
+    private readonly long _maxTotalChars;
+    private readonly int _maxEntries;
+    private long _totalChars;
 
     // Mutable node class (not a readonly struct) — avoids the partial-trust
     // ldflda-on-readonly-struct-field IL pitfall entirely (CLAUDE.md), and lets
@@ -92,6 +105,16 @@ public sealed class DbExportCache : IDbExportCache
     private readonly Dictionary<string, LinkedListNode<CacheItem>> _index =
         new Dictionary<string, LinkedListNode<CacheItem>>();
 
+    public DbExportCache() : this(MaxEntries, MaxTotalChars) { }
+
+    // Test seam: inject tiny bounds so size-eviction is verifiable without
+    // allocating 48 MB strings.
+    internal DbExportCache(int maxEntries, long maxTotalChars)
+    {
+        _maxEntries = maxEntries;
+        _maxTotalChars = maxTotalChars;
+    }
+
     /// <summary>
     /// Stable cache key. <paramref name="projectScope"/> isolates parallel TIA
     /// instances / switched projects (a project can host two PLCs with
@@ -101,14 +124,13 @@ public sealed class DbExportCache : IDbExportCache
     /// NUL), unlike concatenation alone.
     ///
     /// <para>
-    /// Note: callers pass the DB launch path uses <c>displayPlcName</c> ("" on
-    /// single-PLC projects) while the in-dialog switcher passes the resolved
-    /// PLC name, so on a single-PLC project the same DB can key differently
-    /// across those two paths. That is a missed-hit (perf) only, never a
-    /// wrong-DB hit: <paramref name="projectScope"/> + name + number stay
-    /// correct, and multi-PLC projects (the only place plcName guards
-    /// correctness) pass the resolved name on both paths. Tracked for unified
-    /// keying in #155.
+    /// Note: the DB launch path uses <c>displayPlcName</c> ("" on single-PLC
+    /// projects) while the in-dialog switcher passes the resolved PLC name, so
+    /// on a single-PLC project the same DB can key differently across those two
+    /// paths. That is a missed-hit (perf) only, never a wrong-DB hit:
+    /// <paramref name="projectScope"/> + name + number stay correct, and
+    /// multi-PLC projects (the only place plcName guards correctness) pass the
+    /// resolved name on both paths. Tracked for unified keying in #155.
     /// </para>
     /// </summary>
     public static string KeyFor(string projectScope, string plcName, string dbName, int dbNumber)
@@ -141,23 +163,29 @@ public sealed class DbExportCache : IDbExportCache
         {
             if (_index.TryGetValue(key, out var node))
             {
+                _totalChars -= node.Value.Xml.Length;
                 node.Value.Token = freshnessToken;
                 node.Value.Xml = xml;
+                _totalChars += xml.Length;
                 Touch(node);
-                return;
+            }
+            else
+            {
+                var added = _lru.AddFirst(new CacheItem(key, freshnessToken, xml));
+                _index[key] = added;
+                _totalChars += xml.Length;
             }
 
-            var added = _lru.AddFirst(new CacheItem(key, freshnessToken, xml));
-            _index[key] = added;
-
-            if (_index.Count > MaxEntries)
+            // Evict LRU (tail) until within both bounds, but never drop the
+            // last entry — a lone over-budget DB is still worth its re-open.
+            while (_index.Count > 1 &&
+                   (_index.Count > _maxEntries || _totalChars > _maxTotalChars))
             {
                 var lru = _lru.Last;
-                if (lru != null)
-                {
-                    _lru.RemoveLast();
-                    _index.Remove(lru.Value.Key);
-                }
+                if (lru == null) break;
+                _totalChars -= lru.Value.Xml.Length;
+                _lru.RemoveLast();
+                _index.Remove(lru.Value.Key);
             }
         }
     }
@@ -174,6 +202,7 @@ public sealed class DbExportCache : IDbExportCache
         {
             if (_index.TryGetValue(key, out var node))
             {
+                _totalChars -= node.Value.Xml.Length;
                 _lru.Remove(node);
                 _index.Remove(key);
             }
@@ -186,6 +215,7 @@ public sealed class DbExportCache : IDbExportCache
         {
             _lru.Clear();
             _index.Clear();
+            _totalChars = 0;
         }
     }
 

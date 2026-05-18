@@ -205,4 +205,50 @@ public class DbExportCacheTests
         cache.TryGet("k0", "t2", out var x0).Should().BeTrue();
         x0.Should().Be("<x0v2/>");
     }
+
+    // ── Size-budget eviction (the OOM-pressure guard) ────────────────────────
+
+    [Fact]
+    public void Set_OverSizeBudget_EvictsLru_EvenUnderEntryCap()
+    {
+        // Entry cap is generous; the 10-char size budget is the binding limit.
+        var cache = new DbExportCache(maxEntries: 100, maxTotalChars: 10);
+        cache.Set("k1", Tok, "abcde"); // total 5
+        cache.Set("k2", Tok, "fghij"); // total 10 — still within budget
+
+        cache.HasEntry("k1").Should().BeTrue();
+        cache.HasEntry("k2").Should().BeTrue();
+
+        cache.Set("k3", Tok, "klmno"); // total 15 > 10 → evict LRU (k1)
+
+        cache.HasEntry("k1").Should().BeFalse("evicted by size budget, not entry count");
+        cache.TryGet("k2", Tok, out _).Should().BeTrue();
+        cache.TryGet("k3", Tok, out var x3).Should().BeTrue();
+        x3.Should().Be("klmno");
+    }
+
+    [Fact]
+    public void Set_SingleEntryLargerThanBudget_IsStillRetained()
+    {
+        var cache = new DbExportCache(maxEntries: 100, maxTotalChars: 3);
+
+        cache.Set("big", Tok, "way-over-budget");
+
+        cache.TryGet("big", Tok, out var xml).Should().BeTrue("a lone entry is never evicted");
+        xml.Should().Be("way-over-budget");
+    }
+
+    [Fact]
+    public void Invalidate_FreesBudget_SoLaterSetsAreNotEvicted()
+    {
+        var cache = new DbExportCache(maxEntries: 100, maxTotalChars: 10);
+        cache.Set("k1", Tok, "abcde");
+        cache.Set("k2", Tok, "fghij"); // total 10
+
+        cache.Invalidate("k1");        // frees 5 → total 5
+        cache.Set("k3", Tok, "klmno"); // total 10 — fits, nothing evicted
+
+        cache.HasEntry("k2").Should().BeTrue();
+        cache.HasEntry("k3").Should().BeTrue();
+    }
 }
