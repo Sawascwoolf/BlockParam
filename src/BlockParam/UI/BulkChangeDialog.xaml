@@ -1041,8 +1041,21 @@
                                            TextWrapping="Wrap"/>
                             </Border>
                             <!-- List -->
+                            <!-- #159 H5: virtualized. A bulk edit over a 10k-element
+                                 array used to materialize every preview row at once
+                                 (bare ItemsControl, no virtualization). The bounded
+                                 ScrollViewer in the template + VirtualizingStackPanel
+                                 panel recycle containers so only the visible rows are
+                                 realized. The MaxHeight gives the panel a viewport
+                                 (a StackPanel-hosted ItemsControl is measured with
+                                 infinite height and never virtualizes); below that
+                                 height it is its natural size and the outer inspector
+                                 scroll still moves it as one unit. -->
                             <ItemsControl ItemsSource="{Binding BulkPreview.Entries}"
-                                          Background="White">
+                                          Background="White"
+                                          ScrollViewer.CanContentScroll="True"
+                                          VirtualizingStackPanel.IsVirtualizing="True"
+                                          VirtualizingStackPanel.VirtualizationMode="Recycling">
                                 <ItemsControl.Style>
                                     <Style TargetType="ItemsControl">
                                         <Setter Property="Visibility" Value="Collapsed"/>
@@ -1057,12 +1070,21 @@
                                         </Style.Triggers>
                                     </Style>
                                 </ItemsControl.Style>
-                                <!-- No inner ScrollViewer: the sidebar's outer ScrollViewer
-                                     handles wheel events for the whole inspector. -->
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate>
+                                        <VirtualizingStackPanel/>
+                                    </ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
                                 <ItemsControl.Template>
                                     <ControlTemplate TargetType="ItemsControl">
                                         <Border Background="White">
-                                            <ItemsPresenter/>
+                                            <ScrollViewer CanContentScroll="True"
+                                                          MaxHeight="360"
+                                                          VerticalScrollBarVisibility="Auto"
+                                                          HorizontalScrollBarVisibility="Disabled"
+                                                          Focusable="False">
+                                                <ItemsPresenter/>
+                                            </ScrollViewer>
                                         </Border>
                                     </ControlTemplate>
                                 </ItemsControl.Template>
@@ -1193,9 +1215,21 @@
                                            TextWrapping="Wrap"/>
                             </Border>
                             <!-- List -->
+                            <!-- #159 H4: virtualized. Staging edits across a
+                                 10k-element array used to materialize 10k pending
+                                 rows at once (bare ItemsControl), making the panel
+                                 sluggish to render and scroll even before Apply.
+                                 Same recipe as the Bulk Preview list above: bounded
+                                 ScrollViewer in the template + VirtualizingStackPanel
+                                 panel so only visible rows are realized; the MaxHeight
+                                 supplies the viewport that a StackPanel-hosted
+                                 ItemsControl otherwise lacks. -->
                             <ItemsControl x:Name="PendingEditsList"
                                           ItemsSource="{Binding Pending.PendingEdits}"
-                                          Background="White">
+                                          Background="White"
+                                          ScrollViewer.CanContentScroll="True"
+                                          VirtualizingStackPanel.IsVirtualizing="True"
+                                          VirtualizingStackPanel.VirtualizationMode="Recycling">
                                 <ItemsControl.Style>
                                     <Style TargetType="ItemsControl">
                                         <Setter Property="Visibility" Value="Collapsed"/>
@@ -1210,12 +1244,21 @@
                                         </Style.Triggers>
                                     </Style>
                                 </ItemsControl.Style>
-                                <!-- No inner ScrollViewer: the sidebar's outer ScrollViewer
-                                     handles wheel events for the whole inspector. -->
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate>
+                                        <VirtualizingStackPanel/>
+                                    </ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
                                 <ItemsControl.Template>
                                     <ControlTemplate TargetType="ItemsControl">
                                         <Border Background="White">
-                                            <ItemsPresenter/>
+                                            <ScrollViewer CanContentScroll="True"
+                                                          MaxHeight="360"
+                                                          VerticalScrollBarVisibility="Auto"
+                                                          HorizontalScrollBarVisibility="Disabled"
+                                                          Focusable="False">
+                                                <ItemsPresenter/>
+                                            </ScrollViewer>
                                         </Border>
                                     </ControlTemplate>
                                 </ItemsControl.Template>

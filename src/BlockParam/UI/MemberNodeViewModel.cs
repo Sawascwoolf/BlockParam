@@ -339,6 +339,19 @@ public class MemberNodeViewModel : ViewModelBase
         OnPropertyChanged(nameof(EditableStartValue));
     }
 
+    /// <summary>
+    /// Re-raises the <see cref="StartValue"/>-derived bindings after the
+    /// owning model's value was patched in place by a committed Apply
+    /// (#159 H3). Without a re-parse the VM instance is unchanged, so the
+    /// table/inspector only refresh if these read-through properties signal.
+    /// </summary>
+    internal void NotifyCommittedStartValueChanged()
+    {
+        OnPropertyChanged(nameof(StartValue));
+        OnPropertyChanged(nameof(HasStartValue));
+        OnPropertyChanged(nameof(EditableStartValue));
+    }
+
     /// <summary>Fired when user edits a start value directly in the table.</summary>
     public event Action<MemberNodeViewModel, string>? StartValueEdited;
 

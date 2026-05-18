@@ -11,8 +11,9 @@ namespace BlockParam.SimaticML;
 public class SimaticMLWriter
 {
     /// <summary>
-    /// Changes the StartValue of all specified members in the XML document.
-    /// Returns the modified XML as a string.
+    /// Changes the StartValue of all specified members to the same value.
+    /// Parses + serializes the document exactly once regardless of how many
+    /// members are targeted. Returns the modified XML as a string.
     /// </summary>
     public WriteResult ModifyStartValues(
         string xml,
@@ -20,59 +21,97 @@ public class SimaticMLWriter
         string newValue)
     {
         var doc = XDocument.Parse(xml);
-        var ns = SimaticMLNamespaces.Detect(doc);
+        var ctx = new WriteContext(doc, SimaticMLNamespaces.Detect(doc));
         var changes = new List<ValueChange>();
         var errors = new List<string>();
 
         foreach (var target in targetMembers)
-        {
-            var location = FindStartValueLocation(doc, ns, target.Path);
-            if (location == null)
-            {
-                errors.Add($"Member not found in XML: {target.Path}");
-                continue;
-            }
-
-            if (string.IsNullOrWhiteSpace(newValue))
-            {
-                var oldCleared = location.ClearStartValue(ns);
-                // ClearStartValue returns null only when there was no
-                // <StartValue> element to remove → a genuine no-op. Don't
-                // record a phantom ValueChange: it would be counted toward
-                // the daily quota and written to the audit log for a write
-                // that changed nothing (bulk-clear over a scope where some
-                // members have no explicit start value hits this).
-                if (oldCleared != null)
-                    changes.Add(new ValueChange(target.Path, target.Datatype, oldCleared, ""));
-                continue;
-            }
-
-            var startValueElement = location.GetOrCreateStartValue(ns);
-
-            // Read old value (from ConstantName attribute or text)
-            var oldValue = startValueElement.Attribute(SE.ConstantName)?.Value?.Trim('"')
-                        ?? startValueElement.Value;
-
-            // Determine if newValue is a constant name or a literal value.
-            // Constants start with a letter but are NOT: bool literals, TIA typed
-            // prefixes (T#, D#, TOD#, etc.), or single-quoted strings.
-            var isConstant = !string.IsNullOrEmpty(newValue)
-                          && char.IsLetter(newValue[0])
-                          && !IsKnownLiteral(newValue);
-
-            // Clear previous content and attributes
-            startValueElement.Value = "";
-            startValueElement.Attribute(SE.ConstantName)?.Remove();
-
-            if (isConstant)
-                startValueElement.SetAttributeValue(SE.ConstantName, $"\"{newValue}\"");
-            else
-                startValueElement.Value = newValue;
-
-            changes.Add(new ValueChange(target.Path, target.Datatype, oldValue, newValue));
-        }
+            ApplyOne(ctx, target, newValue, changes, errors);
 
         return new WriteResult(doc.ToString(), changes, errors);
+    }
+
+    /// <summary>
+    /// Batch overload (#159 H1): applies a distinct value per member while
+    /// parsing and serializing the (potentially multi-MB) document exactly
+    /// once. The Apply loop used to call <see cref="ModifyStartValues(string,
+    /// IReadOnlyList{MemberNode}, string)"/> once per pending edit — an
+    /// O(n) full parse + serialize per edit, O(n) total for n edits. Routing
+    /// the whole pending batch through one call drops that to a single
+    /// parse/serialize pair (O(1) document cycles).
+    /// </summary>
+    public WriteResult ModifyStartValues(
+        string xml,
+        IReadOnlyList<(MemberNode Member, string Value)> edits)
+    {
+        var doc = XDocument.Parse(xml);
+        var ctx = new WriteContext(doc, SimaticMLNamespaces.Detect(doc));
+        var changes = new List<ValueChange>();
+        var errors = new List<string>();
+
+        foreach (var (member, value) in edits)
+            ApplyOne(ctx, member, value, changes, errors);
+
+        return new WriteResult(doc.ToString(), changes, errors);
+    }
+
+    /// <summary>
+    /// Applies a single member's start-value change against an already-parsed
+    /// document. Shared by both <see cref="ModifyStartValues(string,
+    /// IReadOnlyList{MemberNode}, string)"/> and the batch overload so the
+    /// parse/serialize cost is paid by the caller, not per member.
+    /// </summary>
+    private static void ApplyOne(
+        WriteContext ctx,
+        MemberNode target,
+        string newValue,
+        List<ValueChange> changes,
+        List<string> errors)
+    {
+        var location = FindStartValueLocation(ctx, target.Path);
+        if (location == null)
+        {
+            errors.Add($"Member not found in XML: {target.Path}");
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(newValue))
+        {
+            var oldCleared = location.ClearStartValue(ctx);
+            // ClearStartValue returns null only when there was no
+            // <StartValue> element to remove → a genuine no-op. Don't
+            // record a phantom ValueChange: it would be counted toward
+            // the daily quota and written to the audit log for a write
+            // that changed nothing (bulk-clear over a scope where some
+            // members have no explicit start value hits this).
+            if (oldCleared != null)
+                changes.Add(new ValueChange(target.Path, target.Datatype, oldCleared, ""));
+            return;
+        }
+
+        var startValueElement = location.GetOrCreateStartValue(ctx);
+
+        // Read old value (from ConstantName attribute or text)
+        var oldValue = startValueElement.Attribute(SE.ConstantName)?.Value?.Trim('"')
+                    ?? startValueElement.Value;
+
+        // Determine if newValue is a constant name or a literal value.
+        // Constants start with a letter but are NOT: bool literals, TIA typed
+        // prefixes (T#, D#, TOD#, etc.), or single-quoted strings.
+        var isConstant = !string.IsNullOrEmpty(newValue)
+                      && char.IsLetter(newValue[0])
+                      && !IsKnownLiteral(newValue);
+
+        // Clear previous content and attributes
+        startValueElement.Value = "";
+        startValueElement.Attribute(SE.ConstantName)?.Remove();
+
+        if (isConstant)
+            startValueElement.SetAttributeValue(SE.ConstantName, $"\"{newValue}\"");
+        else
+            startValueElement.Value = newValue;
+
+        changes.Add(new ValueChange(target.Path, target.Datatype, oldValue, newValue));
     }
 
     /// <summary>
@@ -89,13 +128,14 @@ public class SimaticMLWriter
 
         var doc = XDocument.Parse(xml);
         var ns = SimaticMLNamespaces.Detect(doc);
+        var ctx = new WriteContext(doc, ns);
 
         // Auto-detect language from existing comments in the XML
         var effectiveLanguage = language ?? DetectLanguage(doc, ns);
 
         for (int i = 0; i < targetMembers.Count; i++)
         {
-            var memberElement = FindMemberElement(doc, ns, targetMembers[i].Path);
+            var memberElement = FindMemberElement(ctx, targetMembers[i].Path);
             if (memberElement == null) continue;
 
             SetComment(memberElement, ns, comments[i], effectiveLanguage);
@@ -131,20 +171,20 @@ public class SimaticMLWriter
     public string RemoveMembers(string xml, IReadOnlyList<MemberNode> membersToRemove)
     {
         var doc = XDocument.Parse(xml);
-        var ns = SimaticMLNamespaces.Detect(doc);
+        var ctx = new WriteContext(doc, SimaticMLNamespaces.Detect(doc));
 
         foreach (var member in membersToRemove)
         {
-            var element = FindMemberElement(doc, ns, member.Path);
+            var element = FindMemberElement(ctx, member.Path);
             element?.Remove();
         }
 
         return doc.ToString();
     }
 
-    private XElement? FindMemberElement(XDocument doc, XNamespace ns, string path)
+    private static XElement? FindMemberElement(WriteContext ctx, string path)
     {
-        var location = FindStartValueLocation(doc, ns, path);
+        var location = FindStartValueLocation(ctx, path);
         return location?.Member;
     }
 
@@ -157,13 +197,17 @@ public class SimaticMLWriter
     /// <c>units[1].modules[3].moduleId</c> becomes
     /// <c>&lt;Subelement Path="1,3"&gt;</c> on the <c>moduleId</c> Member.
     /// </summary>
-    private StartValueLocation? FindStartValueLocation(XDocument doc, XNamespace ns, string path)
+    private static StartValueLocation? FindStartValueLocation(WriteContext ctx, string path)
     {
+        var ns = ctx.Ns;
         var tokens = TokenizePath(path);
         if (tokens.Count == 0) return null;
 
-        var sections = doc.Descendants(ns + SE.Section)
-            .FirstOrDefault(s => s.Attribute(SE.Name)?.Value == "Static");
+        // Cached once per document (#159 H1): the Static-section lookup used
+        // to re-run doc.Descendants(...) on every edit — O(n) descendant
+        // walks for n edits. WriteContext memoises it so the batch pays the
+        // traversal once.
+        var sections = ctx.StaticSection;
         if (sections == null) return null;
 
         XElement? current = sections;
@@ -263,6 +307,74 @@ public class SimaticMLWriter
     }
 
     /// <summary>
+    /// Per-document write state shared across every member in one
+    /// <see cref="ModifyStartValues(string, IReadOnlyList{MemberNode}, string)"/>
+    /// / batch call. Memoises the two lookups that used to be re-paid per
+    /// edit and turned bulk Apply quadratic (#159 H1 + H2):
+    /// the Static-section element, and a per-Member <c>Path → Subelement</c>
+    /// index. Lives only for the duration of one call against one parsed
+    /// <see cref="XDocument"/>.
+    /// </summary>
+    private sealed class WriteContext
+    {
+        private readonly Dictionary<XElement, Dictionary<string, XElement>> _subIndex = new();
+        private XElement? _staticSection;
+        private bool _staticResolved;
+
+        public WriteContext(XDocument doc, XNamespace ns)
+        {
+            Doc = doc;
+            Ns = ns;
+        }
+
+        public XDocument Doc { get; }
+        public XNamespace Ns { get; }
+
+        /// <summary>
+        /// The first <c>Section Name="Static"</c> in the document, resolved
+        /// once. Mirrors the original
+        /// <c>doc.Descendants(ns + Section).FirstOrDefault(...)</c> but pays
+        /// the descendant walk a single time per batch instead of per edit.
+        /// </summary>
+        public XElement? StaticSection
+        {
+            get
+            {
+                if (!_staticResolved)
+                {
+                    _staticSection = Doc.Descendants(Ns + SE.Section)
+                        .FirstOrDefault(s => s.Attribute(SE.Name)?.Value == "Static");
+                    _staticResolved = true;
+                }
+                return _staticSection;
+            }
+        }
+
+        /// <summary>
+        /// Lazily-built <c>Path attribute → &lt;Subelement&gt;</c> map for a
+        /// given array Member element. Built once per Member (O(k)); every
+        /// subsequent index access on the same Member is O(1). Writers that
+        /// add or prune a Subelement keep this map in sync.
+        /// </summary>
+        public Dictionary<string, XElement> SubelementIndex(XElement member)
+        {
+            if (!_subIndex.TryGetValue(member, out var index))
+            {
+                index = new Dictionary<string, XElement>(StringComparer.Ordinal);
+                foreach (var sub in LocalElements(member, SE.Subelement))
+                {
+                    var path = sub.Attribute(SE.Path)?.Value;
+                    // First wins, matching the original FirstOrDefault scan.
+                    if (path != null && !index.ContainsKey(path))
+                        index[path] = sub;
+                }
+                _subIndex[member] = index;
+            }
+            return index;
+        }
+    }
+
+    /// <summary>
     /// Points at either a Member's own StartValue or a Subelement's StartValue
     /// within an array Member.
     /// </summary>
@@ -277,8 +389,9 @@ public class SimaticMLWriter
         public XElement Member { get; }
         public string? SubelementPath { get; }
 
-        public XElement GetOrCreateStartValue(XNamespace ns)
+        public XElement GetOrCreateStartValue(WriteContext ctx)
         {
+            var ns = ctx.Ns;
             if (SubelementPath == null)
             {
                 var sv = Member.Element(ns + SE.StartValue);
@@ -291,12 +404,16 @@ public class SimaticMLWriter
             }
 
             // Find or create the matching <Subelement Path="..."> under Member.
-            var sub = LocalElements(Member, SE.Subelement)
-                .FirstOrDefault(e => e.Attribute(SE.Path)?.Value == SubelementPath);
-            if (sub == null)
+            // #159 H2: a linear FirstOrDefault scan over the Member's
+            // Subelements was O(k) per edit, so writing all k elements of a
+            // k-element array cost O(k^2). WriteContext pre-indexes the
+            // Subelements by Path once per Member; this is now an O(1) lookup.
+            var index = ctx.SubelementIndex(Member);
+            if (!index.TryGetValue(SubelementPath, out var sub))
             {
                 sub = new XElement(ns + SE.Subelement, new XAttribute(SE.Path, SubelementPath));
                 Member.Add(sub);
+                index[SubelementPath] = sub;
             }
 
             var inner = LocalElement(sub, SE.StartValue);
@@ -320,10 +437,12 @@ public class SimaticMLWriter
         /// per-instance override) the now-childless &lt;Subelement&gt; is pruned
         /// too. Returns the prior value, or null if there was nothing to clear.
         /// </summary>
-        public string? ClearStartValue(XNamespace ns)
+        public string? ClearStartValue(WriteContext ctx)
         {
+            var ns = ctx.Ns;
             XElement? sv;
             XElement? owningSubelement = null;
+            Dictionary<string, XElement>? index = null;
 
             if (SubelementPath == null)
             {
@@ -331,8 +450,10 @@ public class SimaticMLWriter
             }
             else
             {
-                owningSubelement = LocalElements(Member, SE.Subelement)
-                    .FirstOrDefault(e => e.Attribute(SE.Path)?.Value == SubelementPath);
+                // #159 H2: O(1) Subelement lookup via the per-Member index
+                // instead of a linear FirstOrDefault scan per cleared edit.
+                index = ctx.SubelementIndex(Member);
+                index.TryGetValue(SubelementPath, out owningSubelement);
                 sv = owningSubelement == null ? null : LocalElement(owningSubelement, SE.StartValue);
             }
 
@@ -344,7 +465,13 @@ public class SimaticMLWriter
             // Prune a Subelement that only existed to carry this StartValue. Keep
             // it if it still holds other content (e.g. a per-instance <Comment>).
             if (owningSubelement != null && !owningSubelement.Elements().Any())
+            {
                 owningSubelement.Remove();
+                // Keep the index consistent so a later create for the same
+                // path in this batch re-creates the Subelement instead of
+                // returning the now-detached element.
+                index?.Remove(SubelementPath!);
+            }
 
             return prior;
         }

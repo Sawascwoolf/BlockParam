@@ -130,6 +130,57 @@ public class BulkChangeViewModelCommandTests : IDisposable
             "an over-quota apply must not close the dialog — the edit is not committed");
     }
 
+    /// <summary>
+    /// #159 H1 + H3: a successful single-DB Apply must leave the tree showing
+    /// the committed values with no pending edits — exactly as the old
+    /// per-edit-loop + full RefreshTree re-parse did. This pins the
+    /// observable contract of the batched write (H1) plus the in-place
+    /// post-Apply patch that replaces the full re-parse (H3): the patched
+    /// StartValue is read through to the VM and the staged edits are cleared.
+    /// </summary>
+    [Fact]
+    public void ApplyCommand_SingleDb_PatchesTreeInPlace_AndClearsPending()
+    {
+        var vm = CreateViewModel();
+        var speed = vm.Tree.RootMembers.Single(m => m.Name == "Speed");
+        var enable = vm.Tree.RootMembers.Single(m => m.Name == "Enable");
+        speed.EditableStartValue = "4242";
+        enable.EditableStartValue = "true";
+        vm.Pending.PendingInlineEditCount.Should().Be(2, "two valid edits are staged");
+
+        vm.ApplyCommand.Execute(null);
+
+        vm.Pending.PendingInlineEditCount.Should().Be(0,
+            "a committed Apply clears every staged edit (H3 in-place patch)");
+        vm.Tree.RootMembers.Single(m => m.Name == "Speed").StartValue
+            .Should().Be("4242",
+                "the committed value must read through without a full re-parse (H3)");
+        vm.Tree.RootMembers.Single(m => m.Name == "Enable").StartValue
+            .Should().Be("true");
+    }
+
+    /// <summary>
+    /// #159 H1 + H3: clearing a value (empty pending edit) through Apply must
+    /// land as a null/empty StartValue, matching what the re-parse path
+    /// produced (the writer removes the &lt;StartValue&gt; element; the patch
+    /// maps the empty change to a null model value).
+    /// </summary>
+    [Fact]
+    public void ApplyCommand_SingleDb_ClearedValue_PatchesToEmpty()
+    {
+        var vm = CreateViewModel();
+        var speed = vm.Tree.RootMembers.Single(m => m.Name == "Speed");
+        speed.StartValue.Should().NotBeNullOrEmpty("flat-db Speed has an explicit value");
+        speed.EditableStartValue = "";
+        vm.Pending.PendingInlineEditCount.Should().Be(1, "one clear is staged");
+
+        vm.ApplyCommand.Execute(null);
+
+        vm.Pending.PendingInlineEditCount.Should().Be(0);
+        vm.Tree.RootMembers.Single(m => m.Name == "Speed").HasStartValue
+            .Should().BeFalse("a cleared value reverts to the type default (no StartValue)");
+    }
+
     // ─────────────────────────────────────────────────────────────────────
     // DiscardPendingCommand  (#21 mis-click regression)
     // ─────────────────────────────────────────────────────────────────────
