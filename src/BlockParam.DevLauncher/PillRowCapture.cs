@@ -181,8 +181,6 @@ internal static class PillRowCapture
             // this DB by default (BulkChangeDialog opens with index 0 active).
             var anchor = realDbs[0];
             var firstThree = realDbs.Take(Math.Min(3, realDbs.Count)).ToList();
-            var firstHalf = realDbs.Take((realDbs.Count + 1) / 2).ToList();
-            var secondHalf = realDbs.Skip((realDbs.Count + 1) / 2).ToList();
 
             // DevLauncher fixtures don't carry a real PLC name; rebrand to a
             // demo label so the always-on PLC label policy is visible in the
@@ -220,10 +218,6 @@ internal static class PillRowCapture
                         Source: realDbs,
                         ActiveNames: new[] { anchor.Name }),
                 }, openIndex: 0, openAddPlc: false)));
-
-            // firstHalf / secondHalf are kept from earlier scene drafts;
-            // unused locals are tolerated here (parity with prior behaviour).
-            _ = (firstHalf, secondHalf);
         }
 
         // ── Synthetic multi-PLC showcase ─────────────────────────────────────

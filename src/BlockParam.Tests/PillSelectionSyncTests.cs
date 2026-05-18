@@ -715,8 +715,11 @@ public class PillTriggerSummary_NumberlessDb_Tests
 
         // No OverflowOptions / DisplayFormatter wired → exercises the
         // DEFAULT PillTriggerTokenBuilder path, not PillOverflowFormatter.
-        sync.SetSelectedItems(new ObservableCollection<object> { idb });
+        // ItemsSource first, then SelectedItems, so the row is selected via
+        // ReconcileRowsFromSelectedItems — the documented DP-order scenario
+        // (cf. PlcPillViewModelTests ClosedPill_…_FullControlPath).
         itemSource.ItemsSource = new ObservableCollection<object> { idb };
+        sync.SetSelectedItems(new ObservableCollection<object> { idb });
         state.DisplayFormatter.Should().BeNull("the default path must be under test");
 
         state.HasSelection.Should().BeTrue();
