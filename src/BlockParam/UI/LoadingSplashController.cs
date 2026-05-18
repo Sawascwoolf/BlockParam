@@ -15,25 +15,23 @@ namespace BlockParam.UI;
 ///   <c>BlockParam.Localization.Res</c>. Status strings are localized on
 ///   the caller (TIA) thread and pushed in via <see cref="Report"/> /
 ///   <see cref="SetCounter"/>, which marshal onto the splash dispatcher.
-/// - Flash-of-splash guard: the window is not created until the splash has
-///   been alive ~150 ms. If <see cref="Close"/> runs first (fast project),
-///   no window is ever shown. (Acceptance criteria use approximate
-///   thresholds; 150 ms is the concrete value the spike fixed for the
-///   flash guard, so the &gt;300 ms-prep case still gets clearly visible
-///   feedback well before the multi-second freeze ends.)
+/// - The splash is shown as fast as possible: the window is created the
+///   moment the splash thread is up, before <see cref="Show"/> returns, so
+///   it is guaranteed visible before the TIA thread dives into the
+///   multi-second Openness freeze. There is deliberately NO flash-of-splash
+///   delay — prep time cannot be predicted up front (issue #125 decision),
+///   so a sub-frame flash on an unusually fast prep is accepted in exchange
+///   for never missing the feedback when it is actually needed.
 /// - <see cref="Close"/> is idempotent and safe from any thread.
 /// - No <c>readonly struct</c> fields (the #131 partial-trust ldflda rule);
 ///   every field here is a reference type.
 /// </summary>
 public sealed class LoadingSplashController : IProgress<string>, IDisposable
 {
-    private static readonly TimeSpan ShowDelay = TimeSpan.FromMilliseconds(150);
-
     private readonly LoadingSplashViewModel _vm;
     private Thread? _thread;
-    private Dispatcher? _dispatcher;
+    private volatile Dispatcher? _dispatcher;
     private LoadingSplash? _window;
-    private DispatcherTimer? _showTimer;
     private int _closed;
 
     public LoadingSplashController(string title)
@@ -41,16 +39,17 @@ public sealed class LoadingSplashController : IProgress<string>, IDisposable
         _vm = new LoadingSplashViewModel { Title = title };
     }
 
-    /// <summary>For tests: whether the splash window was ever created.</summary>
+    /// <summary>For tests: whether the splash window was created.</summary>
     internal bool WindowShown => _window != null;
 
     /// <summary>For tests: wait for the splash thread to terminate.</summary>
     internal bool WaitForThreadExit(TimeSpan timeout) => _thread?.Join(timeout) ?? true;
 
     /// <summary>
-    /// Starts the splash thread. Returns once its dispatcher is live
-    /// (typically &lt;5 ms); the window itself appears later, gated by the
-    /// flash-of-splash delay.
+    /// Starts the splash thread and shows the window. Blocks the caller only
+    /// for the few milliseconds it takes the splash thread to spin up and
+    /// create the window, then returns — from that point the splash paints
+    /// on its own dispatcher while the caller is free to block in Openness.
     /// </summary>
     public void Show()
     {
@@ -60,22 +59,18 @@ public sealed class LoadingSplashController : IProgress<string>, IDisposable
         {
             _dispatcher = Dispatcher.CurrentDispatcher;
 
-            _showTimer = new DispatcherTimer(DispatcherPriority.Normal, _dispatcher)
+            // Defensive only: in this codebase Close() cannot land before
+            // Show() returns (single caller thread), but if it ever did the
+            // window must not appear.
+            if (Volatile.Read(ref _closed) == 0)
             {
-                Interval = ShowDelay,
-            };
-            _showTimer.Tick += (_, _) =>
-            {
-                _showTimer!.Stop();
-                if (Volatile.Read(ref _closed) != 0)
-                {
-                    Dispatcher.CurrentDispatcher.InvokeShutdown();
-                    return;
-                }
                 _window = new LoadingSplash { DataContext = _vm };
                 _window.Show();
-            };
-            _showTimer.Start();
+            }
+            else
+            {
+                Dispatcher.CurrentDispatcher.InvokeShutdown();
+            }
 
             ready.Set();
             Dispatcher.Run();
@@ -92,7 +87,7 @@ public sealed class LoadingSplashController : IProgress<string>, IDisposable
 
     /// <summary>
     /// Sets the main step line (e.g. "Exporting DB_X…"). Pre-localized by
-    /// the caller. Safe to call before the window appears.
+    /// the caller.
     /// </summary>
     public void Report(string status) => Post(() => _vm.StatusText = status);
 
@@ -111,8 +106,7 @@ public sealed class LoadingSplashController : IProgress<string>, IDisposable
 
     /// <summary>
     /// Closes the splash and tears down its thread. Idempotent; safe from
-    /// any thread. A no-op (no window ever shown) if called before the
-    /// flash-of-splash delay elapses.
+    /// any thread.
     /// </summary>
     public void Close()
     {
@@ -121,7 +115,6 @@ public sealed class LoadingSplashController : IProgress<string>, IDisposable
         if (d == null) return;
         d.BeginInvoke(() =>
         {
-            _showTimer?.Stop();
             _window?.Close();
             Dispatcher.CurrentDispatcher.InvokeShutdown();
         });

@@ -7,20 +7,27 @@ namespace BlockParam.Tests;
 
 public class LoadingSplashControllerTests
 {
+    private static readonly TimeSpan ExitTimeout = TimeSpan.FromSeconds(5);
+
     [Fact]
-    public void Close_before_show_delay_never_creates_a_window_and_thread_exits()
+    public void Show_creates_the_window_then_Close_tears_down_the_thread()
     {
         var controller = new LoadingSplashController("Bulk Change");
 
         controller.Show();
-        // Caller thread reports a step before the (150 ms) window even appears —
-        // must not throw and must not force the window into existence.
+
+        // Show() blocks until the splash thread has created + shown the
+        // window, so this is deterministic without any sleep/poll.
+        controller.WindowShown.Should().BeTrue();
+
+        // Pushing step text while the window is up must not throw.
         controller.Report("Exporting DB_X…");
-        controller.SetCounter("(1 of 2)");
+        controller.SetCounter("(2 of 3)");
+
         controller.Close();
 
-        controller.WaitForThreadExit(TimeSpan.FromSeconds(5)).Should().BeTrue();
-        controller.WindowShown.Should().BeFalse();
+        controller.WaitForThreadExit(ExitTimeout).Should().BeTrue(
+            "Close() must shut the splash dispatcher down so the thread exits");
     }
 
     [Fact]
@@ -37,7 +44,7 @@ public class LoadingSplashControllerTests
         };
 
         act.Should().NotThrow();
-        controller.WaitForThreadExit(TimeSpan.FromSeconds(5)).Should().BeTrue();
+        controller.WaitForThreadExit(ExitTimeout).Should().BeTrue();
     }
 
     [Fact]
@@ -46,7 +53,7 @@ public class LoadingSplashControllerTests
         var controller = new LoadingSplashController("Bulk Change");
         controller.Show();
         controller.Close();
-        controller.WaitForThreadExit(TimeSpan.FromSeconds(5));
+        controller.WaitForThreadExit(ExitTimeout);
 
         Action act = () =>
         {

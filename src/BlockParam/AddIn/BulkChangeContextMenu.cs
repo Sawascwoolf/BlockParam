@@ -134,8 +134,9 @@ public class BulkChangeContextMenu : ContextMenuAddIn
 
             // #125: indeterminate splash on its own STA dispatcher thread so
             // it keeps painting while the synchronous Openness export/parse
-            // below blocks the TIA UI thread. Flash-guarded (no window if
-            // prep is fast); strings are localized here and pushed in.
+            // below blocks the TIA UI thread. Shown as fast as possible (no
+            // flash-guard delay — prep time isn't predictable); strings are
+            // localized here and pushed in.
             splash = new LoadingSplashController(Res.Get("Splash_Title"));
             splash.Show();
             splash.Report(Res.Get("Splash_Preparing"));
