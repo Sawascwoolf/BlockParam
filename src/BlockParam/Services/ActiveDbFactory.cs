@@ -86,26 +86,26 @@ public sealed class ActiveDbFactory : IActiveDbFactory
         // for this open (always re-export) so a stale parse can never be served
         // (#140). Mirrors the UDT cache's ModifiedDate gating.
         var freshToken = _adapter.TryGetModifiedToken(initialSelection);
-        var cacheUsable = !forceRefresh && freshToken != null;
+        var tokenReadable = freshToken != null;
+
+        // Decide hit/miss/stale/disabled/forced via the pure policy so the
+        // branching is unit-tested without TIA types; the predictor it yields
+        // is the OPEN-TIMING verdict the TIA-required verification reads.
+        string cachedXml = null!;
+        var matching = tokenReadable
+            && _cache.TryGet(cacheKey, freshToken!, out cachedXml);
+        var outcome = DbExportCacheDecision.Decide(
+            forceRefresh, tokenReadable, matching, _cache.HasEntry(cacheKey));
+        buildTimer.AddPredictors(DbExportCacheDecision.Predictor(outcome));
 
         string xml;
-        if (cacheUsable && _cache.TryGet(cacheKey, freshToken!, out var cachedXml))
+        if (outcome == DbCacheOutcome.Hit)
         {
             xml = cachedXml;
             Log.Information("DB cache hit (skipping export+parse re-export) for {DbName}", initialSelection.Name);
-            buildTimer.AddPredictors("cache=hit");
         }
         else
         {
-            // hit failed: cold miss, stale (ModifiedDate moved), forced, or
-            // token unreadable — the OPEN-TIMING value tells which, which is
-            // exactly what the TIA-required verification of this fix needs.
-            buildTimer.AddPredictors(
-                freshToken == null ? "cache=disabled"
-                : forceRefresh ? "cache=forced"
-                : _cache.HasEntry(cacheKey) ? "cache=stale"
-                : "cache=miss");
-
             string xmlPath = null!;
             using (var exportTimer = OpenTiming.Stage("export",
                 $"db={initialSelection.Name} plc={plcName}"))
@@ -126,9 +126,9 @@ public sealed class ActiveDbFactory : IActiveDbFactory
             }
 
             // Only worth caching when we have a token to validate it against;
-            // a tokenless entry could never produce a future hit.
-            if (freshToken != null)
-                _cache.Set(cacheKey, freshToken, xml);
+            // a tokenless entry (Disabled) could never produce a future hit.
+            if (tokenReadable)
+                _cache.Set(cacheKey, freshToken!, xml);
         }
 
         DataBlockInfo info;

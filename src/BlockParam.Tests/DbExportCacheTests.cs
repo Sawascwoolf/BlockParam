@@ -156,4 +156,53 @@ public class DbExportCacheTests
         cache.TryGet("key2", Tok, out _).Should().BeFalse();
         cache.HasEntry("key1").Should().BeFalse();
     }
+
+    // ── Bounded LRU eviction ─────────────────────────────────────────────────
+
+    [Fact]
+    public void Set_PastCap_EvictsLeastRecentlyUsed()
+    {
+        var cache = new DbExportCache();
+        for (int i = 0; i < DbExportCache.MaxEntries; i++)
+            cache.Set($"k{i}", Tok, $"<x{i}/>");
+
+        // One past the cap evicts the oldest (k0), keeps the rest + the new one.
+        cache.Set("kNew", Tok, "<new/>");
+
+        cache.HasEntry("k0").Should().BeFalse("k0 was least-recently-used");
+        cache.HasEntry("k1").Should().BeTrue();
+        cache.HasEntry($"k{DbExportCache.MaxEntries - 1}").Should().BeTrue();
+        cache.TryGet("kNew", Tok, out var nx).Should().BeTrue();
+        nx.Should().Be("<new/>");
+    }
+
+    [Fact]
+    public void TryGet_Hit_RefreshesRecency_SoEntrySurvivesEviction()
+    {
+        var cache = new DbExportCache();
+        for (int i = 0; i < DbExportCache.MaxEntries; i++)
+            cache.Set($"k{i}", Tok, $"<x{i}/>");
+
+        // Touch k0 so it is no longer the LRU; k1 becomes the eviction victim.
+        cache.TryGet("k0", Tok, out _).Should().BeTrue();
+        cache.Set("kNew", Tok, "<new/>");
+
+        cache.HasEntry("k0").Should().BeTrue("a successful get marks it MRU");
+        cache.HasEntry("k1").Should().BeFalse("k1 became the least-recently-used");
+    }
+
+    [Fact]
+    public void Set_ExistingKey_DoesNotGrowCount_NorEvict()
+    {
+        var cache = new DbExportCache();
+        for (int i = 0; i < DbExportCache.MaxEntries; i++)
+            cache.Set($"k{i}", Tok, $"<x{i}/>");
+
+        // Re-Set an existing key at capacity: update in place, evict nothing.
+        cache.Set("k0", "t2", "<x0v2/>");
+
+        cache.HasEntry($"k{DbExportCache.MaxEntries - 1}").Should().BeTrue();
+        cache.TryGet("k0", "t2", out var x0).Should().BeTrue();
+        x0.Should().Be("<x0v2/>");
+    }
 }

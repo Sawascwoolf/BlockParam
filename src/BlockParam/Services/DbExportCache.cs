@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 
 namespace BlockParam.Services;
 
@@ -23,21 +24,30 @@ namespace BlockParam.Services;
 /// affected entry. The cache lives only as long as the Add-In process: closing
 /// TIA Portal starts a fresh one.
 /// </para>
+///
+/// <para>
+/// Bounded LRU (<see cref="MaxEntries"/>): each entry retains the full export
+/// XML (multi-MB for large DBs), so an unbounded map would let a long session
+/// that browses many DBs grow without limit. The least-recently-used entry is
+/// evicted past the cap; the #140 "re-open the same DB" pattern keeps hot
+/// entries resident because every hit refreshes recency.
+/// </para>
 /// </summary>
 public interface IDbExportCache
 {
     /// <summary>
     /// Returns the cached export XML for <paramref name="key"/> only if an
     /// entry exists AND its stored freshness token equals
-    /// <paramref name="freshnessToken"/> (ordinal). A present-but-stale entry
-    /// returns false (see <see cref="HasEntry"/> to distinguish stale from cold).
+    /// <paramref name="freshnessToken"/> (ordinal). A successful get marks the
+    /// entry most-recently-used. A present-but-stale entry returns false (see
+    /// <see cref="HasEntry"/> to distinguish stale from cold).
     /// </summary>
     bool TryGet(string key, string freshnessToken, out string xml);
 
     /// <summary>
     /// Stores <paramref name="xml"/> for <paramref name="key"/> tagged with
-    /// <paramref name="freshnessToken"/>. A later <see cref="TryGet"/> only
-    /// hits while the caller presents the same token.
+    /// <paramref name="freshnessToken"/> (most-recently-used). A later
+    /// <see cref="TryGet"/> only hits while the caller presents the same token.
     /// </summary>
     void Set(string key, string freshnessToken, string xml);
 
@@ -54,16 +64,33 @@ public interface IDbExportCache
 /// <inheritdoc cref="IDbExportCache"/>
 public sealed class DbExportCache : IDbExportCache
 {
-    private readonly object _lock = new object();
-    private readonly Dictionary<string, Entry> _byKey =
-        new Dictionary<string, Entry>();
+    /// <summary>
+    /// Max retained exports. ~32 multi-MB XML strings is a sane desktop ceiling;
+    /// re-opening within a working set of this size still hits the cache.
+    /// </summary>
+    internal const int MaxEntries = 32;
 
-    private readonly struct Entry
+    private readonly object _lock = new object();
+
+    // Mutable node class (not a readonly struct) — avoids the partial-trust
+    // ldflda-on-readonly-struct-field IL pitfall entirely (CLAUDE.md), and lets
+    // the LRU list + index share one object per entry.
+    private sealed class CacheItem
     {
-        public Entry(string token, string xml) { Token = token; Xml = xml; }
-        public string Token { get; }
-        public string Xml { get; }
+        public CacheItem(string key, string token, string xml)
+        {
+            Key = key; Token = token; Xml = xml;
+        }
+        public string Key { get; }
+        public string Token { get; set; }
+        public string Xml { get; set; }
     }
+
+    // Front of _lru == most-recently-used. _index maps key -> its list node so
+    // touch/evict/invalidate are all O(1).
+    private readonly LinkedList<CacheItem> _lru = new LinkedList<CacheItem>();
+    private readonly Dictionary<string, LinkedListNode<CacheItem>> _index =
+        new Dictionary<string, LinkedListNode<CacheItem>>();
 
     /// <summary>
     /// Stable cache key. <paramref name="projectScope"/> isolates parallel TIA
@@ -72,22 +99,34 @@ public sealed class DbExportCache : IDbExportCache
     /// multi-PLC projects; DB name + number identify the block within a PLC.
     /// The <c>\x00</c> separators are collision-free (no segment can contain a
     /// NUL), unlike concatenation alone.
+    ///
+    /// <para>
+    /// Note: callers pass the DB launch path uses <c>displayPlcName</c> ("" on
+    /// single-PLC projects) while the in-dialog switcher passes the resolved
+    /// PLC name, so on a single-PLC project the same DB can key differently
+    /// across those two paths. That is a missed-hit (perf) only, never a
+    /// wrong-DB hit: <paramref name="projectScope"/> + name + number stay
+    /// correct, and multi-PLC projects (the only place plcName guards
+    /// correctness) pass the resolved name on both paths. Tracked for unified
+    /// keying in #155.
+    /// </para>
     /// </summary>
     public static string KeyFor(string projectScope, string plcName, string dbName, int dbNumber)
         => string.Concat(
             projectScope, "\x00",
             plcName, "\x00",
             dbName, "\x00",
-            dbNumber.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            dbNumber.ToString(CultureInfo.InvariantCulture));
 
     public bool TryGet(string key, string freshnessToken, out string xml)
     {
         lock (_lock)
         {
-            if (_byKey.TryGetValue(key, out var entry) &&
-                string.Equals(entry.Token, freshnessToken, StringComparison.Ordinal))
+            if (_index.TryGetValue(key, out var node) &&
+                string.Equals(node.Value.Token, freshnessToken, StringComparison.Ordinal))
             {
-                xml = entry.Xml;
+                Touch(node);
+                xml = node.Value.Xml;
                 return true;
             }
         }
@@ -99,24 +138,64 @@ public sealed class DbExportCache : IDbExportCache
     public void Set(string key, string freshnessToken, string xml)
     {
         lock (_lock)
-            _byKey[key] = new Entry(freshnessToken, xml);
+        {
+            if (_index.TryGetValue(key, out var node))
+            {
+                node.Value.Token = freshnessToken;
+                node.Value.Xml = xml;
+                Touch(node);
+                return;
+            }
+
+            var added = _lru.AddFirst(new CacheItem(key, freshnessToken, xml));
+            _index[key] = added;
+
+            if (_index.Count > MaxEntries)
+            {
+                var lru = _lru.Last;
+                if (lru != null)
+                {
+                    _lru.RemoveLast();
+                    _index.Remove(lru.Value.Key);
+                }
+            }
+        }
     }
 
     public bool HasEntry(string key)
     {
         lock (_lock)
-            return _byKey.ContainsKey(key);
+            return _index.ContainsKey(key);
     }
 
     public void Invalidate(string key)
     {
         lock (_lock)
-            _byKey.Remove(key);
+        {
+            if (_index.TryGetValue(key, out var node))
+            {
+                _lru.Remove(node);
+                _index.Remove(key);
+            }
+        }
     }
 
     public void Clear()
     {
         lock (_lock)
-            _byKey.Clear();
+        {
+            _lru.Clear();
+            _index.Clear();
+        }
+    }
+
+    // Caller holds _lock.
+    private void Touch(LinkedListNode<CacheItem> node)
+    {
+        if (!ReferenceEquals(_lru.First, node))
+        {
+            _lru.Remove(node);
+            _lru.AddFirst(node);
+        }
     }
 }
