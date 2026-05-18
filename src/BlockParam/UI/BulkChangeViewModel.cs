@@ -2779,20 +2779,31 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         Log.Information(
             "[gesture] Inline edit on {Path}: '{Old}' → '{New}' | {State}",
             memberVm.Path, memberVm.StartValue ?? "", newValue, BuildSnapshotForLog());
-        if (string.IsNullOrEmpty(newValue))
+        // #142: an empty cell is NOT unconditionally "discard my edit".
+        // Clearing a member that HAD a start value is a genuine
+        // revert-to-default change that must be staged and applied (the
+        // writer removes the <StartValue> element). The only true revert is
+        // when there is no net change versus the member's original value —
+        // which MemberNodeViewModel.EditableStartValue already encodes by
+        // calling ClearPending() (→ IsPendingInlineEdit == false) only when
+        // the cell equals the original. Branch on that single source of
+        // truth so the store, the counter and the tree-derived Pending list
+        // can never disagree (the bug: list showed the cleared row, counter
+        // stayed 0, Apply disabled).
+        if (!memberVm.IsPendingInlineEdit)
         {
-            // Inline revert / cleared field: drop any stale validation error
-            // from the prior value, then refresh the aggregated pending queue
-            // / preview — otherwise the row lingers red and a stale message
-            // stays in StatusText. StartsWith matches the exact producer
-            // format ($"{memberVm.Name}: {error}") without accidentally
-            // clearing messages about other members whose name contains this
-            // one as a substring.
+            // Inline revert: drop any stale validation error from the prior
+            // value, then refresh the aggregated pending queue / preview —
+            // otherwise the row lingers red and a stale message stays in
+            // StatusText. StartsWith matches the exact producer format
+            // ($"{memberVm.Name}: {error}") without accidentally clearing
+            // messages about other members whose name contains this one as a
+            // substring.
             memberVm.HasInlineError = false;
             memberVm.InlineErrorMessage = null;
             if (StatusText.StartsWith(memberVm.Name + ":"))
                 StatusText = "";
-            // Evict cleared edit from the store so tree rebuilds don't
+            // Evict the reverted edit from the store so tree rebuilds don't
             // re-populate a value the user just reverted.
             _pendingEditStore.Clear(memberVm.Model);
             RefreshPendingAndPreview();

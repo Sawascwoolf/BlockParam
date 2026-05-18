@@ -1,6 +1,8 @@
+using System;
 using System.IO;
 using Siemens.Engineering.SW.Blocks;
 using BlockParam.Diagnostics;
+using BlockParam.Localization;
 using BlockParam.Models;
 using BlockParam.SimaticML;
 using BlockParam.UI;
@@ -33,7 +35,8 @@ public interface IActiveDbFactory
     /// <paramref name="forceRefresh"/> bypasses the export XML cache (#140) and
     /// always re-exports from TIA Openness.
     /// </summary>
-    ActiveDb? Build(DataBlock initialSelection, string plcName, bool forceRefresh = false);
+    ActiveDb? Build(DataBlock initialSelection, string plcName,
+        IProgress<string>? progress = null, bool forceRefresh = false);
 }
 
 public sealed class ActiveDbFactory : IActiveDbFactory
@@ -67,7 +70,8 @@ public sealed class ActiveDbFactory : IActiveDbFactory
         _projectScope = projectScope;
     }
 
-    public ActiveDb? Build(DataBlock initialSelection, string plcName, bool forceRefresh = false)
+    public ActiveDb? Build(DataBlock initialSelection, string plcName,
+        IProgress<string>? progress = null, bool forceRefresh = false)
     {
         // TIA's ImportBlock(Override) disposes the previous DataBlock instance
         // on every Apply, so we re-resolve after each import. The captured
@@ -106,6 +110,7 @@ public sealed class ActiveDbFactory : IActiveDbFactory
         }
         else
         {
+            progress?.Report(Res.Format("Splash_ExportingDb", initialSelection.Name));
             string xmlPath = null!;
             using (var exportTimer = OpenTiming.Stage("export",
                 $"db={initialSelection.Name} plc={plcName}"))
@@ -142,6 +147,7 @@ public sealed class ActiveDbFactory : IActiveDbFactory
             }
         }
 
+        progress?.Report(Res.Format("Splash_ParsingDb", initialSelection.Name));
         DataBlockInfo info;
         using (var parseTimer = OpenTiming.Stage("parse",
             $"db={initialSelection.Name} plc={plcName}"))

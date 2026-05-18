@@ -47,6 +47,13 @@ class Program
             return;
         }
 
+        // --capture-splash <out.png>              #125: pre-dialog loading splash
+        if (args.Length >= 2 && args[0] == "--capture-splash")
+        {
+            SplashCapture.Run(Path.GetFullPath(args[1]));
+            return;
+        }
+
         // --capture-rules <out.png> [<rules-dir>]  website hero: rules editor
         if (args.Length >= 2 && args[0] == "--capture-rules")
         {
