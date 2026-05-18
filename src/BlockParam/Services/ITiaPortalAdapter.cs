@@ -56,4 +56,14 @@ public interface ITiaPortalAdapter
     /// path hits TIA's "inconsistent block" error (#19).
     /// </summary>
     void CompileBlock(object dataBlock);
+
+    /// <summary>
+    /// Returns a stable freshness token derived from the block's Openness
+    /// <c>ModifiedDate</c> attribute, used to detect that a DB changed between
+    /// two opens so the export cache (#140) can skip stale entries. Returns
+    /// <c>null</c> if the attribute can't be read (older Openness, inconsistent
+    /// block, sandbox) — callers MUST treat null as "cache disabled, always
+    /// re-export" so an unreadable timestamp never serves stale start values.
+    /// </summary>
+    string? TryGetModifiedToken(object dataBlock);
 }
