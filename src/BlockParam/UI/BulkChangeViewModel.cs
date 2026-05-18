@@ -1520,7 +1520,17 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     {
         var commentTargets = new List<MemberNodeViewModel>();
         CollectPendingCommentNodes(RootMembers, commentTargets);
+        return ApplyCommentPreviews(xml, commentTargets);
+    }
 
+    /// <summary>
+    /// Overload that takes a pre-collected target list so the caller's
+    /// "are there comment previews?" check (#159 H3 fast-path gate) and the
+    /// write itself share a single tree walk instead of two back-to-back.
+    /// </summary>
+    internal string ApplyCommentPreviews(
+        string xml, IReadOnlyList<MemberNodeViewModel> commentTargets)
+    {
         if (commentTargets.Count == 0) return xml;
 
         var config = _configLoader.GetConfig();
@@ -1564,20 +1574,6 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         }
     }
 
-    /// <summary>
-    /// True when any node carries a comment preview that an Apply would
-    /// write to XML. Used by <see cref="ExecuteApply"/> to decide whether
-    /// the post-Apply refresh can take the #159 H3 in-place fast path (a
-    /// comment write changes the tree's comment state, so it still needs
-    /// the full re-parse). Mirrors the predicate
-    /// <see cref="CollectPendingCommentNodes"/> + <see cref="ApplyCommentPreviews"/> use.
-    /// </summary>
-    private bool HasPendingCommentPreviews()
-    {
-        var nodes = new List<MemberNodeViewModel>();
-        CollectPendingCommentNodes(RootMembers, nodes);
-        return nodes.Count > 0;
-    }
 
     /// <summary>
     /// Diagnostic wrapper around <see cref="MemberTreeViewModel.FindNodeByPathInDb"/>.
@@ -2340,13 +2336,22 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             foreach (var error in writeResult.Errors)
                 Log.Warning("Apply skipped: {Error}", error);
 
-            // Apply comment previews. A value-only Apply (no comment
-            // previews, no write errors) leaves the XML structurally
-            // identical to the parsed tree, which enables the #159 H3
-            // in-place refresh below; comment writes change the tree's
-            // comment state, so those still take the full re-parse path.
-            bool hadCommentPreviews = HasPendingCommentPreviews();
-            _active.Xml = ApplyCommentPreviews(_active.Xml);
+            // Apply comment previews. Collect the target nodes once and
+            // reuse the list for both the fast-path gate and the write —
+            // avoids a second full tree walk in the common (value-only) path.
+            var commentTargets = new List<MemberNodeViewModel>();
+            CollectPendingCommentNodes(RootMembers, commentTargets);
+            bool hadCommentPreviews = commentTargets.Count > 0;
+            _active.Xml = ApplyCommentPreviews(_active.Xml, commentTargets);
+
+            // #159 H3 gate. The in-place patch below is only sound when the
+            // re-parsed tree would be structurally identical to the current
+            // one. Two ways that fails: (a) a comment was written (changes
+            // the tree's comment state, not captured by ValueChange); (b) an
+            // edit errored — only the successful edits are in _active.Xml and
+            // writeResult.Changes, so the errored members' models would keep
+            // stale StartValues if patched piecemeal. Either case takes the
+            // full RefreshTree re-parse instead.
             bool structurePreserved =
                 writeResult.Errors.Count == 0 && !hadCommentPreviews;
 
@@ -2962,6 +2967,13 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     /// </summary>
     private void PatchTreeAfterApply(IReadOnlyList<ValueChange> changes)
     {
+        // Iterating `changes` (not the pending store) is sufficient to clear
+        // every staged VM: the only store entry that would NOT appear in
+        // `changes` is a no-op clear (empty value on a member with no
+        // <StartValue>), and that can never be staged in the first place —
+        // MemberNodeViewModel.EditableStartValue's no-op guard calls
+        // ClearPending() instead of creating a pending edit when clearing an
+        // already-empty value. So every store entry yields a ValueChange here.
         foreach (var change in changes)
         {
             var vm = FindNodeByPathInDb(change.MemberPath, _active);

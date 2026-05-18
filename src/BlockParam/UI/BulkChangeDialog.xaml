@@ -1050,7 +1050,10 @@
                                  (a StackPanel-hosted ItemsControl is measured with
                                  infinite height and never virtualizes); below that
                                  height it is its natural size and the outer inspector
-                                 scroll still moves it as one unit. -->
+                                 scroll still moves it as one unit. The sticky-header
+                                 math (OnInspectorScrollChanged) keys off the OUTER
+                                 InspectorScroll/InspectorContent geometry only, so a
+                                 bounded inner scroller leaves it unaffected. -->
                             <ItemsControl ItemsSource="{Binding BulkPreview.Entries}"
                                           Background="White"
                                           ScrollViewer.CanContentScroll="True"
