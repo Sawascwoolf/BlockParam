@@ -128,7 +128,18 @@ public sealed class ActiveDbFactory : IActiveDbFactory
             // Only worth caching when we have a token to validate it against;
             // a tokenless entry (Disabled) could never produce a future hit.
             if (tokenReadable)
-                _cache.Set(cacheKey, freshToken!, xml);
+            {
+                // Re-read the token AFTER export: an inconsistent block makes
+                // TryExportWithCompilePrompt compile (mutate) it, so the token
+                // captured at the top of Build no longer describes the state
+                // this XML represents. Caching the pre-compile token would make
+                // every subsequent unchanged open miss forever (next open reads
+                // the post-compile ModifiedDate). Tag the entry with the token
+                // for the state we actually exported; fall back to the pre-read
+                // if the post-read fails so the entry stays valid (#140).
+                var exportedToken = _adapter.TryGetModifiedToken(liveDb) ?? freshToken;
+                _cache.Set(cacheKey, exportedToken!, xml);
+            }
         }
 
         DataBlockInfo info;
