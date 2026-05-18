@@ -144,8 +144,10 @@ public class BulkChangeViewModelCommandTests : IDisposable
         var vm = CreateViewModel();
         var speed = vm.Tree.RootMembers.Single(m => m.Name == "Speed");
         var enable = vm.Tree.RootMembers.Single(m => m.Name == "Enable");
+        // flat-db Speed=1500, Enable=true — pick values that are genuine
+        // changes so the no-op guard in EditableStartValue stages both.
         speed.EditableStartValue = "4242";
-        enable.EditableStartValue = "true";
+        enable.EditableStartValue = "false";
         vm.Pending.PendingInlineEditCount.Should().Be(2, "two valid edits are staged");
 
         vm.ApplyCommand.Execute(null);
@@ -156,7 +158,7 @@ public class BulkChangeViewModelCommandTests : IDisposable
             .Should().Be("4242",
                 "the committed value must read through without a full re-parse (H3)");
         vm.Tree.RootMembers.Single(m => m.Name == "Enable").StartValue
-            .Should().Be("true");
+            .Should().Be("false");
     }
 
     /// <summary>
