@@ -28,6 +28,16 @@ public class BulkChangeContextMenu : ContextMenuAddIn
     // Openness export + parse (#140).
     private readonly DbExportCache _dbExportCache = new DbExportCache();
 
+    // #155: same per-Add-In-load lifetime as _dbExportCache. These collapse the
+    // remaining per-open bottlenecks profiled in #155 — the ~8–12s project DB
+    // enumeration, the ~4.6s tag-table re-export, and the ~2.7s UDT freshness
+    // walk — to once per project scope per TIA session. The dialog's existing
+    // explicit refresh affordances Invalidate them (the cross-open staleness
+    // valve, sanctioned by the #155 correctness constraint).
+    private readonly ProjectDbEnumerationCache _projectDbCache = new ProjectDbEnumerationCache();
+    private readonly SessionScopeGate _tagTableExportGate = new SessionScopeGate("tag-table export");
+    private readonly SessionScopeGate _udtValidationGate = new SessionScopeGate("UDT validation");
+
     /// <summary>
     /// Reads the optional <c>language</c> override from %APPDATA%\BlockParam\config.json
     /// (#50) and, if set, applies it to <c>Thread.CurrentUICulture</c>. When unset,
@@ -175,8 +185,16 @@ public class BulkChangeContextMenu : ContextMenuAddIn
             {
                 if (plcSoftware != null)
                 {
-                    udtRefreshedCount = udtCacheRefresher.Refresh(plcSoftware, udtDir);
-                    Log.Information("UDT cache validation: {Refreshed} stale file(s) re-exported", udtRefreshedCount);
+                    // #155 item 3: the full UDT freshness walk (583 types in the
+                    // profiled project, ~2.7s) ran unconditionally on every open
+                    // even when 0 were stale. Run it once per project scope per
+                    // TIA session; the dialog's "Refresh UDT types" path
+                    // Invalidates the gate (onInvalidateUdtSession) to force it.
+                    bool ran = _udtValidationGate.RunOnce(scope, () =>
+                        udtRefreshedCount = udtCacheRefresher.Refresh(plcSoftware, udtDir));
+                    if (ran)
+                        Log.Information("UDT cache validation: {Refreshed} stale file(s) re-exported", udtRefreshedCount);
+                    t.AddPredictors($"udtGate={(ran ? "ran" : "skipped")}");
                 }
                 t.AddPredictors($"staleFlushed={udtRefreshedCount}");
             }
@@ -276,8 +294,14 @@ public class BulkChangeContextMenu : ContextMenuAddIn
                 // Thunk: the focused ActiveDb may be swapped by switchToDataBlock,
                 // so we route Apply through the latest reference, not a captured one.
                 onApply: xml => currentFocused.OnApply!(xml),
+                // #155 item 2: TagTableExporter.Export wipes + re-exports every
+                // tag table from Openness (~4.6s) on first tag-table need of
+                // each open. The XML is already on disk from a prior open, so
+                // gate the export to once per project scope per TIA session.
+                // "Refresh constants" Invalidates the gate (onInvalidateTagTableSession).
                 onRefreshTagTables: plcSoftware != null
-                    ? () => tagTableExporter.Export(plcSoftware, tagTableDir)
+                    ? new Action(() => _tagTableExportGate.RunOnce(scope,
+                        () => tagTableExporter.Export(plcSoftware, tagTableDir)))
                     : null,
                 tagTableDir: plcSoftware != null ? tagTableDir : null,
                 projectLanguages: projectLanguages,
@@ -291,8 +315,17 @@ public class BulkChangeContextMenu : ContextMenuAddIn
                 editingLanguage: editingLanguage,
                 referenceLanguage: referenceLanguage,
                 updateCheckService: updateCheckService,
+                // #155 item 1: the ~8–12s project-wide DB walk was cached only
+                // per-dialog (ActiveSetViewModel field), so it re-ran on the
+                // first switcher interaction of every open. Route it through
+                // the TIA-session-scoped cache; the switcher's Refresh button
+                // Invalidates it via onRefreshDataBlocks.
                 enumerateDataBlocks: project != null
-                    ? new Func<IReadOnlyList<DataBlockSummary>>(() => discovery.EnumerateDataBlocks(project))
+                    ? new Func<IReadOnlyList<DataBlockSummary>>(
+                        () => _projectDbCache.GetOrAdd(scope, () => discovery.EnumerateDataBlocks(project)))
+                    : null,
+                onRefreshDataBlocks: project != null
+                    ? new Action(() => _projectDbCache.Invalidate(scope))
                     : null,
                 currentPlcName: displayPlcName,
                 switchToDataBlock: plcSoftware != null
@@ -334,6 +367,15 @@ public class BulkChangeContextMenu : ContextMenuAddIn
                         }
                         return dbFactory.Build(initial, summary.PlcName);
                     })
+                    : null,
+                // #155 cross-open staleness valves: the dialog's explicit
+                // refresh actions clear the session gates so a tag-table / UDT
+                // edited in TIA mid-session is one click away (never silent).
+                onInvalidateTagTableSession: plcSoftware != null
+                    ? new Action(() => _tagTableExportGate.Invalidate(scope))
+                    : null,
+                onInvalidateUdtSession: plcSoftware != null
+                    ? new Action(() => _udtValidationGate.Invalidate(scope))
                     : null);
 
             licenseService.StartHeartbeat();

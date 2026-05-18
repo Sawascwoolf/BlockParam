@@ -86,6 +86,10 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     private readonly string? _tagTableDir;
     private readonly Action? _onRefreshUdtTypes;
     private readonly string? _udtDir;
+    // #155 cross-open staleness valves: clear the TIA-session gates owned by
+    // BulkChangeContextMenu so the next forced refresh re-runs the gated walk.
+    private readonly Action? _onInvalidateTagTableSession;
+    private readonly Action? _onInvalidateUdtSession;
     private UdtSetPointResolver? _udtResolver;
     private UdtCommentResolver? _commentResolver;
     private AutocompleteProvider? _autocompleteProvider;
@@ -174,7 +178,10 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         Func<DataBlockSummary, string>? switchToDataBlock = null,
         string? currentPlcName = null,
         IReadOnlyList<ActiveDb>? additionalActiveDbs = null,
-        Func<DataBlockSummary, ActiveDb?>? buildActiveDbForSummary = null)
+        Func<DataBlockSummary, ActiveDb?>? buildActiveDbForSummary = null,
+        Action? onRefreshDataBlocks = null,
+        Action? onInvalidateTagTableSession = null,
+        Action? onInvalidateUdtSession = null)
     {
         _dispatcher = Dispatcher.CurrentDispatcher;
         _projectLanguages = projectLanguages is { Count: > 0 } ? projectLanguages : new[] { "en-GB" };
@@ -189,6 +196,8 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         _tagTableCache = tagTableCache;
         _onRefreshTagTables = onRefreshTagTables;
         _tagTableDir = tagTableDir;
+        _onInvalidateTagTableSession = onInvalidateTagTableSession;
+        _onInvalidateUdtSession = onInvalidateUdtSession;
         _onRefreshUdtTypes = onRefreshUdtTypes;
         _udtDir = udtDir;
         _udtResolver = udtResolver;
@@ -237,6 +246,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             getStartValueForNode: node => Tree!.FindVmByModel(node)?.StartValue,
             buildActiveDbForSummary: BuildActiveDbFromSummaryWithFallback,
             enumerateDataBlocks: enumerateDataBlocks,
+            onRefreshDataBlocks: onRefreshDataBlocks,
             switchToDataBlock: switchToDataBlock,
             tryApplyActiveDbInPlace: TryApplyActiveDbInPlace,
             restoreStashOntoLive: RestoreStashOntoLive,
@@ -1959,6 +1969,10 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         if (_onRefreshUdtTypes == null) return;
         try
         {
+            // #155: clear the TIA-session validation gate first so the (now
+            // gated) UDT freshness walk actually re-runs on this explicit
+            // refresh instead of being skipped as session-cached.
+            _onInvalidateUdtSession?.Invoke();
             _onRefreshUdtTypes();
 
             var resolver = new UdtSetPointResolver();
@@ -1984,6 +1998,10 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
 
     private void ExecuteRefreshConstants()
     {
+        // #155: clear the TIA-session export gate first so the (now gated)
+        // _onRefreshTagTables actually re-exports from Openness on this
+        // explicit user request instead of being skipped as session-cached.
+        _onInvalidateTagTableSession?.Invoke();
         _onRefreshTagTables?.Invoke();
 
         if (_tagTableDir != null && System.IO.Directory.Exists(_tagTableDir))

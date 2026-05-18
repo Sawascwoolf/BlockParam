@@ -53,6 +53,10 @@ public sealed class ActiveSetViewModel : ViewModelBase
     private readonly Func<MemberNode, string?>? _getStartValueForNode;
     private readonly Func<DataBlockSummary, ActiveDb?>? _buildActiveDbForSummary;
     private readonly Func<IReadOnlyList<DataBlockSummary>>? _enumerateDataBlocks;
+    // #155 item 1: invalidates the TIA-session DB-enumeration cache owned by
+    // BulkChangeContextMenu so the switcher's explicit Refresh re-walks the
+    // project (the cross-open staleness valve). Null in tests / DevLauncher.
+    private readonly Action? _onRefreshDataBlocks;
     private readonly Func<DataBlockSummary, string>? _switchToDataBlock;
     private readonly Func<ActiveDb, bool>? _tryApplyActiveDbInPlace;
     private readonly Func<StashedDbState, ActiveDb?, (int restored, int dropped)>? _restoreStashOntoLive;
@@ -117,7 +121,8 @@ public sealed class ActiveSetViewModel : ViewModelBase
         Func<StashedDbState, ActiveDb?, (int restored, int dropped)>? restoreStashOntoLive,
         Action<string>? setStatus,
         Func<int>? getPendingCount,
-        Dispatcher? dispatcher)
+        Dispatcher? dispatcher,
+        Action? onRefreshDataBlocks = null)
     {
         _state = initial ?? throw new ArgumentNullException(nameof(initial));
         StashedDbs = new ObservableCollection<StashedDbState>();
@@ -133,6 +138,7 @@ public sealed class ActiveSetViewModel : ViewModelBase
         _getStartValueForNode = getStartValueForNode;
         _buildActiveDbForSummary = buildActiveDbForSummary;
         _enumerateDataBlocks = enumerateDataBlocks;
+        _onRefreshDataBlocks = onRefreshDataBlocks;
         _switchToDataBlock = switchToDataBlock;
         _tryApplyActiveDbInPlace = tryApplyActiveDbInPlace;
         _restoreStashOntoLive = restoreStashOntoLive;
@@ -375,6 +381,11 @@ public sealed class ActiveSetViewModel : ViewModelBase
 
     private void ExecuteRefreshDataBlocks()
     {
+        // #155 item 1: bust the TIA-session enumeration cache first so the
+        // forced reload below actually re-walks the project (the explicit
+        // refresh affordance is the cross-open staleness valve) instead of
+        // re-reading the session-cached list.
+        _onRefreshDataBlocks?.Invoke();
         LoadAvailableDataBlocks(force: true);
         ApplyDataBlockFilter();
     }
