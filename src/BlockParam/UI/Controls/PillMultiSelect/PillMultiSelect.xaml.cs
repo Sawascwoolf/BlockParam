@@ -7,6 +7,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Markup;
 using System.Windows.Media;
+using BlockParam.Diagnostics;
 
 namespace BlockParam.UI.Controls.PillMultiSelect;
 
@@ -61,13 +62,15 @@ public partial class PillMultiSelect : UserControl
         // SetValue would kill it. DP metadata default is null to avoid the
         // "shared default across instances" trap for collection DPs.
         SetCurrentValue(SelectedItemsProperty, new ObservableCollection<object>());
+
+        Log.Information("PillMultiSelect: control instantiated");
     }
 
     // ── DependencyProperties ─────────────────────────────────────────────────
 
     public static readonly DependencyProperty ItemsSourceProperty =
         DependencyProperty.Register(nameof(ItemsSource), typeof(IEnumerable), typeof(PillMultiSelect),
-            new PropertyMetadata(null, (d, e) => ((PillMultiSelect)d)._itemSource.ItemsSource = (IEnumerable?)e.NewValue));
+            new PropertyMetadata(null, (d, e) => ((PillMultiSelect)d).OnItemsSourceDpChanged((IEnumerable?)e.NewValue)));
 
     public IEnumerable? ItemsSource
     {
@@ -139,7 +142,7 @@ public partial class PillMultiSelect : UserControl
 
     public static readonly DependencyProperty LabelProperty =
         DependencyProperty.Register(nameof(Label), typeof(string), typeof(PillMultiSelect),
-            new PropertyMetadata(string.Empty, (d, e) => ((PillMultiSelect)d)._internalState.Label = (string)e.NewValue));
+            new PropertyMetadata(string.Empty, (d, e) => ((PillMultiSelect)d).OnLabelDpChanged((string)e.NewValue)));
 
     public string Label
     {
@@ -220,10 +223,36 @@ public partial class PillMultiSelect : UserControl
 
     private void OnIsOpenDpChanged(bool value)
     {
+        Log.Information("PillMultiSelect DP: IsOpen={Value} (host->control)", value);
         if (_syncingIsOpen) return;
         _syncingIsOpen = true;
         try { _internalState.IsOpen = value; }
         finally { _syncingIsOpen = false; }
+    }
+
+    // Diagnostic shims around the host->control DP boundary (#141). The pill
+    // renders an empty bubble when the host bindings never deliver Label /
+    // ItemsSource / SelectedItems into _internalState; these lines make that
+    // boundary observable in the runtime log instead of a silent blank.
+    private void OnLabelDpChanged(string value)
+    {
+        Log.Information("PillMultiSelect DP: Label='{Label}' (host->control)", value ?? "");
+        _internalState.Label = value;
+    }
+
+    private void OnItemsSourceDpChanged(IEnumerable? value)
+    {
+        int n = value is ICollection c ? c.Count : -1;
+        Log.Information("PillMultiSelect DP: ItemsSource set (items={N}, null={Null})",
+            n, value == null);
+        _itemSource.ItemsSource = value;
+    }
+
+    private void OnSelectedItemsDpChanged(IList? value)
+    {
+        Log.Information("PillMultiSelect DP: SelectedItems set (count={N}, null={Null})",
+            value?.Count ?? -1, value == null);
+        _selectionSync.SetSelectedItems(value);
     }
 
     private void OnInternalStatePropertyChanged(object? sender, PropertyChangedEventArgs e)
@@ -328,7 +357,7 @@ public partial class PillMultiSelect : UserControl
     public static readonly DependencyProperty SelectedItemsProperty =
         DependencyProperty.Register(nameof(SelectedItems), typeof(IList), typeof(PillMultiSelect),
             new PropertyMetadata(null,
-                (d, e) => ((PillMultiSelect)d)._selectionSync.SetSelectedItems((IList?)e.NewValue)));
+                (d, e) => ((PillMultiSelect)d).OnSelectedItemsDpChanged((IList?)e.NewValue)));
 
     public IList? SelectedItems
     {

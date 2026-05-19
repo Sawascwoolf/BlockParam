@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using BlockParam.Diagnostics;
 using BlockParam.Models;
 using BlockParam.UI;
 
@@ -97,6 +98,10 @@ public static class PlcPillGroupsService
         // sessions, so the user can identify which PLC each pill targets
         // at a glance — and so the row stays visually consistent when
         // additional PLCs get added via "+ PLC".
+        Log.Information(
+            "PlcPillGroups: building {Pills} pill(s) from {Dbs} active DB(s); anchorPlc='{Anchor}', extraPlcs={Extra}",
+            orderedPlcs.Count, activeDbs.Count, anchorPlcName ?? "", extraPlcs?.Count ?? 0);
+
         var pills = new List<PlcPillViewModel>(orderedPlcs.Count);
         for (int idx = 0; idx < orderedPlcs.Count; idx++)
         {
@@ -110,6 +115,20 @@ public static class PlcPillGroupsService
 
             pill.Label = plc;
             pills.Add(pill);
+
+            // #141 lead: the pill trigger renders its Label; an empty PLC name
+            // (single-PLC / DevLauncher seeds, or an ActiveDb that came through
+            // with no PlcName) means a blank, effectively unclickable trigger —
+            // so the popup "won't open". Make that the loudest line in the log.
+            if (string.IsNullOrEmpty(plc))
+                Log.Warning(
+                    "PlcPillGroups: pill[{Idx}] built with EMPTY PLC label (anchor={Anchor}) — trigger renders blank, popup not clickable (#141 lead). initialItems={N}: [{Names}]",
+                    idx, idx == 0, activeItems.Count,
+                    string.Join(", ", activeItems.Select(i => i.Summary.Name)));
+            else
+                Log.Information(
+                    "PlcPillGroups: pill[{Idx}] plc='{Plc}' items={N}",
+                    idx, plc, activeItems.Count);
         }
 
         return pills;

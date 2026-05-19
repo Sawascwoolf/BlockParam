@@ -61,6 +61,10 @@ public class PlcPillViewModel : ViewModelBase
         SelectedDbs.CollectionChanged += OnSelectedDbsChanged;
 
         LoadCommand = new RelayCommand(_ => OnIsOpenFlippedToTrue(), _ => !_isLoaded);
+
+        Log.Information(
+            "PlcPill ctor: plc='{Plc}' anchor={Anchor} initialItems={N}",
+            _plcName, _isAnchor, initialActiveItems.Count);
     }
 
     // ── Props ─────────────────────────────────────────────────────────────────
@@ -92,6 +96,9 @@ public class PlcPillViewModel : ViewModelBase
         set
         {
             if (!SetProperty(ref _isOpen, value)) return;
+            Log.Information(
+                "PlcPill '{Plc}': IsOpen -> {Value} (isLoaded={Loaded})",
+                _plcName, value, _isLoaded);
             if (value && !_isLoaded)
                 OnIsOpenFlippedToTrue();
         }
@@ -175,9 +182,13 @@ public class PlcPillViewModel : ViewModelBase
     {
         if (_isLoaded) return;
 
+        Log.Information("PlcPill '{Plc}': loading DBs (first popup open)", _plcName);
+
         try
         {
             IReadOnlyList<DataBlockListItem> items = await _loadDbs(_plcName);
+            Log.Information(
+                "PlcPill '{Plc}': loadDbs returned {N} item(s)", _plcName, items.Count);
 
             // Snapshot the CURRENT selection by (Name, PlcName) identity
             // before clearing AvailableDbs. Reading SelectedDbs (not the
@@ -228,6 +239,10 @@ public class PlcPillViewModel : ViewModelBase
             {
                 _syncingSelection = false;
             }
+
+            Log.Information(
+                "PlcPill '{Plc}': populated AvailableDbs={A}, SelectedDbs={S}",
+                _plcName, AvailableDbs.Count, SelectedDbs.Count);
 
             IsLoaded = true;
             (LoadCommand as RelayCommand)?.RaiseCanExecuteChanged();

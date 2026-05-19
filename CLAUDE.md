@@ -78,6 +78,77 @@ The script:
 
 After deployment, restart TIA Portal to load the new version.
 
+### Dev iteration: `package-to-temp.ps1`
+
+`bump-version.sh` deploys to `C:\Program Files\...\Portal V20\AddIns`
+(needs admin) and also builds V21. For fast local iteration use the
+PowerShell script instead — **V20 Release only, packaged straight into
+`$env:TEMP` root, no admin, no V21**:
+
+```powershell
+.\package-to-temp.ps1                       # build V20, package to $env:TEMP
+.\package-to-temp.ps1 -Suffix none          # plain BlockParam.addin
+.\package-to-temp.ps1 -Version 0.155.0 -Suffix issue155
+```
+
+- Output defaults to `BlockParam-<suffix>.addin`, where `<suffix>` is
+  auto-derived from the current git branch and shortened to the issue
+  number (`claude/implement-issue-155-AJiG6` → `BlockParam-155.addin`,
+  manifest `<Name>BlockParam (155)</Name>`, `<Id>BlockParam.155</Id>`).
+  The tracked `addin-publisher-v20.xml` is **not** modified — the Name/Id
+  rewrite is on a staged copy, so branches stay clean.
+- `-Version` is optional; when given it bumps `BlockParam.csproj` +
+  `addin-publisher-v20.xml` (BOM-free) like `bump-version.sh`.
+- **Convention: bump the patch on every repackage** (`0.155.0` → `0.155.1`
+  → `0.155.2` …), passing `-Version` each time. Rationale: the runtime log
+  filename is keyed on the **assembly version**
+  (`bulkchange-v<assembly-version>-<date>.log`, see "Runtime log" below),
+  so two builds at the same version append to the *same* log file and you
+  can't tell the old build's lines from the new one's after a
+  redeploy+restart — and same-version assemblies also hit the identity
+  collision noted in the caveat below. A distinct version per package gives
+  each build its own log file and makes "did my new build actually load?"
+  unambiguous (the log filename changes). The script does **not**
+  auto-increment today — until it does, pass `-Version` explicitly each
+  iteration.
+- Deploy with one robocopy. Run the shell **elevated** (`Program Files`
+  is ACL-protected); robocopy returns exit **1 on success**, **≥8 on
+  real failure** — gate on `$LASTEXITCODE -ge 8`, don't treat non-zero
+  as failure:
+
+  ```powershell
+  robocopy "$env:TEMP" "C:\Program Files\Siemens\Automation\Portal V20\AddIns" BlockParam.addin BlockParam-*.addin /R:3 /W:2 /NP /NDL /NJH /NJS
+  ```
+
+  (`BlockParam.addin` + `BlockParam-*.addin` matches exactly this
+  script's output and not unrelated `BlockParam*.addin` artifacts.)
+- **Caveat — two branch builds loaded at once:** a distinct file name +
+  Product Id stop TIA deduping the entries, but both still ship assembly
+  identity `BlockParam, <Version>`; the CLR loads only the first and
+  silently ignores the second (you'd test the wrong code). To run two
+  simultaneously give each a distinct `-Version`. Install-one-at-a-time
+  iteration is unaffected.
+
+## Runtime log (deployed Add-In)
+
+When the Add-In runs **inside TIA Portal** it writes a per-version,
+per-day log to:
+
+```
+%APPDATA%\BlockParam\logs\bulkchange-v<assembly-version>-<yyyy-MM-dd>.log
+```
+
+e.g. `bulkchange-v0.155.0.0-2026-05-19.log`. This is the **authoritative
+place to verify a deployed build** — CI and DevLauncher run full-trust
+and do not exercise the TIA-only paths. Open-path perf is verified here:
+the open emits timestamped lines you can diff for cold-vs-warm opens,
+including `DB cache hit` (#140), `UDT validation: skipped
+(session-cached)`, `tag-table export: skipped (session-cached)`, and
+`DB enumeration cache hit (skipping project walk)` (#155). The logger
+is a partial-trust-safe Serilog replacement
+(`src/BlockParam/Diagnostics/Log.cs`); the directory comes from
+`AppDirectories.LogsDir` (`%APPDATA%\BlockParam\logs`), not a literal.
+
 ## CI (GitHub Actions)
 
 One workflow: `.github/workflows/ci.yml`. Three jobs, all on `windows-latest`:
