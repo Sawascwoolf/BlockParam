@@ -10,7 +10,7 @@ namespace BlockParam.UI;
 /// </summary>
 public class FlatTreeManager
 {
-    private readonly ObservableCollection<MemberNodeViewModel> _flatList = new();
+    private readonly BulkObservableCollection<MemberNodeViewModel> _flatList = new();
 
     public ObservableCollection<MemberNodeViewModel> FlatList => _flatList;
 
@@ -20,11 +20,45 @@ public class FlatTreeManager
     /// </summary>
     public void BuildFlatList(IEnumerable<MemberNodeViewModel> rootMembers)
     {
-        _flatList.Clear();
-        foreach (var root in rootMembers)
+        var roots = rootMembers as IReadOnlyList<MemberNodeViewModel>
+                    ?? rootMembers.ToList();
+
+        // #154 H4: refresh every node's HasHighlightedDescendantCache in one
+        // O(n) post-order pass instead of letting AddNodeToFlatList recurse
+        // the whole subtree per visible node (O(n²) on a flat array). Done
+        // here, not in ApplyFilter, so the cache is correct on EVERY rebuild
+        // trigger — search, filter, expand, AND pending-edit/inline-error
+        // mutations that change IsHighlighted without re-running ApplyFilter.
+        foreach (var root in roots)
+            RefreshHighlightCache(root);
+
+        // #154 H3: assemble into a plain List then push it in one shot so the
+        // bound collection raises a single Reset instead of Clear()+N×Add
+        // (N+1 CollectionChanged events through WPF on every rebuild).
+        var flat = new List<MemberNodeViewModel>();
+        foreach (var root in roots)
+            AddNodeToFlatList(root, flat);
+        _flatList.ReplaceAll(flat);
+    }
+
+    /// <summary>
+    /// Post-order pass: sets
+    /// <see cref="MemberNodeViewModel.HasHighlightedDescendantCache"/> (true
+    /// iff any descendant is highlighted) and returns whether this node OR
+    /// any descendant is highlighted, so a parent folds its subtree in O(1).
+    /// One walk over the forest — O(n) total.
+    /// </summary>
+    private static bool RefreshHighlightCache(MemberNodeViewModel node)
+    {
+        bool descendantHighlighted = false;
+        foreach (var child in node.Children)
         {
-            AddNodeToFlatList(root);
+            // No short-circuit: every node's cache must be set.
+            if (RefreshHighlightCache(child))
+                descendantHighlighted = true;
         }
+        node.HasHighlightedDescendantCache = descendantHighlighted;
+        return IsHighlighted(node) || descendantHighlighted;
     }
 
     /// <summary>
@@ -35,16 +69,21 @@ public class FlatTreeManager
         BuildFlatList(rootMembers);
     }
 
-    private void AddNodeToFlatList(MemberNodeViewModel node, bool parentIsSmartExpanded = false)
+    private void AddNodeToFlatList(
+        MemberNodeViewModel node,
+        List<MemberNodeViewModel> flat,
+        bool parentIsSmartExpanded = false)
     {
         if (!node.IsVisible) return;
 
         // Inside a smart-expanded parent, only show highlighted nodes
-        // (affected or already-matching) or nodes that have such descendants
-        if (parentIsSmartExpanded && !IsHighlighted(node) && !HasHighlightedDescendant(node))
+        // (affected or already-matching) or nodes that have such descendants.
+        // #154 H4: HasHighlightedDescendantCache was filled by the single
+        // RefreshHighlightCache pass — O(1) here instead of a fresh recursion.
+        if (parentIsSmartExpanded && !IsHighlighted(node) && !node.HasHighlightedDescendantCache)
             return;
 
-        _flatList.Add(node);
+        flat.Add(node);
 
         if (node.IsExpanded)
         {
@@ -53,23 +92,13 @@ public class FlatTreeManager
             // even if its parent was smart-expanded.
             foreach (var child in node.Children)
             {
-                AddNodeToFlatList(child, node.IsSmartExpanded);
+                AddNodeToFlatList(child, flat, node.IsSmartExpanded);
             }
         }
     }
 
     private static bool IsHighlighted(MemberNodeViewModel node)
         => node.IsAffected || node.IsAlreadyMatching || node.IsSearchMatch || node.IsPendingInlineEdit || node.HasInlineError;
-
-    private static bool HasHighlightedDescendant(MemberNodeViewModel node)
-    {
-        foreach (var child in node.Children)
-        {
-            if (IsHighlighted(child) || HasHighlightedDescendant(child))
-                return true;
-        }
-        return false;
-    }
 
     // Keep for CycleExpandState (determines if smart-expand toggle is offered)
     private static bool HasAffectedDescendant(MemberNodeViewModel node)
