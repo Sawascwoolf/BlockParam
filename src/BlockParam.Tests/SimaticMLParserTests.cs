@@ -1,3 +1,5 @@
+using System.Diagnostics;
+using System.Text;
 using FluentAssertions;
 using BlockParam.SimaticML;
 using Xunit;
@@ -492,5 +494,53 @@ public class SimaticMLParserTests
         // Belt: tree size should be small (4 visible members), not the 10,000+
         // we'd see if the array got expanded.
         db.AllMembers().Should().HaveCount(4);
+    }
+
+    /// <summary>
+    /// #154 H1 regression gate. A 10 000-element <c>Array Of DInt</c> where
+    /// every element carries an explicit <c>&lt;Subelement&gt;</c> start value
+    /// is the issue's repro. Pre-fix, <c>ExpandArrayMember</c> re-scanned all
+    /// 10 000 <c>&lt;Subelement&gt;</c> children once per element → ~100M
+    /// comparisons (O(n²)) before the tree was even built. With the one-shot
+    /// Path index it is O(n + k); this completes far under the generous,
+    /// CI-jitter-tolerant ceiling while a revert blows past it. Also asserts
+    /// every element's value parsed correctly (the index must be faithful).
+    /// </summary>
+    [Fact]
+    public void Parse_TenThousandElementArray_IsLinearAndCorrect()
+    {
+        const int n = 10_000;
+        var xml = BuildLargeArrayDbXml(n);
+
+        var sw = Stopwatch.StartNew();
+        var db = _parser.Parse(xml);
+        sw.Stop();
+
+        var arr = db.Members.First(m => m.Name == "BigArray");
+        arr.Children.Should().HaveCount(n);
+        arr.Children[0].StartValue.Should().Be("1");
+        arr.Children[n / 2].StartValue.Should().Be((n / 2 + 1).ToString());
+        arr.Children[n - 1].StartValue.Should().Be(n.ToString());
+
+        sw.Elapsed.TotalSeconds.Should().BeLessThan(8,
+            "#154 H1: O(n) indexed Subelement reads — a regression to the "
+            + "per-element linear scan (O(n²)) would take far longer than this "
+            + "generous ceiling");
+    }
+
+    private static string BuildLargeArrayDbXml(int n)
+    {
+        var sb = new StringBuilder(n * 64);
+        sb.Append("<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<Document>\n");
+        sb.Append("  <SW.Blocks.GlobalDB ID=\"0\">\n    <AttributeList>\n      <Interface>\n");
+        sb.Append("        <Sections xmlns=\"http://www.siemens.com/automation/Openness/SW/Interface/v5\">\n");
+        sb.Append("          <Section Name=\"Static\">\n");
+        sb.Append($"            <Member Name=\"BigArray\" Datatype=\"Array[1..{n}] of DInt\" Accessibility=\"Public\">\n");
+        for (int i = 1; i <= n; i++)
+            sb.Append($"              <Subelement Path=\"{i}\"><StartValue>{i}</StartValue></Subelement>\n");
+        sb.Append("            </Member>\n          </Section>\n        </Sections>\n");
+        sb.Append("      </Interface>\n      <Name>BigArrayDb</Name>\n      <Number>1</Number>\n");
+        sb.Append("    </AttributeList>\n  </SW.Blocks.GlobalDB>\n</Document>\n");
+        return sb.ToString();
     }
 }

@@ -181,6 +181,16 @@ public class MemberNodeViewModel : ViewModelBase
         set => SetProperty(ref _isVisible, value);
     }
 
+    /// <summary>
+    /// #154 H4: cached "does any descendant satisfy the smart-expand
+    /// highlight predicate?" flag. Recomputed in one O(n) post-order pass at
+    /// the top of every flat-list rebuild
+    /// (<see cref="FlatTreeManager"/>), replacing a per-visible-node
+    /// recursive scan that was O(n²) on a large flat array. Pure flat-list
+    /// scratch state — not data-bound, so no change notification.
+    /// </summary>
+    internal bool HasHighlightedDescendantCache;
+
     /// <summary>True if this node was auto-expanded by scope highlighting (not by user).</summary>
     public bool IsSmartExpanded
     {

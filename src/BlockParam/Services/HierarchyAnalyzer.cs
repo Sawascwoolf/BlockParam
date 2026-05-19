@@ -140,7 +140,7 @@ public class HierarchyAnalyzer
         // on a square 2D array (#90). Keying on the path set as well means
         // scopes only collapse when they actually point at the same nodes.
         // Stable: ties on the same key go to the first occurrence.
-        var seen = new HashSet<string>(StringComparer.Ordinal);
+        var seen = new HashSet<long>();
         var result = new List<ScopeLevel>(scopes.Count);
         foreach (var s in scopes.OrderBy(x => x.MatchCount))
         {
@@ -149,12 +149,46 @@ public class HierarchyAnalyzer
         return result;
     }
 
-    private static string ScopeFingerprint(ScopeLevel s)
+    /// <summary>
+    /// Returns a 64-bit allocation-free fingerprint for a scope.
+    ///
+    /// Preserves the #90 correctness invariant: two scopes with equal MatchCount
+    /// but different path sets (e.g. Matrix[1,*] vs Matrix[*,2] on a square
+    /// array) must NOT be treated as equal, so the fingerprint encodes BOTH
+    /// MatchCount AND the exact set of Path strings.
+    ///
+    /// Implementation (#154 H5 -- allocation-free): each path is hashed with
+    /// deterministic 64-bit FNV-1a (stable across processes, unlike
+    /// string.GetHashCode). Per-path hashes are combined with unchecked addition
+    /// (order-independent, so no Sort/OrderBy/Join is needed), then mixed with
+    /// MatchCount via a prime multiply to keep the two dimensions orthogonal.
+    /// No LINQ, no intermediate strings or arrays -- a plain foreach over the
+    /// IReadOnlyList&lt;MemberNode&gt;.
+    /// </summary>
+    private static long ScopeFingerprint(ScopeLevel s)
     {
-        var paths = s.MatchingMembers
-            .Select(m => m.Path)
-            .OrderBy(p => p, StringComparer.Ordinal);
-        return $"{s.MatchCount}|{string.Join("", paths)}";
+        // 64-bit FNV-1a constants.
+        const ulong FnvOffset = 14695981039346656037UL;
+        const ulong FnvPrime = 1099511628211UL;
+
+        // Unchecked-sum of per-path FNV-1a hashes -- order-independent aggregate.
+        ulong pathSetHash = 0;
+        foreach (var m in s.MatchingMembers)
+        {
+            ulong h = FnvOffset;
+            foreach (char c in m.Path)
+            {
+                h ^= (uint)c;
+                h = unchecked(h * FnvPrime);
+            }
+            pathSetHash += h; // commutative: no sort needed (#154 H5)
+        }
+
+        // Mix in MatchCount so a 0-member scope never falsely equals another.
+        unchecked
+        {
+            return (long)(pathSetHash * 397UL + (ulong)s.MatchCount);
+        }
     }
 
     private List<ScopeLevel> AnalyzeWithinDb(DataBlockInfo db, MemberNode selectedMember)

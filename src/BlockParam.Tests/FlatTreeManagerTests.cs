@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using FluentAssertions;
 using BlockParam.Models;
 using BlockParam.UI;
@@ -307,5 +308,45 @@ public class FlatTreeManagerTests
         mgr.Refresh(new[] { root });
 
         GetFlatNames(mgr).Should().Equal("Root", "Child1", "Leaf1B", "Child2", "Leaf2B");
+    }
+
+    // ===== #154 H3/H4: large flat array =====
+
+    /// <summary>
+    /// #154 H4 regression gate. A smart-expanded parent of a 5 000-element
+    /// flat array: pre-fix, <c>AddNodeToFlatList</c> called the recursive
+    /// <c>HasHighlightedDescendant</c> for every sibling — O(n²). With the
+    /// one-shot <c>RefreshHighlightCache</c> pass it is O(n). Asserts the
+    /// smart-expand filter still shows exactly the highlighted element (so
+    /// the cache is correct, not just fast) and that the build is well under
+    /// a generous, CI-jitter-tolerant ceiling.
+    /// </summary>
+    [Fact]
+    public void FlatList_LargeArray_SmartExpand_IsLinearAndFiltersCorrectly()
+    {
+        const int n = 5_000;
+        var leaves = new MemberNode[n];
+        for (int i = 0; i < n; i++)
+            leaves[i] = new MemberNode($"[{i}]", "DInt", i.ToString(),
+                $"Big[{i}]", null, Array.Empty<MemberNode>());
+        var rootModel = new MemberNode("Big", "Array[0..4999] of DInt", null,
+            "Big", null, leaves);
+
+        var rootVm = new MemberNodeViewModel(rootModel, null);
+        rootVm.IsExpanded = true;
+        rootVm.IsSmartExpanded = true;
+        // Exactly one element highlighted, deep in the middle.
+        rootVm.Children[n / 2].IsAffected = true;
+
+        var mgr = new FlatTreeManager();
+        var sw = Stopwatch.StartNew();
+        mgr.Refresh(new[] { rootVm });
+        sw.Stop();
+
+        // Smart-expand under the array shows only the highlighted child.
+        GetFlatNames(mgr).Should().Equal("Big", $"[{n / 2}]");
+        sw.Elapsed.TotalSeconds.Should().BeLessThan(5,
+            "#154 H4: O(n) cached highlight pass — a regression to the "
+            + "per-node recursive scan (O(n²)) would exceed this ceiling");
     }
 }
