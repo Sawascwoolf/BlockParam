@@ -5,6 +5,8 @@ using System.ComponentModel;
 using System.Linq;
 using System.Runtime.CompilerServices;
 using FluentAssertions;
+using BlockParam.Models;
+using BlockParam.UI;
 using BlockParam.UI.Controls.PillMultiSelect;
 using Xunit;
 
@@ -671,6 +673,60 @@ public class PillSelectionSync_OrderIndependence_Tests
         // Normal Edge-A still works after the empty-seed path.
         selected.Add(src);
         state.Items[0].IsSelected.Should().BeTrue();
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// #141 — closed-trigger summary for a numberless instance DB on the DEFAULT
+// (no OverflowOptions / no _displayFormatter) path.
+//
+// 7882cc1 added the empty-Abbreviation → Display fallback ONLY to
+// PillOverflowFormatter.Format (the _displayFormatter path). The default
+// path in PillMultiSelectInternalState.SelectedAbbreviationsText joined
+// PillTriggerToken.Abbreviation directly, so a numberless instance DB
+// (Gen_Main_IDB — empty Abbreviation) rendered a BLANK closed-trigger
+// summary whenever OverflowOptions wasn't wired (or hadn't been applied
+// yet). That is symptom A of #141. Every prior #141 regression test set
+// OverflowOptions, so they all exercised the already-fixed formatter path
+// and never covered this. This pins parity: the default path must also
+// fall back to Display so the closed pill is never blank — with NO popup
+// ever opened.
+// ─────────────────────────────────────────────────────────────────────────────
+
+public class PillTriggerSummary_NumberlessDb_Tests
+{
+    [Fact]
+    public void NumberlessInstanceDb_DefaultPath_RendersDisplayNotBlank()
+    {
+        var state = new PillMultiSelectInternalState();
+        var resolver = new MemberPathResolver();
+        var itemSource = new PillItemSource(state, resolver);
+        var sync = new PillSelectionSync(state, itemSource, resolver);
+
+        // The #141 repro: instance DB, _IDB suffix, no DB number → the
+        // Abbreviation ("DB{Number}") is empty; only Display is populated.
+        var idb = new DataBlockListItem(
+            new DataBlockSummary("Gen_Main_IDB", "", blockType: "InstanceDB",
+                isInstanceDb: true, plcName: "CPU_1", number: null),
+            isActive: true, isAnchor: true);
+
+        itemSource.DisplayMemberPath = nameof(DataBlockListItem.Display);
+        itemSource.AbbreviationMemberPath = nameof(DataBlockListItem.Abbreviation);
+
+        // No OverflowOptions / DisplayFormatter wired → exercises the
+        // DEFAULT PillTriggerTokenBuilder path, not PillOverflowFormatter.
+        // ItemsSource first, then SelectedItems, so the row is selected via
+        // ReconcileRowsFromSelectedItems — the documented DP-order scenario
+        // (cf. PlcPillViewModelTests ClosedPill_…_FullControlPath).
+        itemSource.ItemsSource = new ObservableCollection<object> { idb };
+        sync.SetSelectedItems(new ObservableCollection<object> { idb });
+        state.DisplayFormatter.Should().BeNull("the default path must be under test");
+
+        state.HasSelection.Should().BeTrue();
+        // Before the fix this was "" (join of the empty Abbreviation),
+        // leaving the closed pill blank. It must show the DB name with no
+        // popup-open and no OverflowOptions.
+        state.SelectedAbbreviationsText.Should().Be("Gen_Main_IDB");
     }
 }
 

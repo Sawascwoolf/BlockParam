@@ -312,7 +312,14 @@ internal sealed class PillMultiSelectInternalState : PillViewModelBase
                 return _displayFormatter(selected);
 
             var tokens = PillTriggerTokenBuilder.Build(selected);
-            return string.Join(", ", tokens.Select(t => t.Abbreviation));
+            // #141: a numberless instance DB (e.g. Gen_Main_IDB — _IDB
+            // suffix, no DB number) has an empty Abbreviation. Joining the
+            // bare Abbreviation here rendered a BLANK closed-trigger summary
+            // when no OverflowOptions/_displayFormatter is wired. Fall back
+            // to the full Display name — the same rule PillOverflowFormatter
+            // already applies on the _displayFormatter path (kept in parity).
+            return string.Join(", ", tokens.Select(
+                t => string.IsNullOrEmpty(t.Abbreviation) ? t.Display : t.Abbreviation));
         }
     }
 
