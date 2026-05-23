@@ -2573,11 +2573,18 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             Log.Warning(backupEx, "Backup failed, continuing without backup");
         }
 
-        // #146: cross-thread progress splash for multi-DB Apply — mirrors
-        // single-DB. Use the MultiDb status string so the user knows the
-        // batch spans more than one DB.
+        // #146: cross-thread progress splash for multi-DB Apply. Initial
+        // status names the FIRST DB about to be written — the prior
+        // "Applying to N DBs" line was overwritten one tick later by the
+        // per-DB Report in Phase 2 (review nit #4), so it flashed and
+        // vanished. Batch context now lives on the persistent counter
+        // line ("DB 1 of 5") via SetCounter, mirroring the open-time
+        // splash's per-DB counter (#125).
+        var firstDbName = perDb.Count > 0 ? perDb[0].db.Info.Name : _active.Info.Name;
         using var progress = _applyProgress.Begin(
-            Res.Format("Apply_Progress_WorkingMultiDb", perDb.Count));
+            Res.Format("Apply_Progress_Working", firstDbName));
+        if (perDb.Count > 1)
+            progress.SetCounter(Res.Format("Splash_Counter", 1, perDb.Count));
         try
         {
             int totalChanged = 0;
@@ -2616,12 +2623,15 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             int committedChanges = 0;
             int committedDbs = 0;
             string? cancelledOnDb = null;
-            foreach (var (db, edits) in perDb)
+            for (int i = 0; i < perDb.Count; i++)
             {
-                // Per-DB status line so the user sees forward progress on
-                // long multi-DB Applies (#146). Pre-localized on this thread;
-                // the splash dispatcher just renders.
+                var (db, edits) = perDb[i];
+                // Per-DB status line + counter so the user sees forward
+                // progress on long multi-DB Applies (#146). Pre-localized
+                // on this thread; the splash dispatcher just renders.
                 progress.Report(Res.Format("Apply_Progress_Working", db.Info.Name));
+                if (perDb.Count > 1)
+                    progress.SetCounter(Res.Format("Splash_Counter", i + 1, perDb.Count));
                 try
                 {
                     db.OnApply?.Invoke(db.Xml);

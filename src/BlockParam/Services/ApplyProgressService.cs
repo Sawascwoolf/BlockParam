@@ -41,6 +41,15 @@ public interface IApplyProgressHandle : IDisposable
     void Report(string status);
 
     /// <summary>
+    /// Sets the secondary "(N of M)" counter line, or clears it with an
+    /// empty string. Used by multi-DB Apply to keep batch context ("DB 2
+    /// of 5") visible while <see cref="Report"/> cycles the primary line
+    /// through per-DB names — without this the multi-DB context flashed
+    /// for one tick and was gone (#146 review nit #4).
+    /// </summary>
+    void SetCounter(string counter);
+
+    /// <summary>
     /// Shows a success summary on the splash and blocks the caller for
     /// <paramref name="holdMs"/> milliseconds so the user actually sees it
     /// before the splash (and typically the host dialog) closes. The splash
@@ -83,6 +92,12 @@ public sealed class WpfApplyProgressService : IApplyProgressService
             _splash.Report(status);
         }
 
+        public void SetCounter(string counter)
+        {
+            if (Volatile.Read(ref _disposed) != 0) return;
+            _splash.SetCounter(counter);
+        }
+
         public void ShowSummaryAndClose(string summary, int holdMs)
         {
             if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
@@ -119,6 +134,7 @@ public sealed class NoOpApplyProgressService : IApplyProgressService
     {
         public static readonly NoOpHandle Instance = new();
         public void Report(string status) { }
+        public void SetCounter(string counter) { }
         public void ShowSummaryAndClose(string summary, int holdMs) { }
         public void Dispose() { }
     }

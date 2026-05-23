@@ -64,10 +64,19 @@ public class ApplyProgressTests : IDisposable
         {
             public string InitialStatus { get; }
             public List<string> Reports { get; } = new();
+            public List<string> Counters { get; } = new();
             public string? Summary { get; private set; }
             public int SummaryHoldMs { get; private set; }
             public int DisposeCount { get; private set; }
-            public bool Closed => DisposeCount > 0 || Summary != null;
+            public int SummaryCallCount { get; private set; }
+            // Mirrors the WpfApplyProgressHandle Interlocked gate: Dispose
+            // and ShowSummaryAndClose are mutually exclusive, only the first
+            // one called does work (review nit #6). Without this, the fake
+            // diverges from prod and a test that asserts "exactly one close
+            // path ran" would pass on the fake and fail on real WPF (or
+            // vice versa).
+            private int _closed;
+            public bool Closed => _closed != 0;
 
             public RecordingHandle(string initialStatus)
             {
@@ -76,13 +85,21 @@ public class ApplyProgressTests : IDisposable
 
             public void Report(string status) => Reports.Add(status);
 
+            public void SetCounter(string counter) => Counters.Add(counter);
+
             public void ShowSummaryAndClose(string summary, int holdMs)
             {
+                SummaryCallCount++;
+                if (System.Threading.Interlocked.Exchange(ref _closed, 1) != 0) return;
                 Summary = summary;
                 SummaryHoldMs = holdMs;
             }
 
-            public void Dispose() => DisposeCount++;
+            public void Dispose()
+            {
+                if (System.Threading.Interlocked.Exchange(ref _closed, 1) != 0) return;
+                DisposeCount++;
+            }
         }
     }
 
@@ -137,11 +154,36 @@ public class ApplyProgressTests : IDisposable
         vm.ApplyCommand.Execute(null);
 
         progress.Handles.Should().HaveCount(1, "plain Apply opens one session");
-        progress.Handles[0].DisposeCount.Should().BeGreaterOrEqualTo(1,
-            "the session must be closed so the splash thread tears down");
+        progress.Handles[0].DisposeCount.Should().Be(1,
+            "exactly one close path runs (the using-var Dispose) — pins the " +
+            "mutual-exclusion contract that ShowSummaryAndClose isn't also " +
+            "called on the plain-Apply path");
         progress.Handles[0].Summary.Should().BeNull(
             "plain Apply never holds a summary — dialog stays open and " +
             "StatusText repaints; a held splash would be duplicate noise");
+    }
+
+    /// <summary>
+    /// Apply &amp; Close: the close path runs via ShowSummaryAndClose, not via
+    /// the using-var Dispose. The two are mutually exclusive in production
+    /// (see <c>WpfApplyProgressHandle</c>'s <c>Interlocked.Exchange</c>
+    /// gate); this test pins that contract through the recording fake.
+    /// </summary>
+    [Fact]
+    public void ApplyAndClose_ClosesViaSummaryNotDispose()
+    {
+        var (vm, progress) = MakeVm();
+        vm.Tree.RootMembers.Single(m => m.Name == "Enable").EditableStartValue = "false";
+
+        vm.ApplyAndCloseCommand.Execute(null);
+
+        progress.Handles.Should().HaveCount(1);
+        progress.Handles[0].SummaryCallCount.Should().Be(1,
+            "Apply &amp; Close routes through ShowSummaryAndClose exactly once");
+        progress.Handles[0].DisposeCount.Should().Be(0,
+            "the subsequent using-var Dispose is gated and must be a no-op — " +
+            "double-closing the underlying splash would tear down its " +
+            "dispatcher thread twice");
     }
 
     /// <summary>
@@ -179,12 +221,15 @@ public class ApplyProgressTests : IDisposable
 
     /// <summary>
     /// ApplyFinished is raised on every Apply outcome so the dialog code-
-    /// behind can re-foreground above TIA. Verifies the success path; the
-    /// guarantee comes from the <c>finally</c> block so failure paths
-    /// fire too (covered by inspection — the finally is unconditional).
+    /// behind can re-foreground above TIA. The guarantee comes from the
+    /// <c>finally</c> block in <c>ExecuteApplyCore</c>; this and the two
+    /// failure-path tests below pin that — if a future edit moves the
+    /// <c>ApplyFinished?.Invoke()</c> line out of <c>finally</c> into the
+    /// <c>try</c> body, the failure paths will stop firing the event and
+    /// these tests fail.
     /// </summary>
     [Fact]
-    public void Apply_RaisesApplyFinished()
+    public void Apply_Success_RaisesApplyFinished()
     {
         var (vm, _) = MakeVm();
         vm.Tree.RootMembers.Single(m => m.Name == "Enable").EditableStartValue = "false";
@@ -197,6 +242,76 @@ public class ApplyProgressTests : IDisposable
         finishedCount.Should().Be(1,
             "every Apply attempt must raise ApplyFinished so the host can " +
             "re-foreground the dialog above TIA (#146 H3)");
+    }
+
+    /// <summary>
+    /// User declined the compile-prompt on an inconsistent block (the
+    /// <c>OnApply</c> closure in <c>ActiveDbFactory</c> throws
+    /// <see cref="OperationCanceledException"/>). <c>CommitChanges</c>
+    /// catches it and returns false; the host must STILL receive
+    /// ApplyFinished so the dialog re-foregrounds. Pins the
+    /// <c>finally</c>-block contract on the user-cancel path.
+    /// </summary>
+    [Fact]
+    public void Apply_UserCancelDuringCommit_StillRaisesApplyFinished()
+    {
+        var xml = TestFixtures.LoadXml("flat-db.xml");
+        var db = new SimaticMLParser().Parse(xml);
+        var configLoader = CreateEmptyConfig();
+        var bulkService = new BulkChangeService(new ChangeLogger(), configLoader);
+        var vm = new BulkChangeViewModel(
+            db, xml, new HierarchyAnalyzer(), bulkService,
+            UsageTracker(), configLoader,
+            onApply: _ => throw new OperationCanceledException(
+                "User declined to compile the inconsistent block."),
+            applyProgress: new RecordingApplyProgress());
+        vm.Tree.RootMembers.Single(m => m.Name == "Enable").EditableStartValue = "false";
+
+        var finishedCount = 0;
+        vm.ApplyFinished += () => finishedCount++;
+
+        vm.ApplyCommand.Execute(null);
+
+        finishedCount.Should().Be(1,
+            "compile-cancel must still fire ApplyFinished — the dialog stays " +
+            "open and TIA may have stolen foreground during the failed export");
+    }
+
+    /// <summary>
+    /// <c>OnApply</c> threw a non-cancellation exception (e.g. TIA import
+    /// failed). The VM routes this through <c>HandleErrorWithRollback</c>
+    /// inside the catch. The <c>finally</c> must still raise
+    /// ApplyFinished so the dialog isn't left buried behind TIA after
+    /// the error dialog dismisses.
+    /// </summary>
+    [Fact]
+    public void Apply_ImportThrows_StillRaisesApplyFinished()
+    {
+        var xml = TestFixtures.LoadXml("flat-db.xml");
+        var db = new SimaticMLParser().Parse(xml);
+        var configLoader = CreateEmptyConfig();
+        var bulkService = new BulkChangeService(new ChangeLogger(), configLoader);
+        var messageBox = Substitute.For<IMessageBoxService>();
+        // No backup callback wired → the error path goes to the
+        // "no backup available" branch which just sets a status string
+        // (no user prompt), so the test runs without an interactive stub.
+        var vm = new BulkChangeViewModel(
+            db, xml, new HierarchyAnalyzer(), bulkService,
+            UsageTracker(), configLoader,
+            onApply: _ => throw new InvalidOperationException("TIA import failed"),
+            messageBox: messageBox,
+            applyProgress: new RecordingApplyProgress());
+        vm.Tree.RootMembers.Single(m => m.Name == "Enable").EditableStartValue = "false";
+
+        var finishedCount = 0;
+        vm.ApplyFinished += () => finishedCount++;
+
+        vm.ApplyCommand.Execute(null);
+
+        finishedCount.Should().Be(1,
+            "exception during import must still fire ApplyFinished from the " +
+            "finally block — without it the dialog stays buried behind TIA " +
+            "after the error MessageBox dismisses");
     }
 
     /// <summary>

@@ -1036,19 +1036,15 @@ Continue?</value>
   </data>
   <data name="Apply_Progress_Working" xml:space="preserve">
     <value>Applying changes to {0}…</value>
-    <comment>{0} = DB name</comment>
-  </data>
-  <data name="Apply_Progress_WorkingMultiDb" xml:space="preserve">
-    <value>Applying changes to {0} DBs…</value>
-    <comment>{0} = active DB count</comment>
+    <comment>{0} = DB name. Used for single-DB Apply and for each per-DB step of multi-DB Apply; the multi-DB batch counter rides on Splash_Counter via SetCounter.</comment>
   </data>
   <data name="Apply_Progress_Summary" xml:space="preserve">
     <value>✓ Applied {0} change(s) to {1}</value>
-    <comment>{0} = change count, {1} = DB name. Held briefly on the splash before Apply &amp; Close dismisses the host dialog.</comment>
+    <comment>{0} = change count, {1} = DB name. Held briefly on the splash before Apply &amp; Close dismisses the host dialog. Leading glyph is U+2713 CHECK MARK — preserve byte-for-byte when translating.</comment>
   </data>
   <data name="Apply_Progress_SummaryMultiDb" xml:space="preserve">
     <value>✓ Applied {0} change(s) across {1} DBs</value>
-    <comment>{0} = total change count, {1} = DB count</comment>
+    <comment>{0} = total change count, {1} = DB count. Leading glyph is U+2713 CHECK MARK — preserve byte-for-byte when translating.</comment>
   </data>
   <data name="Splash_Preparing" xml:space="preserve">
     <value>Preparing…</value>

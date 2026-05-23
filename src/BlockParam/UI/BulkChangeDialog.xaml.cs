@@ -65,19 +65,19 @@ public partial class BulkChangeDialog : Window
     /// <summary>
     /// Topmost flip to pull the dialog above TIA's main window. Cheap and
     /// idempotent; called from <c>Loaded</c> and after every Apply (#146).
+    /// Runs synchronously: <c>ApplyFinished</c> is raised from the VM's
+    /// <c>finally</c> block BEFORE <c>RequestClose</c> fires on the same
+    /// dispatcher tick, so the close-then-flip race only existed when the
+    /// flip was deferred via <c>Dispatcher.BeginInvoke</c>. Sync also matches
+    /// the pre-#146 <c>Loaded</c> behaviour — deferring it had momentarily
+    /// left the just-opened dialog non-Topmost, exactly the window where
+    /// TIA's main HWND could bury it on first open.
     /// </summary>
     private void BringDialogToForeground()
     {
-        // Dispatcher hop guards against the rare case where the VM raises
-        // ApplyFinished while the close handler has already detached but the
-        // window is still alive — and keeps the flip cheap when Apply &amp;
-        // Close is about to fire RequestClose right after.
-        Dispatcher.BeginInvoke(new Action(() =>
-        {
-            Topmost = true;
-            Activate();
-            Topmost = false;
-        }), System.Windows.Threading.DispatcherPriority.Background);
+        Topmost = true;
+        Activate();
+        Topmost = false;
     }
 
     private void OnInspectorPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
