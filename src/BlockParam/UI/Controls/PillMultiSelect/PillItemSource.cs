@@ -24,7 +24,7 @@ namespace BlockParam.UI.Controls.PillMultiSelect;
 /// The UserControl's DP callbacks call the setters here, which manage
 /// subscriptions and trigger row rebuilds or string refreshes as needed.
 /// </remarks>
-internal sealed class PillItemSource
+public sealed class PillItemSource
 {
     // Identity comparer: source items might not implement equality correctly
     // (e.g. two distinct objects with the same property values). Identity is

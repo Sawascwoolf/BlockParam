@@ -29,7 +29,7 @@ namespace BlockParam.UI.Controls.PillMultiSelect;
 /// that the DP can't express. The DP is a convenience; the Func is the
 /// authoritative override.
 /// </remarks>
-internal sealed class PillFormatterCoordinator
+public sealed class PillFormatterCoordinator
 {
     private readonly PillMultiSelectInternalState _state;
     private readonly PillItemSource _itemSource;

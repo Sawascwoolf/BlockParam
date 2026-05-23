@@ -59,7 +59,7 @@ namespace BlockParam.UI.Controls.PillMultiSelect;
 /// instances, otherwise the checkbox-to-host edge silently breaks.
 /// </para>
 /// </remarks>
-internal sealed class PillSelectionSync
+public sealed class PillSelectionSync
 {
     private readonly PillMultiSelectInternalState _state;
     private readonly MemberPathResolver _resolver;

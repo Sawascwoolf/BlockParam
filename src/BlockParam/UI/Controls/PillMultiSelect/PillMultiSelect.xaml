@@ -6,88 +6,6 @@
 
     <UserControl.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVis"/>
-        <local:PillGroupHeaderVisibilityConverter x:Key="GroupHeaderVis"/>
-        <local:PillGroupExpandedVisibilityConverter x:Key="GroupExpandedVis"/>
-
-        <!-- Default header template used when GroupKeyMemberPath / GroupKeySelector
-             is set on the PillMultiSelect but the host has not supplied a
-             GroupHeaderTemplate of its own. DataContext is the PillGroupViewModel. -->
-        <DataTemplate x:Key="DefaultPillGroupHeaderTemplate">
-            <!-- Light tint + thin bottom border so the header reads as a
-                 section boundary, not as just another row. Reinforces the
-                 visual grouping along with the indented leaves below. -->
-            <Border Background="#F4F6F9"
-                    BorderBrush="#E5E7EB" BorderThickness="0,0,0,1"
-                    Padding="6,5">
-                <Grid>
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="Auto"/>
-                        <ColumnDefinition Width="Auto"/>
-                        <ColumnDefinition Width="*"/>
-                        <ColumnDefinition Width="Auto"/>
-                    </Grid.ColumnDefinitions>
-
-                    <!-- Expand/collapse chevron. ToggleButton.IsChecked binds to
-                         PillGroupViewModel.IsExpanded — checked = expanded (▼),
-                         unchecked = collapsed (▶). -->
-                    <ToggleButton Grid.Column="0"
-                                  IsChecked="{Binding IsExpanded, Mode=TwoWay}"
-                                  Width="14" Height="14"
-                                  Background="Transparent"
-                                  BorderThickness="0"
-                                  Cursor="Hand"
-                                  Focusable="False"
-                                  Margin="0,0,2,0">
-                        <ToggleButton.Template>
-                            <ControlTemplate TargetType="ToggleButton">
-                                <Grid Background="Transparent">
-                                    <Path x:Name="Chevron"
-                                          Stroke="#6B7280" StrokeThickness="1.4"
-                                          StrokeStartLineCap="Round" StrokeEndLineCap="Round"
-                                          Fill="Transparent"
-                                          HorizontalAlignment="Center"
-                                          VerticalAlignment="Center"
-                                          Data="M 3,5 L 7,9 L 11,5"/>
-                                </Grid>
-                                <ControlTemplate.Triggers>
-                                    <Trigger Property="IsChecked" Value="False">
-                                        <Setter TargetName="Chevron" Property="Data"
-                                                Value="M 5,3 L 9,7 L 5,11"/>
-                                    </Trigger>
-                                </ControlTemplate.Triggers>
-                            </ControlTemplate>
-                        </ToggleButton.Template>
-                    </ToggleButton>
-
-                    <!-- Tri-state header checkbox. IsThreeState=False so user clicks
-                         cycle binary; the indeterminate visual is driven by the
-                         aggregated bool? from PillGroupViewModel.RecomputeFromChildren. -->
-                    <CheckBox Grid.Column="1"
-                              IsChecked="{Binding IsSelected, Mode=TwoWay}"
-                              IsThreeState="False"
-                              VerticalAlignment="Center"
-                              Margin="4,0,8,0"/>
-
-                    <TextBlock Grid.Column="2"
-                               Text="{Binding Header}"
-                               FontWeight="SemiBold"
-                               Foreground="#1F2937"
-                               VerticalAlignment="Center"
-                               TextTrimming="CharacterEllipsis"/>
-
-                    <TextBlock Grid.Column="3"
-                               Foreground="#9CA3AF" FontSize="11"
-                               VerticalAlignment="Center" Margin="8,0,2,0">
-                        <Run Text="{Binding SelectedCount, Mode=OneWay}"/>
-                        <Run Text=" / "/>
-                        <Run Text="{Binding TotalCount, Mode=OneWay}"/>
-                    </TextBlock>
-                </Grid>
-            </Border>
-        </DataTemplate>
-
-        <!-- Material magnifier (24x24) -->
-        <Geometry x:Key="MagnifierGeom">M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.516 6.516 0 0 1 9.5 16C5.91 16 3 13.09 3 9.5S5.91 3 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5z</Geometry>
 
         <!-- Pill trigger button: rounded chrome, blue tint when something is selected. -->
         <Style x:Key="PillTriggerStyle" TargetType="ToggleButton">
@@ -124,8 +42,7 @@
             </Setter>
         </Style>
 
-        <!-- Compact, chrome-free button used for the X (clear) and the
-             footer "Select all" / "Reset" hyperlink-style actions. -->
+        <!-- Compact, chrome-free button used for the X (clear) on the trigger. -->
         <Style x:Key="PillIconButton" TargetType="Button">
             <Setter Property="Background" Value="Transparent"/>
             <Setter Property="BorderThickness" Value="0"/>
@@ -147,73 +64,6 @@
                     <Setter Property="Background" Value="#1A000000"/>
                     <Setter Property="Foreground" Value="#1F2937"/>
                 </Trigger>
-            </Style.Triggers>
-        </Style>
-
-        <Style x:Key="FooterLinkButton" TargetType="Button">
-            <Setter Property="Background" Value="Transparent"/>
-            <Setter Property="BorderThickness" Value="0"/>
-            <Setter Property="Padding" Value="6,3"/>
-            <Setter Property="Cursor" Value="Hand"/>
-            <Setter Property="Focusable" Value="False"/>
-            <Setter Property="Foreground" Value="#0078D7"/>
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="Button">
-                        <Border Background="{TemplateBinding Background}" CornerRadius="4">
-                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                        </Border>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-            <Style.Triggers>
-                <Trigger Property="IsMouseOver" Value="True">
-                    <Setter Property="Background" Value="#EAF3FB"/>
-                </Trigger>
-            </Style.Triggers>
-        </Style>
-
-        <!-- Strip the default ListBoxItem selection chrome — the inline
-             checkbox communicates state. The whole row is a click target
-             that toggles the checkbox. When the popup is rendering explicit
-             groups, the left padding bumps so children visually nest under
-             their group header. -->
-        <Style x:Key="PillRowStyle" TargetType="ListBoxItem">
-            <Setter Property="Padding" Value="8,5"/>
-            <Setter Property="Cursor" Value="Hand"/>
-            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
-            <Setter Property="Background" Value="Transparent"/>
-            <Setter Property="BorderThickness" Value="0"/>
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="ListBoxItem">
-                        <Border x:Name="RowBorder"
-                                Background="{TemplateBinding Background}"
-                                Padding="{TemplateBinding Padding}"
-                                CornerRadius="4">
-                            <ContentPresenter/>
-                        </Border>
-                        <ControlTemplate.Triggers>
-                            <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="RowBorder" Property="Background" Value="#F3F6FB"/>
-                            </Trigger>
-                        </ControlTemplate.Triggers>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-            <Style.Triggers>
-                <!-- When the popup is grouped, indent leaf rows so children
-                     read as nested under their group header. Walks up through
-                     the GroupItem to find the ListBox so we can pick up the
-                     state's IsExplicitGroupingActive flag. The 26px left
-                     padding aligns the leaf checkbox exactly with the header
-                     checkbox: header Border(6) + chevron(14) + chevron right
-                     margin(2) + header checkbox left margin(4) = 26. -->
-                <DataTrigger Binding="{Binding DataContext.IsExplicitGroupingActive,
-                                              RelativeSource={RelativeSource AncestorType=ListBox}}"
-                             Value="True">
-                    <Setter Property="Padding" Value="26,5,8,5"/>
-                </DataTrigger>
             </Style.Triggers>
         </Style>
     </UserControl.Resources>
@@ -280,179 +130,28 @@
                PopupAnimation="Fade"
                HorizontalOffset="0" VerticalOffset="4"
                Opened="OnPopupOpened">
+            <!--
+                Popup chrome (rounded white card + drop shadow) lives here
+                on the pill side so PillDropdownList stays chrome-agnostic —
+                DataGrid cells, fly-out panels, or other hosts can wrap the
+                dropdown in their own container. Width binding stays on the
+                outer Border so the dropdown's intrinsic sizing kicks in
+                when used standalone.
+            -->
             <Border Background="White"
                     CornerRadius="8"
                     BorderBrush="#E5E7EB" BorderThickness="1"
-                    Margin="0,0,12,12">
+                    Margin="0,0,12,12"
+                    Width="{Binding PopupWidth}">
                 <Border.Effect>
                     <DropShadowEffect Color="#000000" Opacity="0.18"
                                       BlurRadius="14" ShadowDepth="3"
                                       Direction="270"/>
                 </Border.Effect>
-                <Grid Width="{Binding PopupWidth}">
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto"/>
-                        <RowDefinition Height="*"/>
-                        <RowDefinition Height="Auto"/>
-                        <RowDefinition Height="Auto"/>
-                    </Grid.RowDefinitions>
-
-                    <!-- Search row -->
-                    <Border Grid.Row="0" Margin="8,8,8,4"
-                            Background="#F9FAFB" BorderBrush="#E5E7EB" BorderThickness="1"
-                            CornerRadius="6" Padding="6,4"
-                            Visibility="{Binding ShowSearchBox, Converter={StaticResource BoolToVis}}">
-                        <Grid>
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="Auto"/>
-                                <ColumnDefinition Width="*"/>
-                            </Grid.ColumnDefinitions>
-                            <Path Grid.Column="0"
-                                  Data="{StaticResource MagnifierGeom}"
-                                  Fill="#9CA3AF"
-                                  Stretch="Uniform" Width="13" Height="13"
-                                  VerticalAlignment="Center" Margin="2,0,6,0"/>
-                            <Grid Grid.Column="1">
-                                <!-- Placeholder overlay: a sibling TextBlock that
-                                     hides as soon as the user types. Lives in the
-                                     TextBox's DataContext so the binding resolves;
-                                     IsHitTestVisible=False keeps clicks falling
-                                     through to the editor underneath. -->
-                                <TextBlock Text="{Binding SearchPlaceholder}"
-                                           Foreground="#9CA3AF"
-                                           VerticalAlignment="Center"
-                                           IsHitTestVisible="False">
-                                    <TextBlock.Style>
-                                        <Style TargetType="TextBlock">
-                                            <Setter Property="Visibility" Value="Collapsed"/>
-                                            <Style.Triggers>
-                                                <DataTrigger Binding="{Binding Text, ElementName=SearchBox}" Value="">
-                                                    <Setter Property="Visibility" Value="Visible"/>
-                                                </DataTrigger>
-                                            </Style.Triggers>
-                                        </Style>
-                                    </TextBlock.Style>
-                                </TextBlock>
-                                <TextBox x:Name="SearchBox"
-                                         Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}"
-                                         BorderThickness="0" Background="Transparent"
-                                         Padding="0" VerticalContentAlignment="Center"/>
-                            </Grid>
-                        </Grid>
-                    </Border>
-
-                    <!-- Item list -->
-                    <ListBox Grid.Row="1"
-                             ItemsSource="{Binding FilteredItems}"
-                             ItemContainerStyle="{StaticResource PillRowStyle}"
-                             MaxHeight="{Binding PopupMaxListHeight}" Margin="4,0"
-                             BorderThickness="0" Background="Transparent"
-                             ScrollViewer.HorizontalScrollBarVisibility="Disabled"
-                             ScrollViewer.VerticalScrollBarVisibility="Auto">
-                        <!-- Group rendering. Two distinct grouping modes share
-                             this single template:
-                             1) Selected-first (Name is a bool): renders a 1px
-                                divider before the False (unselected) group;
-                                no divider above the True group.
-                             2) Explicit grouping by GroupKeyMemberPath
-                                (Name is a PillGroupViewModel): renders a
-                                full header with checkbox, expand chevron,
-                                label, and count; items hidden when collapsed.
-                             The two modes never coexist — explicit grouping
-                             suppresses selected-first inside the VM. -->
-                        <ListBox.GroupStyle>
-                            <GroupStyle HidesIfEmpty="True">
-                                <GroupStyle.ContainerStyle>
-                                    <Style TargetType="GroupItem">
-                                        <Setter Property="Template">
-                                            <Setter.Value>
-                                                <ControlTemplate TargetType="GroupItem">
-                                                    <StackPanel>
-                                                        <!-- Selected-first 1px divider. Hidden by default;
-                                                             shown only when Name=False (the unselected
-                                                             group, rendered after the selected one). -->
-                                                        <Border x:Name="GroupDivider"
-                                                                Height="1" Background="#EEF1F4"
-                                                                Margin="8,4"
-                                                                Visibility="Collapsed"/>
-
-                                                        <!-- Explicit-group header. ContentTemplate
-                                                             falls back to the inline default when the
-                                                             host has not bound GroupHeaderTemplate. -->
-                                                        <ContentControl x:Name="ExplicitHeader"
-                                                                        Content="{Binding Name}"
-                                                                        Visibility="{Binding Name, Converter={StaticResource GroupHeaderVis}}"
-                                                                        ContentTemplate="{Binding DataContext.GroupHeaderTemplate, RelativeSource={RelativeSource AncestorType=ListBox}, FallbackValue={StaticResource DefaultPillGroupHeaderTemplate}, TargetNullValue={StaticResource DefaultPillGroupHeaderTemplate}}"/>
-
-                                                        <!-- The leaves. Always visible in selected-first
-                                                             mode (Name is bool, IsExpanded path returns
-                                                             Unset, converter defaults to Visible). For
-                                                             explicit groups, visibility follows
-                                                             PillGroupViewModel.IsExpanded. -->
-                                                        <ItemsPresenter x:Name="LeafItems"
-                                                                        Visibility="{Binding Name.IsExpanded, Converter={StaticResource GroupExpandedVis}}"/>
-                                                    </StackPanel>
-                                                    <ControlTemplate.Triggers>
-                                                        <DataTrigger Binding="{Binding Name}" Value="False">
-                                                            <Setter TargetName="GroupDivider"
-                                                                    Property="Visibility" Value="Visible"/>
-                                                        </DataTrigger>
-                                                    </ControlTemplate.Triggers>
-                                                </ControlTemplate>
-                                            </Setter.Value>
-                                        </Setter>
-                                    </Style>
-                                </GroupStyle.ContainerStyle>
-                            </GroupStyle>
-                        </ListBox.GroupStyle>
-                        <ListBox.ItemTemplate>
-                            <DataTemplate>
-                                <Grid>
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="Auto"/>
-                                        <ColumnDefinition Width="*"/>
-                                        <ColumnDefinition Width="Auto"/>
-                                    </Grid.ColumnDefinitions>
-                                    <CheckBox Grid.Column="0"
-                                              IsChecked="{Binding IsSelected, Mode=TwoWay}"
-                                              VerticalAlignment="Center" Margin="0,0,8,0"/>
-                                    <TextBlock Grid.Column="1"
-                                               Text="{Binding Display}"
-                                               Foreground="#1F2937"
-                                               VerticalAlignment="Center"/>
-                                    <TextBlock Grid.Column="2"
-                                               Text="{Binding Abbreviation}"
-                                               Foreground="#9CA3AF" FontSize="11"
-                                               VerticalAlignment="Center" Margin="8,0,2,0"/>
-                                </Grid>
-                            </DataTemplate>
-                        </ListBox.ItemTemplate>
-                    </ListBox>
-
-                    <!-- Subtle divider above the footer -->
-                    <Border Grid.Row="2" Height="1" Background="#EEF1F4" Margin="8,4,8,0"
-                            Visibility="{Binding ShowFooterActions, Converter={StaticResource BoolToVis}}"/>
-
-                    <!-- Footer: Select all / Reset on the left, n/N on the right -->
-                    <Grid Grid.Row="3" Margin="6,4,8,6"
-                          Visibility="{Binding ShowFooterActions, Converter={StaticResource BoolToVis}}">
-                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Left">
-                            <Button Content="{Binding SelectAllText}"
-                                    Style="{StaticResource FooterLinkButton}"
-                                    Command="{Binding SelectAllCommand}"/>
-                            <Button Content="{Binding ResetText}"
-                                    Style="{StaticResource FooterLinkButton}"
-                                    Command="{Binding ResetCommand}"
-                                    Margin="6,0,0,0"/>
-                        </StackPanel>
-                        <TextBlock HorizontalAlignment="Right" VerticalAlignment="Center"
-                                   Foreground="#6B7280" FontSize="11" Margin="0,0,4,0">
-                            <Run Text="{Binding SelectedCount, Mode=OneWay}"/>
-                            <Run Text=" / "/>
-                            <Run Text="{Binding TotalCount, Mode=OneWay}"/>
-                        </TextBlock>
-                    </Grid>
-                </Grid>
+                <!-- DataContext inherits from the popup's content (which the
+                     code-behind sets to _internalState); the dropdown reads
+                     the same state the trigger does. -->
+                <local:PillDropdownList/>
             </Border>
         </Popup>
     </Grid>

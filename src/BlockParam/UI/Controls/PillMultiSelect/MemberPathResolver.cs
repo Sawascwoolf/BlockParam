@@ -16,7 +16,7 @@ namespace BlockParam.UI.Controls.PillMultiSelect;
 /// <c>obj => obj.ToString()</c>) so hosts that don't set member paths get reasonable
 /// output without any configuration.
 /// </remarks>
-internal sealed class MemberPathResolver
+public sealed class MemberPathResolver
 {
     // Null-value sentinel: a (Type, path) pair whose property was not found.
     // Storing null in the dictionary lets us avoid repeated failed lookups.

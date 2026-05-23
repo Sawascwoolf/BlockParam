@@ -9,12 +9,13 @@ states.
 
 ## Vendoring
 
-Drop these 17 source files into any WPF project. That's it. (This README is
+Drop these 19 source files into any WPF project. That's it. (This README is
 just for you — leave it behind or take it along.)
 
 ```
-PillMultiSelect.xaml          PillMultiSelectInternalState.cs
-PillMultiSelect.xaml.cs       PillItemSource.cs
+PillMultiSelect.xaml          PillDropdownList.xaml
+PillMultiSelect.xaml.cs       PillDropdownList.xaml.cs
+PillMultiSelectInternalState.cs   PillItemSource.cs
 PillRelayCommand.cs           PillSelectionSync.cs
 PillViewModelBase.cs          PillFormatterCoordinator.cs
 PillRowViewModel.cs           PillOverflowFormatter.cs
@@ -120,6 +121,41 @@ five string DPs (`SearchPlaceholder`, `ClearTooltip`, `SelectAllText`,
                       Label="Members"
                       SelectedItems="{Binding SelectedMembers, Mode=OneWay}" />
 ```
+
+## Standalone dropdown (DataGrid cells, fly-out panels, ...)
+
+The popup half is also shipped as `PillDropdownList` — a chrome-agnostic
+`UserControl` containing only the search box, the (optionally grouped)
+checkbox list, and the Select-all / Reset footer. Use it when you want the
+selection UI without the pill trigger, e.g. as a `DataGridTemplateColumn`
+cell editor, a sidebar panel, or a fly-out that opens on a custom button.
+
+The dropdown is **DataContext-driven** — bind it to a
+`PillMultiSelectInternalState` you wire up yourself. The four collaborators
+are `public` for exactly this use case:
+
+```csharp
+var state    = new PillMultiSelectInternalState();
+var resolver = new MemberPathResolver();
+var source   = new PillItemSource(state, resolver) {
+                   ItemsSource       = myItems,
+                   DisplayMemberPath = "Name",
+               };
+var sync     = new PillSelectionSync(state, source, resolver);
+_           = new PillFormatterCoordinator(state, source); // trigger-only — harmless here
+sync.SetSelectedItems(mySelectedList);
+```
+
+```xml
+<pill:PillDropdownList DataContext="{Binding TheState}" Width="320"/>
+```
+
+Listen to `sync.SelectionChanged` (or watch `mySelectedList`) for changes.
+The dropdown ships **no chrome** of its own — wrap it in whatever `Border`,
+`Popup`, or panel your host needs. For a DataGrid cell editor the pattern
+is `DataGridTemplateColumn.CellEditingTemplate` → `Popup` (with
+`StaysOpen="False"`) → `PillDropdownList` inside; the column's bound list
+flows into `sync.SetSelectedItems`.
 
 ## Tests
 
