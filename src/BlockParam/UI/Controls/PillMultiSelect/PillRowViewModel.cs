@@ -26,7 +26,12 @@ namespace BlockParam.UI.Controls.PillMultiSelect;
 /// <see cref="OwningGroup"/> so the row can notify its group on selection
 /// changes without a tree walk.
 /// </remarks>
-internal sealed class PillRowViewModel : PillViewModelBase
+// `public`, not `internal`: see PillViewModelBase comment / #141. The row
+// DataTemplate binds `{Binding Display}`, `{Binding Abbreviation}`,
+// `{Binding IsSelected}` against instances of this type, which WPF resolves
+// by reflection — non-public under TIA's partial-trust SandboxDomain means
+// rows render blank.
+public sealed class PillRowViewModel : PillViewModelBase
 {
     private string _display;
     private string _abbreviation;

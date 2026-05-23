@@ -4,7 +4,10 @@ using System.IO;
 using System.Reflection;
 using System.Security;
 using System.Security.Permissions;
+using System.Windows;
+using System.Windows.Data;
 using BlockParam.Services;
+using BlockParam.UI.Controls.PillMultiSelect;
 using FluentAssertions;
 using Xunit;
 
@@ -88,6 +91,117 @@ public sealed class PartialTrustSandboxTests
             try { AppDomain.Unload(domain); }
             finally { TryDeleteDir(baseDir); }
         }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // #141 — partial-trust WPF binding regression
+    //
+    // The PillMultiSelect UserControl's content DataContext is a
+    // PillMultiSelectInternalState; rows bind to PillRowViewModel; groups bind
+    // to PillGroupViewModel. WPF's binding engine resolves `{Binding Member}`
+    // by reflecting from PresentationFramework (a foreign assembly) over the
+    // bound object. Under TIA Portal V20's partial-trust SandboxDomain that
+    // reflection silently fails on non-public types — the trigger renders
+    // blank, the popup never opens. Full-trust CI/DevLauncher never see it.
+    //
+    // The two tests below are the regression gate:
+    //
+    //   * Structural: each bound pill VM type must be `public`. Fast, exact,
+    //     refuses to merge a future "let's make this internal again" PR.
+    //
+    //   * Behavioural (sandbox): from inside the same partial-trust grant
+    //     set TIA gives the Add-In, load BlockParam.dll and confirm each
+    //     pill VM type is reachable AND public. This mirrors what
+    //     PresentationFramework does when it loads bound types for {Binding}
+    //     resolution — `Assembly.Load(name)` is the same code path.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public void Bound_pill_vm_types_are_public_for_partial_trust_binding()
+    {
+        // WPF's binding engine reflects over bound source objects from
+        // PresentationFramework, a foreign assembly. Under TIA V20's
+        // partial-trust SandboxDomain, that reflection yields no value for
+        // non-public types — the pill trigger renders empty, no IsOpen
+        // write-back, the popup never opens. Full-trust CI/DevLauncher hide
+        // this, which is why #141 regressed twice before this gate landed.
+        const string why =
+            "WPF data binding can't resolve members of a non-public type "
+            + "from PresentationFramework under TIA's partial-trust sandbox — "
+            + "see #141. Keep this `public`; the type is still presentation "
+            + "infrastructure, hosts use the PillMultiSelect UserControl's DPs.";
+
+        typeof(PillViewModelBase).IsPublic.Should().BeTrue(why);
+        typeof(PillMultiSelectInternalState).IsPublic.Should().BeTrue(why);
+        typeof(PillRowViewModel).IsPublic.Should().BeTrue(why);
+        typeof(PillGroupViewModel).IsPublic.Should().BeTrue(why);
+
+        // Converters referenced by `{Binding … Converter={StaticResource …}}`
+        // and the ICommand implementation handed out through public command
+        // properties — same partial-trust foreign-assembly reflection rule.
+        typeof(PillGroupHeaderVisibilityConverter).IsPublic.Should().BeTrue(why);
+        typeof(PillGroupExpandedVisibilityConverter).IsPublic.Should().BeTrue(why);
+        typeof(PillRelayCommand).IsPublic.Should().BeTrue(why);
+    }
+
+    [Fact]
+    public void Pill_vm_types_resolve_as_public_inside_partial_trust_sandbox()
+    {
+        var baseDir = StageAssemblies();
+        var domain = CreateTiaLikeSandbox(baseDir);
+        try
+        {
+            var worker = CreateWorker(domain);
+            var result = worker.ProbePillVmTypeVisibility();
+
+            // "C:OK" → all four bound pill VM types loaded from BlockParam.dll
+            //          and reported IsPublic = true under TIA's grant set.
+            //          That is the contract WPF binding depends on for #141.
+            // anything else encodes which type went back to internal (or the
+            // assembly stopped loading in the sandbox, which would also break
+            // binding).
+            result.Should().Be(
+                "C:OK",
+                "each pill VM bound by {Binding ...} must reflect as a public "
+                + "type from inside the sandbox; otherwise WPF binding fails "
+                + "silently under TIA Portal and the control renders blank (#141)");
+        }
+        finally
+        {
+            try { AppDomain.Unload(domain); }
+            finally { TryDeleteDir(baseDir); }
+        }
+    }
+
+    [UIFact]
+    public void Pill_internal_state_property_binds_through_wpf()
+    {
+        // Behavioural positive test (full trust): drive a real WPF {Binding}
+        // against a PillMultiSelectInternalState instance and verify the
+        // bound DependencyProperty receives the source value. This proves
+        // the surface that mattered for #141 — Label / IsOpen / HasSelection
+        // / SelectedCount on the internal state — actually resolves through
+        // WPF's binding engine end-to-end.
+        //
+        // Why this catches future regressions despite running in full trust:
+        // pairing it with the structural test above means "internal again"
+        // breaks the visibility gate, "renamed/removed bound property" breaks
+        // this one. Together they cover the silent-binding-failure mode that
+        // #141's TIA reproduction surfaced.
+        var pill = new PillMultiSelect();
+        pill.Label = "Bound";
+
+        var source = (PillMultiSelectInternalState)((FrameworkElement)pill.Content).DataContext;
+        source.IsOpen = true;
+
+        var target = new BindingTarget();
+        BindingOperations.SetBinding(target, BindingTarget.LabelValueProperty,
+            new Binding(nameof(PillMultiSelectInternalState.Label)) { Source = source, Mode = BindingMode.OneWay });
+        BindingOperations.SetBinding(target, BindingTarget.OpenValueProperty,
+            new Binding(nameof(PillMultiSelectInternalState.IsOpen)) { Source = source, Mode = BindingMode.OneWay });
+
+        target.LabelValue.Should().Be("Bound", "Label binding must resolve via reflection on the public VM type");
+        target.OpenValue.Should().Be(true, "IsOpen binding must resolve via reflection on the public VM type");
     }
 
     // The ORIGINAL deployed directory of an assembly. vstest shadow-copies
@@ -227,6 +341,75 @@ public sealed class PartialTrustWorker : MarshalByRefObject
         {
             return "B:ERR:" + ex.GetType().FullName + ":" + ex.Message;
         }
+    }
+
+    /// <summary>
+    /// #141 gate, run from inside the partial-trust sandbox. Loads
+    /// BlockParam.dll via <see cref="Assembly.Load(string)"/> — the same
+    /// code path PresentationFramework takes when it resolves bound types
+    /// for <c>{Binding}</c> — and asserts each pill VM type is reachable
+    /// and <see cref="Type.IsPublic"/>. If any went back to internal,
+    /// WPF binding fails silently in TIA and the pill renders blank.
+    /// </summary>
+    public string ProbePillVmTypeVisibility()
+    {
+        try
+        {
+            var asm = Assembly.Load("BlockParam");
+
+            var checks = new[]
+            {
+                "BlockParam.UI.Controls.PillMultiSelect.PillViewModelBase",
+                "BlockParam.UI.Controls.PillMultiSelect.PillMultiSelectInternalState",
+                "BlockParam.UI.Controls.PillMultiSelect.PillRowViewModel",
+                "BlockParam.UI.Controls.PillMultiSelect.PillGroupViewModel",
+                "BlockParam.UI.Controls.PillMultiSelect.PillGroupHeaderVisibilityConverter",
+                "BlockParam.UI.Controls.PillMultiSelect.PillGroupExpandedVisibilityConverter",
+                "BlockParam.UI.Controls.PillMultiSelect.PillRelayCommand",
+            };
+
+            foreach (var fullName in checks)
+            {
+                var t = asm.GetType(fullName);
+                if (t == null) return "C:MISSING:" + fullName;
+                if (!t.IsPublic) return "C:INTERNAL:" + fullName;
+            }
+            return "C:OK";
+        }
+        catch (Exception ex)
+        {
+            return "C:ERR:" + ex.GetType().FullName + ":" + ex.Message;
+        }
+    }
+}
+
+/// <summary>
+/// Tiny <see cref="DependencyObject"/> used by the #141 binding test to
+/// receive bound values. Two DPs (string + bool) cover the property types
+/// the pill control's trigger renders against — Label (string),
+/// IsOpen / HasSelection (bool). Public so the WPF binding engine can
+/// reflect on it the same way it does on any host VM.
+/// </summary>
+public sealed class BindingTarget : DependencyObject
+{
+    public static readonly DependencyProperty LabelValueProperty =
+        DependencyProperty.Register(nameof(LabelValue), typeof(string), typeof(BindingTarget),
+            new PropertyMetadata(null));
+
+    public static readonly DependencyProperty OpenValueProperty =
+        DependencyProperty.Register(nameof(OpenValue), typeof(bool), typeof(BindingTarget),
+            new PropertyMetadata(false));
+
+    public string? LabelValue
+    {
+        get => (string?)GetValue(LabelValueProperty);
+        set => SetValue(LabelValueProperty, value);
+    }
+
+    public bool OpenValue
+    {
+        get => (bool)GetValue(OpenValueProperty);
+        set => SetValue(OpenValueProperty, value);
     }
 }
 
