@@ -12,7 +12,14 @@ namespace BlockParam.UI.Controls.PillMultiSelect;
 /// Used in <c>PillMultiSelect.xaml</c>'s shared GroupItem template to swap
 /// between the explicit-group header and the selected-first 1px divider.
 /// </summary>
-internal sealed class PillGroupHeaderVisibilityConverter : IValueConverter
+// `public`, not `internal`: this converter is referenced by XAML
+// `{StaticResource GroupHeaderVis}` and applied to a `{Binding ... Converter=…}`.
+// When grouping is active, WPF's binding pipeline reflects on the converter
+// instance from PresentationFramework — same partial-trust foreign-assembly
+// reflection rule as the bound pill VM types. See #141. Today no production
+// host enables grouping on the pill, but keep the safety net so the next one
+// doesn't reopen this bug.
+public sealed class PillGroupHeaderVisibilityConverter : IValueConverter
 {
     public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
         => value is PillGroupViewModel ? Visibility.Visible : Visibility.Collapsed;
@@ -28,7 +35,9 @@ internal sealed class PillGroupHeaderVisibilityConverter : IValueConverter
 /// and <see cref="Visibility.Collapsed"/> only when an explicit-group
 /// <see cref="PillGroupViewModel.IsExpanded"/> is <c>false</c>.
 /// </summary>
-internal sealed class PillGroupExpandedVisibilityConverter : IValueConverter
+// `public`, not `internal`: same #141 reasoning as
+// PillGroupHeaderVisibilityConverter above.
+public sealed class PillGroupExpandedVisibilityConverter : IValueConverter
 {
     public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
         => value is bool b && !b ? Visibility.Collapsed : Visibility.Visible;

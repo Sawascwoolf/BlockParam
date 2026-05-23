@@ -6,7 +6,14 @@ namespace BlockParam.UI.Controls.PillMultiSelect;
 
 // Minimal INotifyPropertyChanged base for the pill control's internal VMs.
 // Kept here so the folder has zero dependency on a host MVVM helper.
-internal abstract class PillViewModelBase : INotifyPropertyChanged
+//
+// Must be `public`, not `internal`: WPF's binding engine reflects over bound
+// objects from PresentationFramework, a foreign assembly. Under TIA Portal's
+// partial-trust SandboxDomain, reflecting non-public types from a foreign
+// assembly is rejected and bindings yield no value — pill renders blank, the
+// trigger toggle doesn't write back. Full-trust CI/DevLauncher hides this.
+// See #141.
+public abstract class PillViewModelBase : INotifyPropertyChanged
 {
     public event PropertyChangedEventHandler? PropertyChanged;
 

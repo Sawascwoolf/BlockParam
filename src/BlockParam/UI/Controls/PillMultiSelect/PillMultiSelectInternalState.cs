@@ -43,7 +43,14 @@ namespace BlockParam.UI.Controls.PillMultiSelect;
 /// want localization bind the corresponding DPs on <see cref="PillMultiSelect"/>
 /// to their own resource lookup.
 /// </remarks>
-internal sealed class PillMultiSelectInternalState : PillViewModelBase
+// `public`, not `internal`: see PillViewModelBase comment / #141. WPF's
+// binding engine resolves `{Binding IsOpen}`, `{Binding HasSelection}`, etc.
+// against an instance of this type via reflection from PresentationFramework
+// (a foreign assembly). Under TIA's partial-trust SandboxDomain those
+// reflections silently fail for non-public types, producing the empty-pill
+// regression. The members are still control infrastructure — hosts use the
+// PillMultiSelect UserControl's DependencyProperties.
+public sealed class PillMultiSelectInternalState : PillViewModelBase
 {
     private readonly ObservableCollection<PillRowViewModel> _items;
     private readonly ListCollectionView _filteredView;

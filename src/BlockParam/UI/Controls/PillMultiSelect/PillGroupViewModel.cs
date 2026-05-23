@@ -28,7 +28,12 @@ namespace BlockParam.UI.Controls.PillMultiSelect;
 /// row passing the filter and restores the prior value when search clears.
 /// </para>
 /// </remarks>
-internal sealed class PillGroupViewModel : PillViewModelBase
+// `public`, not `internal`: see PillViewModelBase comment / #141. The group
+// header template binds `{Binding Header}`, `{Binding IsSelected}`,
+// `{Binding IsExpanded}`, `{Binding SelectedCount}`, `{Binding TotalCount}`
+// against instances of this type — same partial-trust reflection failure
+// otherwise.
+public sealed class PillGroupViewModel : PillViewModelBase
 {
     private readonly List<PillRowViewModel> _children = new();
     private bool _isExpanded = true;
