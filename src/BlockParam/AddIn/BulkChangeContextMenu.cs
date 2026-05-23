@@ -376,7 +376,13 @@ public class BulkChangeContextMenu : ContextMenuAddIn
                     : null,
                 onInvalidateUdtSession: plcSoftware != null
                     ? new Action(() => _udtValidationGate.Invalidate(scope))
-                    : null);
+                    : null,
+                // #146: Apply-time progress splash. Lives on its own STA
+                // dispatcher so it keeps painting while TIA's UI thread is
+                // blocked in Openness `Blocks.Import`. The default in the VM
+                // is a NoOp so headless tests / DevLauncher don't spin up
+                // real windows; only the in-process Add-In wires the WPF impl.
+                applyProgress: new BlockParam.Services.WpfApplyProgressService());
 
             licenseService.StartHeartbeat();
 

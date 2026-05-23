@@ -1028,6 +1028,24 @@ Continue?</value>
   <data name="Splash_Title" xml:space="preserve">
     <value>Bulk Change</value>
   </data>
+  <!-- Apply-time progress splash (#146). Shown by ApplyProgressService while
+       the synchronous Openness import blocks TIA's dispatcher; lives on its
+       own STA thread so the indeterminate marquee keeps animating. -->
+  <data name="Apply_Progress_Title" xml:space="preserve">
+    <value>Applying changes</value>
+  </data>
+  <data name="Apply_Progress_Working" xml:space="preserve">
+    <value>Applying changes to {0}…</value>
+    <comment>{0} = DB name. Used for single-DB Apply and for each per-DB step of multi-DB Apply; the multi-DB batch counter rides on Splash_Counter via SetCounter.</comment>
+  </data>
+  <data name="Apply_Progress_Summary" xml:space="preserve">
+    <value>✓ Applied {0} change(s) to {1}</value>
+    <comment>{0} = change count, {1} = DB name. Held briefly on the splash before Apply &amp; Close dismisses the host dialog. Leading glyph is U+2713 CHECK MARK — preserve byte-for-byte when translating.</comment>
+  </data>
+  <data name="Apply_Progress_SummaryMultiDb" xml:space="preserve">
+    <value>✓ Applied {0} change(s) across {1} DBs</value>
+    <comment>{0} = total change count, {1} = DB count. Leading glyph is U+2713 CHECK MARK — preserve byte-for-byte when translating.</comment>
+  </data>
   <data name="Splash_Preparing" xml:space="preserve">
     <value>Preparing…</value>
   </data>

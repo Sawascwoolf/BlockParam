@@ -42,16 +42,42 @@ public partial class BulkChangeDialog : Window
         viewModel.RequestClose += () => Close();
         viewModel.FlatListRefreshed += RehydrateManualSelection;
         viewModel.Inspector.PropertyChanged += OnInspectorPropertyChanged;
-        Closed += (_, _) => viewModel.Dispose();
+        // #146 H3: after each Apply, briefly flip Topmost so the dialog
+        // re-foregrounds above TIA. TIA activates its main window during
+        // Openness Import and would otherwise leave this (ownerless,
+        // not-Topmost) dialog buried behind it once the splash dismisses.
+        // Same dance as the Loaded handler below; raised on every Apply
+        // outcome so failures don't strand the user behind TIA either.
+        viewModel.ApplyFinished += BringDialogToForeground;
+        Closed += (_, _) =>
+        {
+            // Detach so a late-firing ApplyFinished (e.g. from a slow
+            // failure path) can't touch a disposed window.
+            viewModel.ApplyFinished -= BringDialogToForeground;
+            viewModel.Dispose();
+        };
 
         // Briefly set Topmost to appear above TIA Portal, then release
         // so other windows (non-TIA) can go in front.
-        Loaded += (_, _) =>
-        {
-            Topmost = true;
-            Activate();
-            Topmost = false;
-        };
+        Loaded += (_, _) => BringDialogToForeground();
+    }
+
+    /// <summary>
+    /// Topmost flip to pull the dialog above TIA's main window. Cheap and
+    /// idempotent; called from <c>Loaded</c> and after every Apply (#146).
+    /// Runs synchronously: <c>ApplyFinished</c> is raised from the VM's
+    /// <c>finally</c> block BEFORE <c>RequestClose</c> fires on the same
+    /// dispatcher tick, so the close-then-flip race only existed when the
+    /// flip was deferred via <c>Dispatcher.BeginInvoke</c>. Sync also matches
+    /// the pre-#146 <c>Loaded</c> behaviour — deferring it had momentarily
+    /// left the just-opened dialog non-Topmost, exactly the window where
+    /// TIA's main HWND could bury it on first open.
+    /// </summary>
+    private void BringDialogToForeground()
+    {
+        Topmost = true;
+        Activate();
+        Topmost = false;
     }
 
     private void OnInspectorPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)

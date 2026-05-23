@@ -72,6 +72,19 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     private readonly SimaticMLWriter _writer = new();
     private readonly MemberSearchService _searchService = new();
     private readonly IMessageBoxService _messageBox;
+    // Apply-time progress feedback (#146). Wrapped around every Openness
+    // import so TIA's blocked dispatcher doesn't manifest as a "(Not
+    // Responding)" main window with no Add-In feedback. Default is the
+    // NoOp impl so headless tests / DevLauncher don't spin up an STA
+    // dispatcher window; production wires WpfApplyProgressService from
+    // BulkChangeContextMenu.
+    private readonly IApplyProgressService _applyProgress;
+    // How long the "✓ Applied N values" summary stays on the splash before
+    // Apply &amp; Close fires RequestClose. The splash keeps painting on its
+    // own dispatcher during the hold, so this is purely a perceived-
+    // confirmation pause — without it the dialog vanishes the same tick
+    // and the user has no idea whether anything happened.
+    private const int ApplySummaryHoldMs = 900;
 
     /// <summary>
     /// Exposes the message-box service so headless capture tooling (e.g.
@@ -181,9 +194,13 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         Func<DataBlockSummary, ActiveDb?>? buildActiveDbForSummary = null,
         Action? onRefreshDataBlocks = null,
         Action? onInvalidateTagTableSession = null,
-        Action? onInvalidateUdtSession = null)
+        Action? onInvalidateUdtSession = null,
+        IApplyProgressService? applyProgress = null)
     {
         _dispatcher = Dispatcher.CurrentDispatcher;
+        // Default to NoOp so headless tests and DevLauncher don't accidentally
+        // spin up the cross-thread splash on every Apply (#146).
+        _applyProgress = applyProgress ?? new NoOpApplyProgressService();
         _projectLanguages = projectLanguages is { Count: > 0 } ? projectLanguages : new[] { "en-GB" };
         _commentLanguagePolicy = new CommentLanguagePolicy(editingLanguage, referenceLanguage, _projectLanguages);
 
@@ -425,6 +442,16 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     public SearchFilterViewModel Filter { get; }
 
     public event Action? RequestClose;
+
+    /// <summary>
+    /// Raised on the dispatcher thread once each Apply attempt finishes —
+    /// success, user-cancel, or exception. The dialog code-behind subscribes
+    /// to re-foreground the host window via a brief Topmost flip (#146): TIA
+    /// activates its main window during Openness <c>Import</c>, and without
+    /// this nudge the (ownerless, not-Topmost) dialog stays buried behind
+    /// TIA after the splash dismisses.
+    /// </summary>
+    public event Action? ApplyFinished;
 
     /// <summary>True if Apply was used but changes not yet committed to TIA.</summary>
     public bool HasPendingChanges
@@ -2288,8 +2315,12 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
 
     /// <summary>
     /// Applies ALL pending changes (bulk-staged + inline edits) to XML.
+    /// Plain Apply: dialog stays open, no summary hold needed (StatusText
+    /// repaints once the dispatcher unblocks).
     /// </summary>
-    private void ExecuteApply()
+    private void ExecuteApply() => ExecuteApplyCore(showSummary: false);
+
+    private void ExecuteApplyCore(bool showSummary)
     {
         // Multi-DB Apply (#58): when more than one DB is active, iterate
         // every active DB, write each one's pending edits into its own xml,
@@ -2299,7 +2330,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         // is one TIA undo step (matches issue #58 decision).
         if (ActiveSet.State.Dbs.Count > 1)
         {
-            ExecuteApplyMultiDb();
+            ExecuteApplyMultiDb(showSummary);
             return;
         }
 
@@ -2339,6 +2370,15 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             Log.Warning(backupEx, "Backup failed, continuing without backup");
         }
 
+        // #146: open the cross-thread progress splash BEFORE the blocking
+        // Openness work begins. The splash paints on its own STA dispatcher
+        // so it stays interactive while TIA's UI thread is frozen inside
+        // Blocks.Import — and because it is Topmost, TIA can't bury it
+        // mid-import. ApplyFinished is raised in `finally` so the host
+        // dialog re-foregrounds on every code path (success / cancel /
+        // exception), not just the happy path.
+        using var progress = _applyProgress.Begin(
+            Res.Format("Apply_Progress_Working", _active.Info.Name));
         try
         {
             // #159 H1: one parse + serialize for the whole pending batch
@@ -2435,11 +2475,31 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             // RefreshTree/PatchTreeAfterApply clear PendingValue, but computed
             // properties only refresh their bindings when PropertyChanged is raised.
             RefreshPendingAndPreview();
+
+            // #146: Apply &amp; Close fires RequestClose the same tick this method
+            // returns. Without a held summary, the dialog vanishes and the user
+            // has no visible confirmation that N values landed. Pin the splash
+            // on a success line for a brief beat before disposing — the splash
+            // keeps painting on its own thread during the hold.
+            if (showSummary)
+            {
+                progress.ShowSummaryAndClose(
+                    Res.Format("Apply_Progress_Summary", totalChanged, _active.Info.Name),
+                    ApplySummaryHoldMs);
+            }
         }
         catch (Exception ex)
         {
             Log.Error(ex, "Apply threw exception");
             HandleErrorWithRollback(ex, backupPath);
+        }
+        finally
+        {
+            // Re-foreground the host dialog (#146 H3): TIA activates its main
+            // window during Openness Import and would otherwise leave the
+            // ownerless dialog buried behind it. Raised on every Apply outcome
+            // so the user is never stranded behind TIA, even on failures.
+            ApplyFinished?.Invoke();
         }
 
         Subscription.UpdateUsageStatus();
@@ -2447,7 +2507,10 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
 
     private void ExecuteApplyAndClose()
     {
-        ExecuteApply();
+        // Pass showSummary=true: the Apply core holds a "✓ Applied N values"
+        // line on the splash for ApplySummaryHoldMs before disposing, so the
+        // user sees confirmation before the dialog vanishes (#146).
+        ExecuteApplyCore(showSummary: true);
         if (_lastApplySucceeded)
             RequestClose?.Invoke();
     }
@@ -2460,7 +2523,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     /// Quota is charged once on the sum across all DBs — a single
     /// freemium counter increment (#58 decision: no separate multi-DB cap).
     /// </summary>
-    private void ExecuteApplyMultiDb()
+    private void ExecuteApplyMultiDb(bool showSummary)
     {
         _lastApplySucceeded = false;
 
@@ -2510,6 +2573,18 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             Log.Warning(backupEx, "Backup failed, continuing without backup");
         }
 
+        // #146: cross-thread progress splash for multi-DB Apply. Initial
+        // status names the FIRST DB about to be written — the prior
+        // "Applying to N DBs" line was overwritten one tick later by the
+        // per-DB Report in Phase 2 (review nit #4), so it flashed and
+        // vanished. Batch context now lives on the persistent counter
+        // line ("DB 1 of 5") via SetCounter, mirroring the open-time
+        // splash's per-DB counter (#125).
+        var firstDbName = perDb.Count > 0 ? perDb[0].db.Info.Name : _active.Info.Name;
+        using var progress = _applyProgress.Begin(
+            Res.Format("Apply_Progress_Working", firstDbName));
+        if (perDb.Count > 1)
+            progress.SetCounter(Res.Format("Splash_Counter", 1, perDb.Count));
         try
         {
             int totalChanged = 0;
@@ -2548,8 +2623,15 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             int committedChanges = 0;
             int committedDbs = 0;
             string? cancelledOnDb = null;
-            foreach (var (db, edits) in perDb)
+            for (int i = 0; i < perDb.Count; i++)
             {
+                var (db, edits) = perDb[i];
+                // Per-DB status line + counter so the user sees forward
+                // progress on long multi-DB Applies (#146). Pre-localized
+                // on this thread; the splash dispatcher just renders.
+                progress.Report(Res.Format("Apply_Progress_Working", db.Info.Name));
+                if (perDb.Count > 1)
+                    progress.SetCounter(Res.Format("Splash_Counter", i + 1, perDb.Count));
                 try
                 {
                     db.OnApply?.Invoke(db.Xml);
@@ -2649,11 +2731,26 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             }
             RefreshTree(_active.Xml);
             RefreshPendingAndPreview();
+
+            // #146: matches the single-DB Apply &amp; Close summary hold so
+            // the user sees confirmation before the dialog vanishes.
+            if (showSummary)
+            {
+                progress.ShowSummaryAndClose(
+                    Res.Format("Apply_Progress_SummaryMultiDb", totalChanged, perDb.Count),
+                    ApplySummaryHoldMs);
+            }
         }
         catch (Exception ex)
         {
             Log.Error(ex, "Multi-DB Apply threw");
             HandleErrorWithRollback(ex, backupPath);
+        }
+        finally
+        {
+            // Re-foreground the host dialog (#146 H3) on every multi-DB
+            // Apply outcome — success, partial-commit, cancel, or exception.
+            ApplyFinished?.Invoke();
         }
 
         Subscription.UpdateUsageStatus();
