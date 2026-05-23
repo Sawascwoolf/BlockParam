@@ -15,6 +15,7 @@ using BlockParam.Models;
 using BlockParam.Services;
 using BlockParam.SimaticML;
 using BlockParam.UI;
+using BlockParam.UI.Controls.PillMultiSelect;
 using BlockParam.Updates;
 
 namespace BlockParam.DevLauncher;
@@ -39,6 +40,11 @@ class Program
             .WriteTo.File(logPath, outputTemplate: "{Timestamp:HH:mm:ss.fff} [{Level:u3}] {Message:lj}{NewLine}{Exception}")
             .CreateLogger();
         Log.Information("DevLauncher log: {Path}", logPath);
+
+        // Forward the pill control's diagnostic shims (#141) into Serilog
+        // so the DevLauncher's log keeps the host->control DP-boundary
+        // breadcrumbs. PillLog stays vendorable — see PillLog.cs.
+        PillLog.Sink = msg => Log.Information("{Msg}", msg);
 
         // --capture-license <out-dir>             #20: license-dialog visual states
         if (args.Length >= 2 && args[0] == "--capture-license")

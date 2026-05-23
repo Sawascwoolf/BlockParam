@@ -9,7 +9,7 @@ states.
 
 ## Vendoring
 
-Drop these 16 source files into any WPF project. That's it. (This README is
+Drop these 17 source files into any WPF project. That's it. (This README is
 just for you — leave it behind or take it along.)
 
 ```
@@ -21,6 +21,7 @@ PillRowViewModel.cs           PillOverflowFormatter.cs
 PillGroupViewModel.cs         PillOverflowOptions.cs
 PillTooltipMode.cs            MemberPathResolver.cs
 PillTooltipFormatters.cs      PillGroupTemplateConverters.cs
+PillLog.cs
 ```
 
 Dependencies: **.NET BCL + WPF only.** No third-party packages, no
@@ -29,6 +30,21 @@ and later with `<UseWPF>true</UseWPF>`.
 
 Rename the `BlockParam.UI.Controls.PillMultiSelect` namespace to match your
 project if you want — it has no other meaning.
+
+### Diagnostics
+
+The control writes a handful of `PillLog.Information(...)` lines around the
+host→control DP boundary (instantiation, `IsOpen`/`Label`/`ItemsSource`/
+`SelectedItems` changes). These exist because invisible bindings produce a
+silent empty pill — see #141 for the bug they catch.
+
+The sink defaults to no-op. To forward into your logger:
+
+```csharp
+PillLog.Sink = msg => YourLogger.Information(msg);
+```
+
+Wire it once at app startup. If you don't, the lines are silently dropped.
 
 ## Public API
 

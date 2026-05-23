@@ -1,6 +1,8 @@
 using Siemens.Engineering;
 using Siemens.Engineering.AddIn;
 using Siemens.Engineering.AddIn.Menu;
+using BlockParam.Diagnostics;
+using BlockParam.UI.Controls.PillMultiSelect;
 
 namespace BlockParam.AddIn;
 
@@ -10,6 +12,15 @@ namespace BlockParam.AddIn;
 public class BulkChangeAddInProvider : ProjectTreeAddInProvider
 {
     private readonly TiaPortal _tiaPortal;
+
+    static BulkChangeAddInProvider()
+    {
+        // The pill control's diagnostic shims (#141) flow through an
+        // injectable sink so the control stays vendorable into other repos
+        // with zero project-internal dependencies. Wire it to our own
+        // partial-trust-safe Log so nothing changes in the runtime log.
+        PillLog.Sink = msg => Log.Information("{Msg}", msg);
+    }
 
     public BulkChangeAddInProvider(TiaPortal tiaPortal)
     {

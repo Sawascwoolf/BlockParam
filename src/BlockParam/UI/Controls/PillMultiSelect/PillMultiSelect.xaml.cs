@@ -7,7 +7,6 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Markup;
 using System.Windows.Media;
-using BlockParam.Diagnostics;
 
 namespace BlockParam.UI.Controls.PillMultiSelect;
 
@@ -63,7 +62,7 @@ public partial class PillMultiSelect : UserControl
         // "shared default across instances" trap for collection DPs.
         SetCurrentValue(SelectedItemsProperty, new ObservableCollection<object>());
 
-        Log.Information("PillMultiSelect: control instantiated");
+        PillLog.Information("PillMultiSelect: control instantiated");
     }
 
     // ── DependencyProperties ─────────────────────────────────────────────────
@@ -223,7 +222,7 @@ public partial class PillMultiSelect : UserControl
 
     private void OnIsOpenDpChanged(bool value)
     {
-        Log.Information("PillMultiSelect DP: IsOpen={Value} (host->control)", value);
+        PillLog.Information("PillMultiSelect DP: IsOpen={Value} (host->control)", value);
         if (_syncingIsOpen) return;
         _syncingIsOpen = true;
         try { _internalState.IsOpen = value; }
@@ -236,21 +235,21 @@ public partial class PillMultiSelect : UserControl
     // boundary observable in the runtime log instead of a silent blank.
     private void OnLabelDpChanged(string value)
     {
-        Log.Information("PillMultiSelect DP: Label='{Label}' (host->control)", value ?? "");
+        PillLog.Information("PillMultiSelect DP: Label='{Label}' (host->control)", value ?? "");
         _internalState.Label = value;
     }
 
     private void OnItemsSourceDpChanged(IEnumerable? value)
     {
         int n = value is ICollection c ? c.Count : -1;
-        Log.Information("PillMultiSelect DP: ItemsSource set (items={N}, null={Null})",
+        PillLog.Information("PillMultiSelect DP: ItemsSource set (items={N}, null={Null})",
             n, value == null);
         _itemSource.ItemsSource = value;
     }
 
     private void OnSelectedItemsDpChanged(IList? value)
     {
-        Log.Information("PillMultiSelect DP: SelectedItems set (count={N}, null={Null})",
+        PillLog.Information("PillMultiSelect DP: SelectedItems set (count={N}, null={Null})",
             value?.Count ?? -1, value == null);
         _selectionSync.SetSelectedItems(value);
     }

@@ -9,7 +9,6 @@ using System.Windows;
 using System.Windows.Data;
 using System.Windows.Input;
 using System.Windows.Media;
-using BlockParam.Diagnostics;
 
 namespace BlockParam.UI.Controls.PillMultiSelect;
 
@@ -262,7 +261,7 @@ public sealed class PillMultiSelectInternalState : PillViewModelBase
             // lines to tell "trigger not clickable" from "opened but empty".
             // Locals only (bool/int/string) — no readonly-struct member access
             // here, per the partial-trust IL rule for this file (CLAUDE.md).
-            Log.Information(
+            PillLog.Information(
                 "PillMultiSelect[label='{Label}']: IsOpen -> {Value}, rows={Rows}",
                 _label, value, _items.Count);
 
