@@ -47,4 +47,12 @@ public partial class PillDropdownList : UserControl
         InitializeComponent();
         PillLog.Information("PillDropdownList: control instantiated");
     }
+
+    /// <summary>
+    /// Push focus into the search box. Called by hosts that open the
+    /// dropdown in response to a click, so the user can start typing
+    /// immediately (Linear / Notion / cmdk affordance). No-op when the
+    /// search box is hidden via <c>ShowSearchBox=false</c>.
+    /// </summary>
+    public void FocusSearchBox() => SearchBox.Focus();
 }

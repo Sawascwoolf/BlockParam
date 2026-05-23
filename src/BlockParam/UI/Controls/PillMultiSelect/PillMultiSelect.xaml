@@ -151,7 +151,7 @@
                 <!-- DataContext inherits from the popup's content (which the
                      code-behind sets to _internalState); the dropdown reads
                      the same state the trigger does. -->
-                <local:PillDropdownList/>
+                <local:PillDropdownList x:Name="Dropdown"/>
             </Border>
         </Popup>
     </Grid>

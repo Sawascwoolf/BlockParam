@@ -494,7 +494,8 @@ public partial class PillMultiSelect : UserControl
     {
         // Push focus into the search box so the user can start typing
         // immediately on click — same affordance as Linear / Notion / cmdk.
-        SearchBox.Focus();
+        // The SearchBox lives in PillDropdownList now; route through it.
+        Dropdown.FocusSearchBox();
     }
 
     private void OnClearClick(object sender, RoutedEventArgs e)
