@@ -135,6 +135,13 @@ public sealed class PartialTrustSandboxTests
         typeof(PillMultiSelectInternalState).IsPublic.Should().BeTrue(why);
         typeof(PillRowViewModel).IsPublic.Should().BeTrue(why);
         typeof(PillGroupViewModel).IsPublic.Should().BeTrue(why);
+
+        // Converters referenced by `{Binding … Converter={StaticResource …}}`
+        // and the ICommand implementation handed out through public command
+        // properties — same partial-trust foreign-assembly reflection rule.
+        typeof(PillGroupHeaderVisibilityConverter).IsPublic.Should().BeTrue(why);
+        typeof(PillGroupExpandedVisibilityConverter).IsPublic.Should().BeTrue(why);
+        typeof(PillRelayCommand).IsPublic.Should().BeTrue(why);
     }
 
     [Fact]
@@ -356,6 +363,9 @@ public sealed class PartialTrustWorker : MarshalByRefObject
                 "BlockParam.UI.Controls.PillMultiSelect.PillMultiSelectInternalState",
                 "BlockParam.UI.Controls.PillMultiSelect.PillRowViewModel",
                 "BlockParam.UI.Controls.PillMultiSelect.PillGroupViewModel",
+                "BlockParam.UI.Controls.PillMultiSelect.PillGroupHeaderVisibilityConverter",
+                "BlockParam.UI.Controls.PillMultiSelect.PillGroupExpandedVisibilityConverter",
+                "BlockParam.UI.Controls.PillMultiSelect.PillRelayCommand",
             };
 
             foreach (var fullName in checks)
