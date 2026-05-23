@@ -42,16 +42,42 @@ public partial class BulkChangeDialog : Window
         viewModel.RequestClose += () => Close();
         viewModel.FlatListRefreshed += RehydrateManualSelection;
         viewModel.Inspector.PropertyChanged += OnInspectorPropertyChanged;
-        Closed += (_, _) => viewModel.Dispose();
+        // #146 H3: after each Apply, briefly flip Topmost so the dialog
+        // re-foregrounds above TIA. TIA activates its main window during
+        // Openness Import and would otherwise leave this (ownerless,
+        // not-Topmost) dialog buried behind it once the splash dismisses.
+        // Same dance as the Loaded handler below; raised on every Apply
+        // outcome so failures don't strand the user behind TIA either.
+        viewModel.ApplyFinished += BringDialogToForeground;
+        Closed += (_, _) =>
+        {
+            // Detach so a late-firing ApplyFinished (e.g. from a slow
+            // failure path) can't touch a disposed window.
+            viewModel.ApplyFinished -= BringDialogToForeground;
+            viewModel.Dispose();
+        };
 
         // Briefly set Topmost to appear above TIA Portal, then release
         // so other windows (non-TIA) can go in front.
-        Loaded += (_, _) =>
+        Loaded += (_, _) => BringDialogToForeground();
+    }
+
+    /// <summary>
+    /// Topmost flip to pull the dialog above TIA's main window. Cheap and
+    /// idempotent; called from <c>Loaded</c> and after every Apply (#146).
+    /// </summary>
+    private void BringDialogToForeground()
+    {
+        // Dispatcher hop guards against the rare case where the VM raises
+        // ApplyFinished while the close handler has already detached but the
+        // window is still alive — and keeps the flip cheap when Apply &amp;
+        // Close is about to fire RequestClose right after.
+        Dispatcher.BeginInvoke(new Action(() =>
         {
             Topmost = true;
             Activate();
             Topmost = false;
-        };
+        }), System.Windows.Threading.DispatcherPriority.Background);
     }
 
     private void OnInspectorPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)

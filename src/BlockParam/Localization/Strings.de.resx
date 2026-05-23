@@ -384,4 +384,10 @@ Beim Schließen des Dialogs werden sie verworfen. Trotzdem schließen?</value><c
   <data name="Splash_ParsingDb" xml:space="preserve"><value>{0} wird analysiert…</value></data>
   <data name="Splash_LoadingConfig" xml:space="preserve"><value>Konfiguration wird geladen…</value></data>
   <data name="Splash_Counter" xml:space="preserve"><value>({0} von {1})</value></data>
+  <!-- Apply-Fortschritts-Splash (#146) -->
+  <data name="Apply_Progress_Title" xml:space="preserve"><value>Änderungen werden übernommen</value></data>
+  <data name="Apply_Progress_Working" xml:space="preserve"><value>Änderungen werden in {0} geschrieben…</value><comment>{0} = DB-Name</comment></data>
+  <data name="Apply_Progress_WorkingMultiDb" xml:space="preserve"><value>Änderungen werden in {0} DBs geschrieben…</value><comment>{0} = Anzahl aktiver DBs</comment></data>
+  <data name="Apply_Progress_Summary" xml:space="preserve"><value>✓ {0} Änderung(en) in {1} übernommen</value><comment>{0} = Anzahl, {1} = DB-Name</comment></data>
+  <data name="Apply_Progress_SummaryMultiDb" xml:space="preserve"><value>✓ {0} Änderung(en) in {1} DBs übernommen</value><comment>{0} = Anzahl, {1} = DB-Anzahl</comment></data>
 </root>
