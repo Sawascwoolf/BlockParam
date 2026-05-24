@@ -7,7 +7,7 @@ namespace BlockParam.UI.Controls.PillMultiSelect;
 
 /// <summary>
 /// Visibility converter that returns <see cref="Visibility.Visible"/> when
-/// the input is a <see cref="PillGroupViewModel"/> (i.e. an explicit-grouping
+/// the input is a <see cref="MultiSelectGroupViewModel"/> (i.e. an explicit-grouping
 /// header is being rendered) and <see cref="Visibility.Collapsed"/> otherwise.
 /// Used in <c>PillMultiSelect.xaml</c>'s shared GroupItem template to swap
 /// between the explicit-group header and the selected-first 1px divider.
@@ -19,10 +19,10 @@ namespace BlockParam.UI.Controls.PillMultiSelect;
 // reflection rule as the bound pill VM types. See #141. Today no production
 // host enables grouping on the pill, but keep the safety net so the next one
 // doesn't reopen this bug.
-public sealed class PillGroupHeaderVisibilityConverter : IValueConverter
+public sealed class MultiSelectGroupHeaderVisibilityConverter : IValueConverter
 {
     public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
-        => value is PillGroupViewModel ? Visibility.Visible : Visibility.Collapsed;
+        => value is MultiSelectGroupViewModel ? Visibility.Visible : Visibility.Collapsed;
 
     public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
         => DependencyProperty.UnsetValue;
@@ -31,13 +31,13 @@ public sealed class PillGroupHeaderVisibilityConverter : IValueConverter
 /// <summary>
 /// Visibility converter for the items presenter inside a GroupItem.
 /// Returns <see cref="Visibility.Visible"/> when the bound IsExpanded value
-/// is <c>true</c> or absent (selected-first grouping, no PillGroupViewModel),
+/// is <c>true</c> or absent (selected-first grouping, no MultiSelectGroupViewModel),
 /// and <see cref="Visibility.Collapsed"/> only when an explicit-group
-/// <see cref="PillGroupViewModel.IsExpanded"/> is <c>false</c>.
+/// <see cref="MultiSelectGroupViewModel.IsExpanded"/> is <c>false</c>.
 /// </summary>
 // `public`, not `internal`: same #141 reasoning as
-// PillGroupHeaderVisibilityConverter above.
-public sealed class PillGroupExpandedVisibilityConverter : IValueConverter
+// MultiSelectGroupHeaderVisibilityConverter above.
+public sealed class MultiSelectGroupExpandedVisibilityConverter : IValueConverter
 {
     public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
         => value is bool b && !b ? Visibility.Collapsed : Visibility.Visible;

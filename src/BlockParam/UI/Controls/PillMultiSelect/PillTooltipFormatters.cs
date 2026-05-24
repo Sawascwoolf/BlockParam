@@ -54,13 +54,13 @@ public static class PillTooltipFormatters
     /// Row-adapted <see cref="FullNames{T}"/> used internally by the
     /// UserControl when <see cref="PillTooltipMode.FullNames"/> is set.
     /// </summary>
-    internal static string FullNamesRows(IReadOnlyList<PillRowViewModel> rows) =>
+    internal static string FullNamesRows(IReadOnlyList<MultiSelectRowViewModel> rows) =>
         FullNames(rows, r => r.Display);
 
     /// <summary>
     /// Row-adapted <see cref="AbbrevAndFullNames{T}"/> used internally by
     /// the UserControl when <see cref="PillTooltipMode.AbbrevAndFullNames"/> is set.
     /// </summary>
-    internal static string AbbrevAndFullNamesRows(IReadOnlyList<PillRowViewModel> rows) =>
+    internal static string AbbrevAndFullNamesRows(IReadOnlyList<MultiSelectRowViewModel> rows) =>
         AbbrevAndFullNames(rows, r => r.Display, r => r.Abbreviation);
 }

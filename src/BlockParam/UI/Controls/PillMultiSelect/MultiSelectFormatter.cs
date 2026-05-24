@@ -29,10 +29,10 @@ namespace BlockParam.UI.Controls.PillMultiSelect;
 /// that the DP can't express. The DP is a convenience; the Func is the
 /// authoritative override.
 /// </remarks>
-internal sealed class PillFormatterCoordinator
+public sealed class MultiSelectFormatter
 {
-    private readonly PillMultiSelectInternalState _state;
-    private readonly PillItemSource _itemSource;
+    private readonly MultiSelectInternalState _state;
+    private readonly MultiSelectItemSource _itemSource;
 
     // Tracks whether the host has set a custom CLR formatter so DP changes
     // don't silently overwrite it.
@@ -43,9 +43,9 @@ internal sealed class PillFormatterCoordinator
     private PillOverflowOptions? _overflowOptions;
     private PillTooltipMode _tooltipMode = PillTooltipMode.None;
 
-    internal PillFormatterCoordinator(
-        PillMultiSelectInternalState state,
-        PillItemSource itemSource)
+    internal MultiSelectFormatter(
+        MultiSelectInternalState state,
+        MultiSelectItemSource itemSource)
     {
         _state = state;
         _itemSource = itemSource;
@@ -215,7 +215,7 @@ internal sealed class PillFormatterCoordinator
                     t => t.Abbreviation,
                     options);
             }
-            : (Func<IReadOnlyList<PillRowViewModel>, string>?)null;
+            : (Func<IReadOnlyList<MultiSelectRowViewModel>, string>?)null;
     }
 
     private void ApplyTooltipModeToState(PillTooltipMode mode)
@@ -230,7 +230,7 @@ internal sealed class PillFormatterCoordinator
     /// a fully-checked group becomes "Engineering (5)" rather than five
     /// individual member lines.
     /// </summary>
-    private static Func<IReadOnlyList<PillRowViewModel>, string?>? BuildTooltipFormatterFor(
+    private static Func<IReadOnlyList<MultiSelectRowViewModel>, string?>? BuildTooltipFormatterFor(
         PillTooltipMode mode) =>
         mode switch
         {

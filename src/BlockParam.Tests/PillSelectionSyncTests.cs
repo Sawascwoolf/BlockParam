@@ -12,8 +12,8 @@ using Xunit;
 
 // WPF DependencyProperties require an STA thread. xunit defaults to MTA, so
 // tests that touch DPs are marked [UIFact] / [UITheory] via Xunit.StaFact.
-// Tests that work on plain internal types (PillSelectionSync via its helpers,
-// PillMultiSelectInternalState) can run on MTA and use plain [Fact].
+// Tests that work on plain internal types (MultiSelectSelectionSync via its helpers,
+// MultiSelectInternalState) can run on MTA and use plain [Fact].
 
 namespace BlockParam.Tests;
 
@@ -49,8 +49,8 @@ file sealed class PlainSource
 }
 
 /// <summary>
-/// Test fixture that wires up <see cref="PillSelectionSync"/> with a real
-/// <see cref="PillMultiSelectInternalState"/> and <see cref="PillItemSource"/>
+/// Test fixture that wires up <see cref="MultiSelectSelectionSync"/> with a real
+/// <see cref="MultiSelectInternalState"/> and <see cref="MultiSelectItemSource"/>
 /// so all three edges can be exercised without a WPF window. The internal state
 /// and item-source are accessible because <c>BlockParam.Tests</c> is listed in
 /// <c>InternalsVisibleTo</c> on the main project.
@@ -59,21 +59,21 @@ file sealed class SyncFixture
 {
     // A single persistent ObservableCollection used as ItemsSource.
     // Adding to it triggers an incremental Add notification (not a Reset),
-    // so the returned PillRowViewModel stays the live row in State.Items.
+    // so the returned MultiSelectRowViewModel stays the live row in State.Items.
     private readonly ObservableCollection<object> _sources;
 
-    internal PillMultiSelectInternalState State { get; }
-    internal PillItemSource ItemSource { get; }
-    internal PillSelectionSync Sync { get; }
+    internal MultiSelectInternalState State { get; }
+    internal MultiSelectItemSource ItemSource { get; }
+    internal MultiSelectSelectionSync Sync { get; }
     internal MemberPathResolver Resolver { get; }
     internal ObservableCollection<object> SelectedItems { get; }
 
     internal SyncFixture()
     {
-        State = new PillMultiSelectInternalState();
+        State = new MultiSelectInternalState();
         Resolver = new MemberPathResolver();
-        ItemSource = new PillItemSource(State, Resolver);
-        Sync = new PillSelectionSync(State, ItemSource, Resolver);
+        ItemSource = new MultiSelectItemSource(State, Resolver);
+        Sync = new MultiSelectSelectionSync(State, ItemSource, Resolver);
 
         SelectedItems = new ObservableCollection<object>();
         Sync.SetSelectedItems(SelectedItems);
@@ -86,12 +86,12 @@ file sealed class SyncFixture
 
     /// <summary>
     /// Adds a source object to the persistent ItemsSource collection.
-    /// This triggers an incremental Add notification on <see cref="PillItemSource"/>,
-    /// which fires <c>RowAdded</c> so <see cref="PillSelectionSync"/> reconciles
+    /// This triggers an incremental Add notification on <see cref="MultiSelectItemSource"/>,
+    /// which fires <c>RowAdded</c> so <see cref="MultiSelectSelectionSync"/> reconciles
     /// and subscribes INPC. The returned row is the live row in
     /// <see cref="State"/>.Items and remains valid across subsequent AddSource calls.
     /// </summary>
-    internal PillRowViewModel AddSource(object source)
+    internal MultiSelectRowViewModel AddSource(object source)
     {
         _sources.Add(source);
         return State.Items[State.Items.Count - 1];
@@ -102,7 +102,7 @@ file sealed class SyncFixture
 // Edge A — wrapper ↔ SelectedItems
 // ─────────────────────────────────────────────────────────────────────────────
 
-public class PillSelectionSync_EdgeA_Tests
+public class MultiSelectSelectionSync_EdgeA_Tests
 {
     [Fact]
     public void Setting_SelectedItems_with_prepopulated_items_marks_matching_rows_selected()
@@ -111,14 +111,14 @@ public class PillSelectionSync_EdgeA_Tests
         var src2 = new object();
         var src3 = new object();
 
-        var state = new PillMultiSelectInternalState();
+        var state = new MultiSelectInternalState();
         var resolver = new MemberPathResolver();
-        var itemSource = new PillItemSource(state, resolver);
+        var itemSource = new MultiSelectItemSource(state, resolver);
 
         var sources = new ObservableCollection<object> { src1, src2, src3 };
         itemSource.ItemsSource = sources;
 
-        var sync = new PillSelectionSync(state, itemSource, resolver);
+        var sync = new MultiSelectSelectionSync(state, itemSource, resolver);
 
         var preSelected = new ObservableCollection<object> { src1, src3 };
         sync.SetSelectedItems(preSelected);
@@ -256,21 +256,21 @@ public class PillSelectionSync_EdgeA_Tests
 // Edge B — wrapper ↔ IsSelectedMemberPath
 // ─────────────────────────────────────────────────────────────────────────────
 
-public class PillSelectionSync_EdgeB_Tests
+public class MultiSelectSelectionSync_EdgeB_Tests
 {
     [Fact]
     public void Setting_IsSelectedMemberPath_reads_initial_bool_into_rows()
     {
-        var state = new PillMultiSelectInternalState();
+        var state = new MultiSelectInternalState();
         var resolver = new MemberPathResolver();
-        var itemSource = new PillItemSource(state, resolver);
+        var itemSource = new MultiSelectItemSource(state, resolver);
 
         var trueItem = new InpcSource { IsActive = true };
         var falseItem = new InpcSource { IsActive = false };
 
         itemSource.ItemsSource = new ObservableCollection<object> { trueItem, falseItem };
 
-        var sync = new PillSelectionSync(state, itemSource, resolver);
+        var sync = new MultiSelectSelectionSync(state, itemSource, resolver);
         sync.SetIsSelectedMemberPath(nameof(InpcSource.IsActive));
 
         state.Items[0].IsSelected.Should().BeTrue();
@@ -320,14 +320,14 @@ public class PillSelectionSync_EdgeB_Tests
     [Fact]
     public void PlainSource_without_INPC_gets_initial_read_but_no_live_updates()
     {
-        var state = new PillMultiSelectInternalState();
+        var state = new MultiSelectInternalState();
         var resolver = new MemberPathResolver();
-        var itemSource = new PillItemSource(state, resolver);
+        var itemSource = new MultiSelectItemSource(state, resolver);
         var src = new PlainSource { IsActive = true };
 
         itemSource.ItemsSource = new ObservableCollection<object> { src };
 
-        var sync = new PillSelectionSync(state, itemSource, resolver);
+        var sync = new MultiSelectSelectionSync(state, itemSource, resolver);
         sync.SetIsSelectedMemberPath(nameof(PlainSource.IsActive));
 
         // Initial read works.
@@ -378,18 +378,18 @@ public class PillSelectionSync_EdgeB_Tests
 // Edge C — ItemsSource collection changes
 // ─────────────────────────────────────────────────────────────────────────────
 
-public class PillSelectionSync_EdgeC_Tests
+public class MultiSelectSelectionSync_EdgeC_Tests
 {
     [Fact]
     public void Adding_source_already_in_SelectedItems_creates_row_with_IsSelected_true()
     {
-        var state = new PillMultiSelectInternalState();
+        var state = new MultiSelectInternalState();
         var resolver = new MemberPathResolver();
-        var itemSource = new PillItemSource(state, resolver);
+        var itemSource = new MultiSelectItemSource(state, resolver);
 
         var src = new InpcSource();
 
-        var sync = new PillSelectionSync(state, itemSource, resolver);
+        var sync = new MultiSelectSelectionSync(state, itemSource, resolver);
         var selectedItems = new ObservableCollection<object> { src };
         sync.SetSelectedItems(selectedItems);
 
@@ -458,7 +458,7 @@ public class PillSelectionSync_EdgeC_Tests
 // Combined / re-entrancy / SelectionChanged event
 // ─────────────────────────────────────────────────────────────────────────────
 
-public class PillSelectionSync_Combined_Tests
+public class MultiSelectSelectionSync_Combined_Tests
 {
     [Fact]
     public void Both_SelectedItems_and_IsSelectedMemberPath_active_no_infinite_loop()
@@ -575,18 +575,18 @@ public class PillSelectionSync_Combined_Tests
 //
 // Regression guard for the symptom-A scenario in #141 (numberless instance DB).
 // These pin the EXISTING behaviour: the per-row seed in
-// PillSelectionSync.OnRowAdded reconciles each new row against SelectedItems
+// MultiSelectSelectionSync.OnRowAdded reconciles each new row against SelectedItems
 // membership by reference identity AS THE ROW MATERIALISES, so the closed
 // trigger summary becomes correct even when the SelectedItems DP callback
 // fired before the ItemsSource DP callback built any rows. No deferred
 // reconcile / popup-open is involved — verified by reverting
-// PillSelectionSync.cs to origin/main (the per-row seed alone still passes
+// MultiSelectSelectionSync.cs to origin/main (the per-row seed alone still passes
 // every assertion here); see PR #153 discussion. They lock the behaviour so
 // a future refactor of OnRowAdded can't silently reintroduce the v1.0.14
 // blank-pill regression that was already fixed on main by 7882cc1.
 // ─────────────────────────────────────────────────────────────────────────────
 
-public class PillSelectionSync_OrderIndependence_Tests
+public class MultiSelectSelectionSync_OrderIndependence_Tests
 {
     /// <summary>
     /// The <c>SelectedItems</c> DP callback fires before the
@@ -599,10 +599,10 @@ public class PillSelectionSync_OrderIndependence_Tests
     [Fact]
     public void SelectedItems_set_before_rows_still_selects_matching_rows_on_row_add()
     {
-        var state = new PillMultiSelectInternalState();
+        var state = new MultiSelectInternalState();
         var resolver = new MemberPathResolver();
-        var itemSource = new PillItemSource(state, resolver);
-        var sync = new PillSelectionSync(state, itemSource, resolver);
+        var itemSource = new MultiSelectItemSource(state, resolver);
+        var sync = new MultiSelectSelectionSync(state, itemSource, resolver);
 
         var src1 = new object();
         var src2 = new object();
@@ -629,10 +629,10 @@ public class PillSelectionSync_OrderIndependence_Tests
     [Fact]
     public void PerRowSeed_marks_each_pre_selected_row_once_as_rows_arrive()
     {
-        var state = new PillMultiSelectInternalState();
+        var state = new MultiSelectInternalState();
         var resolver = new MemberPathResolver();
-        var itemSource = new PillItemSource(state, resolver);
-        var sync = new PillSelectionSync(state, itemSource, resolver);
+        var itemSource = new MultiSelectItemSource(state, resolver);
+        var sync = new MultiSelectSelectionSync(state, itemSource, resolver);
 
         var src1 = new object();
         var src2 = new object();
@@ -657,10 +657,10 @@ public class PillSelectionSync_OrderIndependence_Tests
         // An empty SelectedItems selects nothing; a later add to the
         // collection must still flip the matching row (Edge A) normally —
         // no stale internal state from the empty-then-populate path.
-        var state = new PillMultiSelectInternalState();
+        var state = new MultiSelectInternalState();
         var resolver = new MemberPathResolver();
-        var itemSource = new PillItemSource(state, resolver);
-        var sync = new PillSelectionSync(state, itemSource, resolver);
+        var itemSource = new MultiSelectItemSource(state, resolver);
+        var sync = new MultiSelectSelectionSync(state, itemSource, resolver);
 
         var selected = new ObservableCollection<object>();
         sync.SetSelectedItems(selected);
@@ -682,7 +682,7 @@ public class PillSelectionSync_OrderIndependence_Tests
 //
 // 7882cc1 added the empty-Abbreviation → Display fallback ONLY to
 // PillOverflowFormatter.Format (the _displayFormatter path). The default
-// path in PillMultiSelectInternalState.SelectedAbbreviationsText joined
+// path in MultiSelectInternalState.SelectedAbbreviationsText joined
 // PillTriggerToken.Abbreviation directly, so a numberless instance DB
 // (Gen_Main_IDB — empty Abbreviation) rendered a BLANK closed-trigger
 // summary whenever OverflowOptions wasn't wired (or hadn't been applied
@@ -698,10 +698,10 @@ public class PillTriggerSummary_NumberlessDb_Tests
     [Fact]
     public void NumberlessInstanceDb_DefaultPath_RendersDisplayNotBlank()
     {
-        var state = new PillMultiSelectInternalState();
+        var state = new MultiSelectInternalState();
         var resolver = new MemberPathResolver();
-        var itemSource = new PillItemSource(state, resolver);
-        var sync = new PillSelectionSync(state, itemSource, resolver);
+        var itemSource = new MultiSelectItemSource(state, resolver);
+        var sync = new MultiSelectSelectionSync(state, itemSource, resolver);
 
         // The #141 repro: instance DB, _IDB suffix, no DB number → the
         // Abbreviation ("DB{Number}") is empty; only Display is populated.

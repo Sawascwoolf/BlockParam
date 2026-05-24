@@ -9,7 +9,7 @@ namespace BlockParam.Tests;
 
 /// <summary>
 /// Tests for <see cref="PillOverflowFormatter.Format{T}"/>.
-/// All cases use plain string-pair DTOs (not <see cref="PillRowViewModel"/>)
+/// All cases use plain string-pair DTOs (not <see cref="MultiSelectRowViewModel"/>)
 /// to verify the generic implementation works on arbitrary source types — the
 /// spirit of the Phase 3 genericization. The internal <c>FormatRows</c> shim
 /// is exercised implicitly via the UserControl's OverflowOptions DP tests.
@@ -26,7 +26,7 @@ public class PillOverflowFormatterTests
         Thread.CurrentThread.CurrentUICulture = en;
     }
 
-    // Simple source DTO — no coupling to PillRowViewModel.
+    // Simple source DTO — no coupling to MultiSelectRowViewModel.
     private record Item(string Display, string Abbrev);
 
     private static IReadOnlyList<Item> Items(params (string Display, string Abbrev)[] data)
@@ -214,7 +214,7 @@ public class PillOverflowFormatterTests
     [Fact]
     public void Generic_overload_works_on_arbitrary_source_type()
     {
-        // Verify T is not coupled to PillRowViewModel — use an int[] where
+        // Verify T is not coupled to MultiSelectRowViewModel — use an int[] where
         // display is the number spelled out and abbrev is the digit string.
         var items = new[] { 1, 2, 3 };
         var result = PillOverflowFormatter.Format(

@@ -9,7 +9,6 @@ using System.Windows;
 using System.Windows.Data;
 using System.Windows.Input;
 using System.Windows.Media;
-using BlockParam.Diagnostics;
 
 namespace BlockParam.UI.Controls.PillMultiSelect;
 
@@ -17,9 +16,9 @@ namespace BlockParam.UI.Controls.PillMultiSelect;
 /// Presentation state for the <see cref="PillMultiSelect"/> UserControl.
 /// Owns the row collection, the open/closed state of the popup, the search
 /// text, the derived trigger summary (joined abbreviations + count), and the
-/// optional explicit-grouping <see cref="PillGroupViewModel"/> map.
+/// optional explicit-grouping <see cref="MultiSelectGroupViewModel"/> map.
 /// Rows track their own selection state; this class aggregates by subscribing
-/// to <see cref="PillRowViewModel.IsSelected"/> changes.
+/// to <see cref="MultiSelectRowViewModel.IsSelected"/> changes.
 /// </summary>
 /// <remarks>
 /// This class is internal infrastructure — hosts use the UserControl's
@@ -43,18 +42,18 @@ namespace BlockParam.UI.Controls.PillMultiSelect;
 /// want localization bind the corresponding DPs on <see cref="PillMultiSelect"/>
 /// to their own resource lookup.
 /// </remarks>
-// `public`, not `internal`: see PillViewModelBase comment / #141. WPF's
+// `public`, not `internal`: see MultiSelectViewModelBase comment / #141. WPF's
 // binding engine resolves `{Binding IsOpen}`, `{Binding HasSelection}`, etc.
 // against an instance of this type via reflection from PresentationFramework
 // (a foreign assembly). Under TIA's partial-trust SandboxDomain those
 // reflections silently fail for non-public types, producing the empty-pill
 // regression. The members are still control infrastructure — hosts use the
 // PillMultiSelect UserControl's DependencyProperties.
-public sealed class PillMultiSelectInternalState : PillViewModelBase
+public sealed class MultiSelectInternalState : MultiSelectViewModelBase
 {
-    private readonly ObservableCollection<PillRowViewModel> _items;
+    private readonly ObservableCollection<MultiSelectRowViewModel> _items;
     private readonly ListCollectionView _filteredView;
-    private readonly Dictionary<object, PillGroupViewModel> _groups;
+    private readonly Dictionary<object, MultiSelectGroupViewModel> _groups;
     private string _searchText = string.Empty;
     private bool _isOpen;
     private string _label = string.Empty;
@@ -70,24 +69,24 @@ public sealed class PillMultiSelectInternalState : PillViewModelBase
     private double _popupMaxListHeight = 280;
     private bool _showSearchBox = true;
     private bool _showFooterActions = true;
-    private Func<IReadOnlyList<PillRowViewModel>, string>? _displayFormatter;
-    private Func<IReadOnlyList<PillRowViewModel>, string?>? _tooltipFormatter;
-    private Func<PillRowViewModel, string, bool>? _customFilter;
+    private Func<IReadOnlyList<MultiSelectRowViewModel>, string>? _displayFormatter;
+    private Func<IReadOnlyList<MultiSelectRowViewModel>, string?>? _tooltipFormatter;
+    private Func<MultiSelectRowViewModel, string, bool>? _customFilter;
 
-    internal PillMultiSelectInternalState()
+    internal MultiSelectInternalState()
     {
-        _items = new ObservableCollection<PillRowViewModel>();
+        _items = new ObservableCollection<MultiSelectRowViewModel>();
         _items.CollectionChanged += OnItemsCollectionChanged;
 
         _filteredView = (ListCollectionView)CollectionViewSource.GetDefaultView(_items);
         _filteredView.Filter = FilterPredicate;
 
-        _groups = new Dictionary<object, PillGroupViewModel>();
+        _groups = new Dictionary<object, MultiSelectGroupViewModel>();
 
-        ToggleOpenCommand = new PillRelayCommand(() => IsOpen = !IsOpen);
-        SelectAllCommand = new PillRelayCommand(SelectAllVisible);
-        ResetCommand = new PillRelayCommand(ResetSelection);
-        ClearCommand = new PillRelayCommand(ResetSelection);
+        ToggleOpenCommand = new MultiSelectRelayCommand(() => IsOpen = !IsOpen);
+        SelectAllCommand = new MultiSelectRelayCommand(SelectAllVisible);
+        ResetCommand = new MultiSelectRelayCommand(ResetSelection);
+        ClearCommand = new MultiSelectRelayCommand(ResetSelection);
     }
 
     public string Label
@@ -167,20 +166,20 @@ public sealed class PillMultiSelectInternalState : PillViewModelBase
     /// <see cref="ClearItems"/> so the internal <c>PropertyChanged</c>
     /// subscriptions stay consistent.
     /// </summary>
-    public IReadOnlyList<PillRowViewModel> Items => _items;
+    public IReadOnlyList<MultiSelectRowViewModel> Items => _items;
 
     public ICollectionView FilteredItems => _filteredView;
 
     /// <summary>
     /// Group view models keyed by raw group-key value. Owned and mutated by
-    /// <see cref="PillItemSource"/> via <see cref="EnsureGroupForKey"/> /
+    /// <see cref="MultiSelectItemSource"/> via <see cref="EnsureGroupForKey"/> /
     /// <see cref="RemoveGroup"/> / <see cref="ClearGroups"/>. Read-only access
     /// for tests and downstream consumers.
     /// </summary>
-    internal IReadOnlyDictionary<object, PillGroupViewModel> Groups => _groups;
+    internal IReadOnlyDictionary<object, MultiSelectGroupViewModel> Groups => _groups;
 
     /// <summary>
-    /// True when <see cref="PillItemSource"/> reports that grouping inputs
+    /// True when <see cref="MultiSelectItemSource"/> reports that grouping inputs
     /// (member path or selector) are set. Drives the choice between
     /// "selected-first" grouping and "explicit key" grouping in
     /// <see cref="ApplyOrderingToView"/>. Set by
@@ -262,7 +261,7 @@ public sealed class PillMultiSelectInternalState : PillViewModelBase
             // lines to tell "trigger not clickable" from "opened but empty".
             // Locals only (bool/int/string) — no readonly-struct member access
             // here, per the partial-trust IL rule for this file (CLAUDE.md).
-            Log.Information(
+            MultiSelectLog.Information(
                 "PillMultiSelect[label='{Label}']: IsOpen -> {Value}, rows={Rows}",
                 _label, value, _items.Count);
 
@@ -305,7 +304,7 @@ public sealed class PillMultiSelectInternalState : PillViewModelBase
     /// Set to <see cref="PillOverflowFormatter.Format"/> bound to a configured
     /// <see cref="PillOverflowOptions"/> when overflow handling is needed.
     /// </summary>
-    public Func<IReadOnlyList<PillRowViewModel>, string>? DisplayFormatter
+    public Func<IReadOnlyList<MultiSelectRowViewModel>, string>? DisplayFormatter
     {
         get => _displayFormatter;
         set
@@ -346,12 +345,12 @@ public sealed class PillMultiSelectInternalState : PillViewModelBase
     /// Optional tooltip strategy for the trigger pill. When null (default),
     /// the pill has no tooltip. When set, the delegate is invoked on each
     /// selection change to produce the tooltip text — common use is showing
-    /// full <see cref="PillRowViewModel.Display"/> names of all selected items,
+    /// full <see cref="MultiSelectRowViewModel.Display"/> names of all selected items,
     /// one per line, so users can recover from abbreviation/collapse overflow
     /// without opening the popup. Returning null from the formatter also
     /// suppresses the tooltip.
     /// </summary>
-    public Func<IReadOnlyList<PillRowViewModel>, string?>? TooltipFormatter
+    public Func<IReadOnlyList<MultiSelectRowViewModel>, string?>? TooltipFormatter
     {
         get => _tooltipFormatter;
         set
@@ -381,12 +380,12 @@ public sealed class PillMultiSelectInternalState : PillViewModelBase
     public ICommand ResetCommand { get; }
     public ICommand ClearCommand { get; }
 
-    public void AddItem(PillRowViewModel item)
+    public void AddItem(MultiSelectRowViewModel item)
     {
         _items.Add(item);
     }
 
-    public bool RemoveItem(PillRowViewModel item)
+    public bool RemoveItem(MultiSelectRowViewModel item)
     {
         return _items.Remove(item);
     }
@@ -404,32 +403,32 @@ public sealed class PillMultiSelectInternalState : PillViewModelBase
         _items.Clear();
     }
 
-    // ── Explicit-grouping management (called by PillItemSource) ──────────────
+    // ── Explicit-grouping management (called by MultiSelectItemSource) ──────────────
 
     /// <summary>
-    /// Returns the <see cref="PillGroupViewModel"/> for the given key, creating
+    /// Returns the <see cref="MultiSelectGroupViewModel"/> for the given key, creating
     /// it on first request. Header text defaults to <c>key.ToString()</c> for
     /// the default header template; hosts wanting richer headers bind against
-    /// <see cref="PillGroupViewModel.Key"/> in their own GroupHeaderTemplate.
+    /// <see cref="MultiSelectGroupViewModel.Key"/> in their own GroupHeaderTemplate.
     /// </summary>
-    internal PillGroupViewModel EnsureGroupForKey(object key)
+    internal MultiSelectGroupViewModel EnsureGroupForKey(object key)
     {
         if (_groups.TryGetValue(key, out var existing))
             return existing;
 
-        var header = key is PillItemSource.NullGroupSentinel
+        var header = key is MultiSelectItemSource.NullGroupSentinel
             ? string.Empty
             : key.ToString() ?? string.Empty;
-        var vm = new PillGroupViewModel(key, header);
+        var vm = new MultiSelectGroupViewModel(key, header);
         _groups[key] = vm;
         return vm;
     }
 
     /// <summary>
-    /// Removes a group VM from the map. Called by <see cref="PillItemSource"/>
+    /// Removes a group VM from the map. Called by <see cref="MultiSelectItemSource"/>
     /// after the group's last child row leaves.
     /// </summary>
-    internal void RemoveGroup(PillGroupViewModel group)
+    internal void RemoveGroup(MultiSelectGroupViewModel group)
     {
         _groups.Remove(group.Key);
     }
@@ -455,7 +454,7 @@ public sealed class PillMultiSelectInternalState : PillViewModelBase
     }
 
     /// <summary>
-    /// Called by <see cref="PillItemSource"/> whenever the
+    /// Called by <see cref="MultiSelectItemSource"/> whenever the
     /// <c>GroupKeyMemberPath</c> / <c>GroupKeyOverride</c> configuration
     /// changes. Updates <see cref="IsExplicitGroupingActive"/> and re-applies
     /// the view's group descriptions.
@@ -474,11 +473,11 @@ public sealed class PillMultiSelectInternalState : PillViewModelBase
         // handled here — the collection is already empty and OldItems is
         // null). Add/Remove paths still need to (un)subscribe.
         if (e.NewItems != null)
-            foreach (PillRowViewModel item in e.NewItems)
+            foreach (MultiSelectRowViewModel item in e.NewItems)
                 item.PropertyChanged += OnItemPropertyChanged;
 
         if (e.OldItems != null)
-            foreach (PillRowViewModel item in e.OldItems)
+            foreach (MultiSelectRowViewModel item in e.OldItems)
                 item.PropertyChanged -= OnItemPropertyChanged;
 
         RaiseAggregatesChanged();
@@ -486,7 +485,7 @@ public sealed class PillMultiSelectInternalState : PillViewModelBase
 
     private void OnItemPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (e.PropertyName == nameof(PillRowViewModel.IsSelected))
+        if (e.PropertyName == nameof(MultiSelectRowViewModel.IsSelected))
             RaiseAggregatesChanged();
     }
 
@@ -501,7 +500,7 @@ public sealed class PillMultiSelectInternalState : PillViewModelBase
 
     /// <summary>
     /// Captures the current selection state into each item's
-    /// <see cref="PillRowViewModel.WasSelectedAtSort"/> field and re-applies
+    /// <see cref="MultiSelectRowViewModel.WasSelectedAtSort"/> field and re-applies
     /// the sort/group descriptions on the filtered view. Called when the
     /// popup opens, when <see cref="SortSelectedFirst"/> changes, or when
     /// grouping mode toggles.
@@ -548,10 +547,10 @@ public sealed class PillMultiSelectInternalState : PillViewModelBase
             if (!(anyIn && anyOut)) return;
 
             _filteredView.SortDescriptions.Add(
-                new SortDescription(nameof(PillRowViewModel.WasSelectedAtSort),
+                new SortDescription(nameof(MultiSelectRowViewModel.WasSelectedAtSort),
                                     ListSortDirection.Descending));
             _filteredView.GroupDescriptions.Add(
-                new PropertyGroupDescription(nameof(PillRowViewModel.WasSelectedAtSort)));
+                new PropertyGroupDescription(nameof(MultiSelectRowViewModel.WasSelectedAtSort)));
         }
     }
 
@@ -599,7 +598,7 @@ public sealed class PillMultiSelectInternalState : PillViewModelBase
     /// The UserControl wraps that delegate to project source → row before
     /// forwarding it here.</para>
     /// </summary>
-    internal Func<PillRowViewModel, string, bool>? CustomFilter
+    internal Func<MultiSelectRowViewModel, string, bool>? CustomFilter
     {
         get => _customFilter;
         set
@@ -612,7 +611,7 @@ public sealed class PillMultiSelectInternalState : PillViewModelBase
     private bool FilterPredicate(object obj)
     {
         if (string.IsNullOrEmpty(_searchText)) return true;
-        if (obj is not PillRowViewModel item) return false;
+        if (obj is not MultiSelectRowViewModel item) return false;
 
         if (_customFilter != null)
             return _customFilter(item, _searchText);
@@ -629,7 +628,7 @@ public sealed class PillMultiSelectInternalState : PillViewModelBase
     /// </summary>
     private void SelectAllVisible()
     {
-        foreach (var item in _filteredView.Cast<PillRowViewModel>())
+        foreach (var item in _filteredView.Cast<MultiSelectRowViewModel>())
             item.IsSelected = true;
     }
 
@@ -641,9 +640,9 @@ public sealed class PillMultiSelectInternalState : PillViewModelBase
 
     /// <summary>
     /// Custom <see cref="GroupDescription"/> that uses each row's already-
-    /// assigned <see cref="PillRowViewModel.OwningGroup"/> as the group key.
+    /// assigned <see cref="MultiSelectRowViewModel.OwningGroup"/> as the group key.
     /// This way the <see cref="CollectionViewGroup.Name"/> rendered by the
-    /// GroupItem template IS the <see cref="PillGroupViewModel"/>, so XAML
+    /// GroupItem template IS the <see cref="MultiSelectGroupViewModel"/>, so XAML
     /// can bind <c>{Binding Name.IsSelected}</c>, <c>{Binding Name.IsExpanded}</c>
     /// etc. against the group's tri-state and expansion props directly.
     /// </summary>
@@ -651,12 +650,12 @@ public sealed class PillMultiSelectInternalState : PillViewModelBase
     {
         public override object GroupNameFromItem(object item, int level, CultureInfo culture)
         {
-            if (item is PillRowViewModel row && row.OwningGroup is { } group)
+            if (item is MultiSelectRowViewModel row && row.OwningGroup is { } group)
                 return group;
 
             // Fall back to a stable sentinel when a row somehow isn't bound
             // to a group VM. Keeps the view from crashing in misconfiguration.
-            return PillItemSource.NullGroupSentinel.Instance;
+            return MultiSelectItemSource.NullGroupSentinel.Instance;
         }
 
         public override bool NamesMatch(object groupName, object itemName)

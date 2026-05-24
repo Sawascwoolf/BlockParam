@@ -13,7 +13,7 @@ namespace BlockParam.UI.Controls.PillMultiSelect;
 // assembly is rejected and bindings yield no value — pill renders blank, the
 // trigger toggle doesn't write back. Full-trust CI/DevLauncher hides this.
 // See #141.
-public abstract class PillViewModelBase : INotifyPropertyChanged
+public abstract class MultiSelectViewModelBase : INotifyPropertyChanged
 {
     public event PropertyChangedEventHandler? PropertyChanged;
 

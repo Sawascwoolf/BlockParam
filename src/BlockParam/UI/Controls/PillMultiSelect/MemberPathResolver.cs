@@ -10,13 +10,13 @@ namespace BlockParam.UI.Controls.PillMultiSelect;
 /// source type, not one per row. UI-thread-only; no locking required.
 /// </summary>
 /// <remarks>
-/// Used by <see cref="PillItemSource"/> when <see cref="PillMultiSelect.DisplayMemberPath"/>
+/// Used by <see cref="MultiSelectItemSource"/> when <see cref="PillMultiSelect.DisplayMemberPath"/>
 /// or <see cref="PillMultiSelect.AbbreviationMemberPath"/> is set. When a path
 /// is null or empty the resolver falls back to a caller-supplied delegate (typically
 /// <c>obj => obj.ToString()</c>) so hosts that don't set member paths get reasonable
 /// output without any configuration.
 /// </remarks>
-internal sealed class MemberPathResolver
+public sealed class MemberPathResolver
 {
     // Null-value sentinel: a (Type, path) pair whose property was not found.
     // Storing null in the dictionary lets us avoid repeated failed lookups.

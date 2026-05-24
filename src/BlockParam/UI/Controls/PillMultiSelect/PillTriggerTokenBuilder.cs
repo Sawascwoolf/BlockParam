@@ -33,7 +33,7 @@ internal readonly struct PillTriggerToken
 }
 
 /// <summary>
-/// Projects a list of currently-selected <see cref="PillRowViewModel"/> rows
+/// Projects a list of currently-selected <see cref="MultiSelectRowViewModel"/> rows
 /// onto a list of <see cref="PillTriggerToken"/> by collapsing each
 /// fully-checked group into a single token at the position of its first
 /// selected member. Rows whose group is partial (or rows with no group)
@@ -41,20 +41,20 @@ internal readonly struct PillTriggerToken
 /// </summary>
 /// <remarks>
 /// Bundling is a no-op when grouping is not configured — every row has
-/// <see cref="PillRowViewModel.OwningGroup"/> = null, the if-branch never
+/// <see cref="MultiSelectRowViewModel.OwningGroup"/> = null, the if-branch never
 /// matches, and the output is one token per row in source order. So callers
 /// can route through this unconditionally without special-casing the
 /// flat-list path.
 /// </remarks>
 internal static class PillTriggerTokenBuilder
 {
-    internal static IReadOnlyList<PillTriggerToken> Build(IReadOnlyList<PillRowViewModel> selectedRows)
+    internal static IReadOnlyList<PillTriggerToken> Build(IReadOnlyList<MultiSelectRowViewModel> selectedRows)
     {
         if (selectedRows.Count == 0)
             return System.Array.Empty<PillTriggerToken>();
 
         var tokens = new List<PillTriggerToken>(selectedRows.Count);
-        var seenGroups = new HashSet<PillGroupViewModel>();
+        var seenGroups = new HashSet<MultiSelectGroupViewModel>();
 
         foreach (var row in selectedRows)
         {

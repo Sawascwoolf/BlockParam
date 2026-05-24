@@ -261,17 +261,17 @@ public class PillFilterPredicate_Tests
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// TooltipMode DP precedence — via PillFormatterCoordinator (non-STA, internal)
+// TooltipMode DP precedence — via MultiSelectFormatter (non-STA, internal)
 // ─────────────────────────────────────────────────────────────────────────────
 
-public class PillFormatterCoordinator_Tests
+public class MultiSelectFormatter_Tests
 {
-    private static (PillFormatterCoordinator coord, PillMultiSelectInternalState state) Make()
+    private static (MultiSelectFormatter coord, MultiSelectInternalState state) Make()
     {
-        var state = new PillMultiSelectInternalState();
+        var state = new MultiSelectInternalState();
         var resolver = new MemberPathResolver();
-        var source = new PillItemSource(state, resolver);
-        var coord = new PillFormatterCoordinator(state, source);
+        var source = new MultiSelectItemSource(state, resolver);
+        var coord = new MultiSelectFormatter(state, source);
         return (coord, state);
     }
 
@@ -291,7 +291,7 @@ public class PillFormatterCoordinator_Tests
         state.TooltipFormatter.Should().NotBeNull();
 
         // Verify the formatter produces FullNames output.
-        var rows = new[] { new PillRowViewModel(new object(), "DB_A", "A"), new PillRowViewModel(new object(), "DB_B", "B") };
+        var rows = new[] { new MultiSelectRowViewModel(new object(), "DB_A", "A"), new MultiSelectRowViewModel(new object(), "DB_B", "B") };
         state.TooltipFormatter!(rows).Should().Be("DB_A\nDB_B");
     }
 
@@ -302,7 +302,7 @@ public class PillFormatterCoordinator_Tests
         coord.OnTooltipModeChanged(PillTooltipMode.AbbrevAndFullNames);
         state.TooltipFormatter.Should().NotBeNull();
 
-        var rows = new[] { new PillRowViewModel(new object(), "DB_Alpha", "AL"), new PillRowViewModel(new object(), "DB_Beta", "BT") };
+        var rows = new[] { new MultiSelectRowViewModel(new object(), "DB_Alpha", "AL"), new MultiSelectRowViewModel(new object(), "DB_Beta", "BT") };
         state.TooltipFormatter!(rows).Should().Be("AL — DB_Alpha\nBT — DB_Beta");
     }
 
@@ -325,7 +325,7 @@ public class PillFormatterCoordinator_Tests
         // is the row→source projection of our lambda, not the FullNames/AbbrevAndFullNames one).
         // Create a row and call the formatter — it should produce the projection output.
         var src = new object();
-        var row = new PillRowViewModel(src, "DB_A", "A");
+        var row = new MultiSelectRowViewModel(src, "DB_A", "A");
         var result = state.TooltipFormatter!(new[] { row });
         // Our lambda returns "custom:N" for any N items; the row projection maps source items.
         result.Should().StartWith("custom:");
@@ -341,7 +341,7 @@ public class PillFormatterCoordinator_Tests
 
         // FullNames should be reinstalled.
         state.TooltipFormatter.Should().NotBeNull();
-        var rows = new[] { new PillRowViewModel(new object(), "DB_A", "A") };
+        var rows = new[] { new MultiSelectRowViewModel(new object(), "DB_A", "A") };
         state.TooltipFormatter!(rows).Should().Be("DB_A");
     }
 
@@ -374,7 +374,7 @@ public class PillFormatterCoordinator_Tests
         coord.OnOverflowOptionsChanged(new PillOverflowOptions());
 
         var src = new object();
-        var row = new PillRowViewModel(src, "DB_A", "A");
+        var row = new MultiSelectRowViewModel(src, "DB_A", "A");
         var result = state.DisplayFormatter!(new[] { row });
         result.Should().StartWith("custom:");
     }
@@ -416,7 +416,7 @@ public class PillFormatterCoordinator_Tests
         coord.FilterPredicate = (obj, _) => { capturedSource = obj; return true; };
 
         var src = new object();
-        var row = new PillRowViewModel(src, "DB_A", "A");
+        var row = new MultiSelectRowViewModel(src, "DB_A", "A");
         state.CustomFilter!(row, "any");
 
         capturedSource.Should().BeSameAs(src);
@@ -424,25 +424,25 @@ public class PillFormatterCoordinator_Tests
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// CustomFilter in PillMultiSelectInternalState (non-STA)
+// CustomFilter in MultiSelectInternalState (non-STA)
 // ─────────────────────────────────────────────────────────────────────────────
 
 public class PillInternalState_CustomFilter_Tests
 {
-    private static PillRowViewModel Row(string display, string abbrev) =>
+    private static MultiSelectRowViewModel Row(string display, string abbrev) =>
         new(new object(), display, abbrev);
 
     [Fact]
     public void CustomFilter_null_uses_default_contains_check()
     {
-        var state = new PillMultiSelectInternalState();
+        var state = new MultiSelectInternalState();
         state.CustomFilter.Should().BeNull(); // default
     }
 
     [Fact]
     public void CustomFilter_set_replaces_default_filter_logic()
     {
-        var state = new PillMultiSelectInternalState();
+        var state = new MultiSelectInternalState();
         var row = Row("Alpha", "AL");
         state.AddItem(row);
 
@@ -457,7 +457,7 @@ public class PillInternalState_CustomFilter_Tests
     [Fact]
     public void CustomFilter_cleared_restores_default_contains_check()
     {
-        var state = new PillMultiSelectInternalState();
+        var state = new MultiSelectInternalState();
         var row = Row("Alpha", "AL");
         state.AddItem(row);
 

@@ -4,24 +4,36 @@ A self-contained WPF multi-select control: rounded trigger pill, popup with
 search box, checkbox list, and a Select all / Reset footer. Modeled after
 modern web pill-dropdowns (Linear / Notion / Figma).
 
+The popup half ships as a standalone control too — `MultiSelectDropdown` —
+so it can be reused outside the pill (DataGrid cell editors, fly-out
+panels, sidebars). See "Standalone dropdown" below.
+
 See `assets/screenshots/pill/` (in the repo root) for the seven canonical
 states.
 
 ## Vendoring
 
-Drop these 16 source files into any WPF project. That's it. (This README is
+Drop these 19 source files into any WPF project. That's it. (This README is
 just for you — leave it behind or take it along.)
 
 ```
-PillMultiSelect.xaml          PillMultiSelectInternalState.cs
-PillMultiSelect.xaml.cs       PillItemSource.cs
-PillRelayCommand.cs           PillSelectionSync.cs
-PillViewModelBase.cs          PillFormatterCoordinator.cs
-PillRowViewModel.cs           PillOverflowFormatter.cs
-PillGroupViewModel.cs         PillOverflowOptions.cs
-PillTooltipMode.cs            MemberPathResolver.cs
-PillTooltipFormatters.cs      PillGroupTemplateConverters.cs
+PillMultiSelect.xaml              MultiSelectDropdown.xaml
+PillMultiSelect.xaml.cs           MultiSelectDropdown.xaml.cs
+MultiSelectInternalState.cs       MultiSelectItemSource.cs
+MultiSelectSelectionSync.cs       MultiSelectFormatter.cs
+MultiSelectRowViewModel.cs        MultiSelectGroupViewModel.cs
+MultiSelectViewModelBase.cs       MultiSelectRelayCommand.cs
+MultiSelectGroupTemplateConverters.cs   MultiSelectLog.cs
+MemberPathResolver.cs             PillOverflowFormatter.cs
+PillOverflowOptions.cs            PillTooltipMode.cs
+PillTooltipFormatters.cs
 ```
+
+Family naming: the **`PillMultiSelect`** UserControl is the pill-styled
+trigger + popup composition. The reusable primitives — state, item source,
+selection sync, formatter, dropdown — share the **`MultiSelect*`** prefix.
+Pill-trigger-specific helpers (overflow, tooltip) keep the **`Pill*`**
+prefix.
 
 Dependencies: **.NET BCL + WPF only.** No third-party packages, no
 project-internal helpers. Targets net48; should also build on net6.0-windows
@@ -29,6 +41,25 @@ and later with `<UseWPF>true</UseWPF>`.
 
 Rename the `BlockParam.UI.Controls.PillMultiSelect` namespace to match your
 project if you want — it has no other meaning.
+
+### Diagnostics
+
+The control writes a handful of `MultiSelectLog.Information(...)` lines
+around the host→control DP boundary (instantiation, `IsOpen`/`Label`/
+`ItemsSource`/`SelectedItems` changes). These exist because invisible
+bindings produce a silent empty pill — see #141 for the bug they catch.
+
+The sink defaults to no-op. To forward into your logger:
+
+```csharp
+MultiSelectLog.Sink = msg => YourLogger.Information(msg);
+```
+
+Wire it once at app startup **in the host that owns the process / AddIn**
+(in BlockParam: `BulkChangeAddInProvider`'s static ctor; in DevLauncher:
+`Main`). Wiring is host-bound, not assembly-bound — code paths that
+instantiate the control without the host (unit tests, the WPF designer)
+will see no sink and the lines silently drop. That's intentional.
 
 ## Public API
 
@@ -61,11 +92,12 @@ Code-only escape hatches (override the corresponding DP when both are set):
 
 ## Tri-state rows
 
-`PillRowViewModel.IsSelected` is `bool?`. Leaf rows toggled inside the popup
-stay binary (the checkbox has `IsThreeState=false`); the indeterminate state
-only ever appears when an external `bool?` source property pushes `null`
-through `IsSelectedMemberPath`. `SelectedItems` always represents fully-checked
-source items — indeterminate rows are intentionally absent.
+`MultiSelectRowViewModel.IsSelected` is `bool?`. Leaf rows toggled inside
+the popup stay binary (the checkbox has `IsThreeState=false`); the
+indeterminate state only ever appears when an external `bool?` source
+property pushes `null` through `IsSelectedMemberPath`. `SelectedItems`
+always represents fully-checked source items — indeterminate rows are
+intentionally absent.
 
 ## Grouping
 
@@ -84,8 +116,9 @@ restore their prior state when the search clears.
 
 The built-in header template is sufficient out of the box; bind
 `GroupHeaderTemplate` to a custom `DataTemplate` whose DataContext is
-`PillGroupViewModel` (with `Key`, `Header`, `IsSelected`, `IsExpanded`,
-`SelectedCount`, `TotalCount`) when you want richer rendering.
+`MultiSelectGroupViewModel` (with `Key`, `Header`, `IsSelected`,
+`IsExpanded`, `SelectedCount`, `TotalCount`) when you want richer
+rendering.
 
 Routed event: `SelectionChanged` (fires once per reconciliation cycle).
 
@@ -105,6 +138,41 @@ five string DPs (`SearchPlaceholder`, `ClearTooltip`, `SelectAllText`,
                       SelectedItems="{Binding SelectedMembers, Mode=OneWay}" />
 ```
 
+## Standalone dropdown (DataGrid cells, fly-out panels, ...)
+
+The popup half is also shipped as `MultiSelectDropdown` — a chrome-agnostic
+`UserControl` containing only the search box, the (optionally grouped)
+checkbox list, and the Select-all / Reset footer. Use it when you want the
+selection UI without the pill trigger, e.g. as a `DataGridTemplateColumn`
+cell editor, a sidebar panel, or a fly-out that opens on a custom button.
+
+The dropdown is **DataContext-driven** — bind it to a
+`MultiSelectInternalState` you wire up yourself. The four collaborators
+are `public` for exactly this use case:
+
+```csharp
+var state    = new MultiSelectInternalState();
+var resolver = new MemberPathResolver();
+var source   = new MultiSelectItemSource(state, resolver) {
+                   ItemsSource       = myItems,
+                   DisplayMemberPath = "Name",
+               };
+var sync     = new MultiSelectSelectionSync(state, source, resolver);
+_           = new MultiSelectFormatter(state, source); // trigger-only — harmless here
+sync.SetSelectedItems(mySelectedList);
+```
+
+```xml
+<pill:MultiSelectDropdown DataContext="{Binding TheState}" Width="320"/>
+```
+
+Listen to `sync.SelectionChanged` (or watch `mySelectedList`) for changes.
+The dropdown ships **no chrome** of its own — wrap it in whatever `Border`,
+`Popup`, or panel your host needs. For a DataGrid cell editor the pattern
+is `DataGridTemplateColumn.CellEditingTemplate` → `Popup` (with
+`StaysOpen="False"`) → `MultiSelectDropdown` inside; the column's bound
+list flows into `sync.SetSelectedItems`.
+
 ## Tests
 
 The sibling tests in `src/BlockParam.Tests/Pill*Tests.cs` cover the bindable
@@ -112,8 +180,12 @@ surface, selection sync, overflow formatter, item lifecycle, tooltip modes,
 and snapshot ordering. They only need xUnit + StaFact + FluentAssertions —
 no other host-project setup — and can travel with the control if desired.
 
-Caveat for vendoring the tests: several reach `internal` types
-(`PillRowViewModel`, `PillMultiSelectInternalState`). The project that owns
-the control needs `[InternalsVisibleTo("YourTestProject")]` for those to
-compile. Tests that only touch the public DP surface
-(`PillBindableApiTests.cs`, `PillOverflowFormatterTests.cs`) don't need it.
+Caveat for vendoring the tests: most of the surface they touch is now
+`public` (the VM family was promoted in #141 to unblock partial-trust WPF
+binding; the four collaborators were promoted in PR #168 to unblock
+standalone hosting). The remaining `internal` touchpoint is
+`PartialTrustSandboxTests`, which subclasses an internal sandbox worker
+to JIT-verify the assembly under TIA-like CAS — vendoring that test
+requires `[InternalsVisibleTo("YourTestProject")]`. Tests that only
+touch the public DP surface (`PillBindableApiTests.cs`,
+`PillOverflowFormatterTests.cs`) don't.

@@ -8,14 +8,14 @@ namespace BlockParam.UI.Controls.PillMultiSelect;
 
 /// <summary>
 /// Owns the lifecycle of "host's <see cref="IEnumerable"/> source items →
-/// wrapper <see cref="PillRowViewModel"/> rows" for one
+/// wrapper <see cref="MultiSelectRowViewModel"/> rows" for one
 /// <see cref="PillMultiSelect"/> instance. Subscribes to
 /// <see cref="INotifyCollectionChanged"/> when the source supports it and
 /// handles incremental Add/Remove/Replace/Reset. Resolves Display and
 /// Abbreviation strings via <see cref="MemberPathResolver"/>. When grouping
 /// is configured (see <see cref="GroupKeyMemberPath"/> /
 /// <see cref="GroupKeyOverride"/>) also resolves each row's group key and
-/// assigns it to the matching <see cref="PillGroupViewModel"/> in the
+/// assigns it to the matching <see cref="MultiSelectGroupViewModel"/> in the
 /// internal state.
 /// </summary>
 /// <remarks>
@@ -24,7 +24,7 @@ namespace BlockParam.UI.Controls.PillMultiSelect;
 /// The UserControl's DP callbacks call the setters here, which manage
 /// subscriptions and trigger row rebuilds or string refreshes as needed.
 /// </remarks>
-internal sealed class PillItemSource
+public sealed class MultiSelectItemSource
 {
     // Identity comparer: source items might not implement equality correctly
     // (e.g. two distinct objects with the same property values). Identity is
@@ -32,9 +32,9 @@ internal sealed class PillItemSource
     private static readonly IEqualityComparer<object> IdentityComparer =
         new ReferenceIdentityComparer();
 
-    private readonly PillMultiSelectInternalState _state;
+    private readonly MultiSelectInternalState _state;
     private readonly MemberPathResolver _resolver;
-    private readonly Dictionary<object, PillRowViewModel> _rowBySource;
+    private readonly Dictionary<object, MultiSelectRowViewModel> _rowBySource;
 
     private IEnumerable? _itemsSource;
     private string? _displayMemberPath;
@@ -46,24 +46,24 @@ internal sealed class PillItemSource
 
     /// <summary>
     /// Raised after a row is added to the internal state. Allows
-    /// <see cref="PillSelectionSync"/> to reconcile selection and subscribe
+    /// <see cref="MultiSelectSelectionSync"/> to reconcile selection and subscribe
     /// to <see cref="System.ComponentModel.INotifyPropertyChanged"/> on the
     /// new source item without needing access to internal dictionaries.
     /// </summary>
-    internal event Action<PillRowViewModel>? RowAdded;
+    internal event Action<MultiSelectRowViewModel>? RowAdded;
 
     /// <summary>
     /// Raised after a row is removed from the internal state (including during
-    /// a Reset). Allows <see cref="PillSelectionSync"/> to unsubscribe from
+    /// a Reset). Allows <see cref="MultiSelectSelectionSync"/> to unsubscribe from
     /// the source item's <see cref="System.ComponentModel.INotifyPropertyChanged"/>.
     /// </summary>
-    internal event Action<PillRowViewModel>? RowRemoved;
+    internal event Action<MultiSelectRowViewModel>? RowRemoved;
 
-    internal PillItemSource(PillMultiSelectInternalState state, MemberPathResolver resolver)
+    internal MultiSelectItemSource(MultiSelectInternalState state, MemberPathResolver resolver)
     {
         _state = state;
         _resolver = resolver;
-        _rowBySource = new Dictionary<object, PillRowViewModel>(IdentityComparer);
+        _rowBySource = new Dictionary<object, MultiSelectRowViewModel>(IdentityComparer);
     }
 
     /// <summary>
@@ -94,7 +94,7 @@ internal sealed class PillItemSource
 
     /// <summary>
     /// Path to the display-name property on each source item. Setting this
-    /// re-resolves <see cref="PillRowViewModel.Display"/> on existing rows
+    /// re-resolves <see cref="MultiSelectRowViewModel.Display"/> on existing rows
     /// without rebuilding them.
     /// </summary>
     public string? DisplayMemberPath
@@ -110,7 +110,7 @@ internal sealed class PillItemSource
 
     /// <summary>
     /// Path to the abbreviation property on each source item. Setting this
-    /// re-resolves <see cref="PillRowViewModel.Abbreviation"/> on existing
+    /// re-resolves <see cref="MultiSelectRowViewModel.Abbreviation"/> on existing
     /// rows without rebuilding them.
     /// </summary>
     public string? AbbreviationMemberPath
@@ -128,7 +128,7 @@ internal sealed class PillItemSource
     /// Path to the group-key property on each source item. When set (and the
     /// <see cref="GroupKeyOverride"/> is null), each row's group key is read
     /// from this property and the row is placed into the matching
-    /// <see cref="PillGroupViewModel"/>. Setting this re-assigns existing rows
+    /// <see cref="MultiSelectGroupViewModel"/>. Setting this re-assigns existing rows
     /// to new groups (without rebuilding rows or losing selection state).
     /// </summary>
     public string? GroupKeyMemberPath
@@ -191,8 +191,8 @@ internal sealed class PillItemSource
     /// <summary>
     /// True when either of the grouping inputs (<see cref="GroupKeyMemberPath"/>
     /// or <see cref="GroupKeyOverride"/>) is set. Drives whether
-    /// <see cref="PillMultiSelectInternalState"/> attaches the explicit
-    /// PropertyGroupDescription on <see cref="PillRowViewModel.GroupKey"/>.
+    /// <see cref="MultiSelectInternalState"/> attaches the explicit
+    /// PropertyGroupDescription on <see cref="MultiSelectRowViewModel.GroupKey"/>.
     /// </summary>
     internal bool IsGroupingActive =>
         !string.IsNullOrEmpty(_groupKeyMemberPath) || _groupKeyOverride != null;
@@ -202,7 +202,7 @@ internal sealed class PillItemSource
     private void RebuildRows()
     {
         // Fire RowRemoved for every existing row before the state clears them,
-        // so PillSelectionSync can unsubscribe from source INotifyPropertyChanged.
+        // so MultiSelectSelectionSync can unsubscribe from source INotifyPropertyChanged.
         foreach (var row in _rowBySource.Values)
             RowRemoved?.Invoke(row);
 
@@ -220,7 +220,7 @@ internal sealed class PillItemSource
     {
         var display = ResolveDisplay(source);
         var abbrev = ResolveAbbreviation(source, display);
-        var row = new PillRowViewModel(source, display, abbrev);
+        var row = new MultiSelectRowViewModel(source, display, abbrev);
 
         if (IsGroupingActive)
         {
@@ -267,7 +267,7 @@ internal sealed class PillItemSource
     /// Re-assigns every existing row to the group matching its current
     /// source-derived group key. Called when <see cref="GroupKeyMemberPath"/>
     /// or <see cref="GroupKeyOverride"/> changes. Rows keep their selection
-    /// state; only their <see cref="PillRowViewModel.OwningGroup"/> assignment
+    /// state; only their <see cref="MultiSelectRowViewModel.OwningGroup"/> assignment
     /// moves. Empty groups left behind are removed.
     /// </summary>
     private void RegroupExistingRows()
@@ -379,7 +379,7 @@ internal sealed class PillItemSource
     /// <c>null</c>. Dictionary lookups can't use a null key directly, and
     /// using the same sentinel for every null lets all "ungrouped" rows
     /// share one bucket. Equality is reference-based and the instance is
-    /// shared, so all PillGroupViewModel lookups for null keys hit the
+    /// shared, so all MultiSelectGroupViewModel lookups for null keys hit the
     /// same dictionary entry.
     /// </summary>
     internal sealed class NullGroupSentinel
