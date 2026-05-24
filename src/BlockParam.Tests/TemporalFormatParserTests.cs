@@ -26,9 +26,9 @@ public class TemporalFormatParserTests
     [InlineData("LTime_Of_Day", TemporalDataType.LTimeOfDay)]
     [InlineData("LTimeOfDay", TemporalDataType.LTimeOfDay)]
     [InlineData("LTod", TemporalDataType.LTimeOfDay)]
-    [InlineData("Date_And_Time", TemporalDataType.DateTime)]
-    [InlineData("DateTime", TemporalDataType.DateTime)]
-    [InlineData("DT", TemporalDataType.DateTime)]
+    [InlineData("Date_And_Time", TemporalDataType.DateAndTime)]
+    [InlineData("DateTime", TemporalDataType.DateAndTime)]
+    [InlineData("DT", TemporalDataType.DateAndTime)]
     [InlineData("LDate_And_Time", TemporalDataType.LDateTime)]
     [InlineData("LDateTime", TemporalDataType.LDateTime)]
     [InlineData("LDT", TemporalDataType.LDateTime)]
@@ -58,6 +58,9 @@ public class TemporalFormatParserTests
     [InlineData("T#2h30m", 2 * 3_600_000.0 + 30 * 60_000.0)]
     [InlineData("T#1d2h3m4s5ms", 86_400_000.0 + 2 * 3_600_000.0 + 3 * 60_000.0 + 4_000.0 + 5.0)]
     [InlineData("T#-500ms", -500.0)]
+    [InlineData("T#0s", 0.0)]                  // zero-edge
+    [InlineData("T#1d", 86_400_000.0)]         // isolates the day multiplier
+    [InlineData("T#1ns", 0.000_001)]           // smallest sub-ms unit
     public void TryParse_Time_AcceptedForms(string literal, double expectedMs)
     {
         TemporalFormatParser.TryParse(literal, TemporalDataType.Time, out var v).Should().BeTrue();
@@ -206,16 +209,16 @@ public class TemporalFormatParserTests
     [Fact]
     public void TryParse_DateTime_AcceptedForms()
     {
-        TemporalFormatParser.TryParse("DT#2024-01-15-12:30:00", TemporalDataType.DateTime, out var v).Should().BeTrue();
+        TemporalFormatParser.TryParse("DT#2024-01-15-12:30:00", TemporalDataType.DateAndTime, out var v).Should().BeTrue();
         v.NumericValue.Should().BeGreaterThan(0);
-        v.Kind.Should().Be(TemporalDataType.DateTime);
+        v.Kind.Should().Be(TemporalDataType.DateAndTime);
     }
 
     [Fact]
     public void TryParse_DateTime_RangeEdge_HourBoundary()
     {
-        TemporalFormatParser.TryParse("DT#2024-01-15-23:59:59", TemporalDataType.DateTime, out _).Should().BeTrue();
-        TemporalFormatParser.TryParse("DT#2024-01-15-24:00:00", TemporalDataType.DateTime, out _).Should().BeFalse();
+        TemporalFormatParser.TryParse("DT#2024-01-15-23:59:59", TemporalDataType.DateAndTime, out _).Should().BeTrue();
+        TemporalFormatParser.TryParse("DT#2024-01-15-24:00:00", TemporalDataType.DateAndTime, out _).Should().BeFalse();
     }
 
     [Theory]
@@ -224,7 +227,7 @@ public class TemporalFormatParserTests
     [InlineData("DT#nope")]
     public void TryParse_DateTime_RejectsMalformed(string literal)
     {
-        TemporalFormatParser.TryParse(literal, TemporalDataType.DateTime, out _).Should().BeFalse();
+        TemporalFormatParser.TryParse(literal, TemporalDataType.DateAndTime, out _).Should().BeFalse();
     }
 
     // --- LDateTime ---

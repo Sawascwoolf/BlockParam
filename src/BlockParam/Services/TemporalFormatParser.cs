@@ -18,7 +18,7 @@ public enum TemporalDataType
     LDate,
     TimeOfDay,
     LTimeOfDay,
-    DateTime,
+    DateAndTime,
     LDateTime,
 }
 
@@ -88,9 +88,9 @@ public static class TemporalFormatParser
             ["LTime_Of_Day"] = TemporalDataType.LTimeOfDay,
             ["LTimeOfDay"] = TemporalDataType.LTimeOfDay,
             ["LTod"] = TemporalDataType.LTimeOfDay,
-            ["Date_And_Time"] = TemporalDataType.DateTime,
-            ["DateTime"] = TemporalDataType.DateTime,
-            ["DT"] = TemporalDataType.DateTime,
+            ["Date_And_Time"] = TemporalDataType.DateAndTime,
+            ["DateTime"] = TemporalDataType.DateAndTime,
+            ["DT"] = TemporalDataType.DateAndTime,
             ["LDate_And_Time"] = TemporalDataType.LDateTime,
             ["LDateTime"] = TemporalDataType.LDateTime,
             ["LDT"] = TemporalDataType.LDateTime,
@@ -167,7 +167,7 @@ public static class TemporalFormatParser
                 }
                 return false;
 
-            case TemporalDataType.DateTime:
+            case TemporalDataType.DateAndTime:
                 if (TryParseDateTimeLiteral(v, "DT#", out var dt))
                 {
                     parsed = new TemporalValue(expected, dt);
@@ -190,29 +190,26 @@ public static class TemporalFormatParser
 
     /// <summary>Body of a T# / LT# / S5T# literal (the part after the prefix).</summary>
     public static bool IsValidTimeBody(string body)
-        => body != null && body.Length > 0
+        => body.Length > 0
            && body.Replace("-", "").Length > 0
            && TimeComponentsRegex.IsMatch(body);
 
     /// <summary>Body of a D# literal (<c>YYYY-MM-DD</c>).</summary>
-    public static bool IsValidDateBody(string body)
-        => body != null && DateRegex.IsMatch(body);
+    public static bool IsValidDateBody(string body) => DateRegex.IsMatch(body);
 
     /// <summary>Body of a TOD# literal (<c>HH:MM:SS</c>, no fractional seconds).</summary>
-    public static bool IsValidTimeOfDayBody(string body)
-        => body != null && TimeOfDayRegex.IsMatch(body);
+    public static bool IsValidTimeOfDayBody(string body) => TimeOfDayRegex.IsMatch(body);
 
     /// <summary>Body of an LTOD# literal — accepts the TOD# form too (fractional seconds optional).</summary>
     public static bool IsValidLTimeOfDayBody(string body)
-        => body != null && (LTimeOfDayRegex.IsMatch(body) || TimeOfDayRegex.IsMatch(body));
+        => LTimeOfDayRegex.IsMatch(body) || TimeOfDayRegex.IsMatch(body);
 
     /// <summary>Body of a DT# literal (<c>YYYY-MM-DD-HH:MM:SS</c>).</summary>
-    public static bool IsValidDateTimeBody(string body)
-        => body != null && DateTimeRegex.IsMatch(body);
+    public static bool IsValidDateTimeBody(string body) => DateTimeRegex.IsMatch(body);
 
     /// <summary>Body of an LDT# literal — accepts the DT# form too (fractional seconds optional).</summary>
     public static bool IsValidLDateTimeBody(string body)
-        => body != null && (LDateTimeRegex.IsMatch(body) || DateTimeRegex.IsMatch(body));
+        => LDateTimeRegex.IsMatch(body) || DateTimeRegex.IsMatch(body);
 
     // --- Internal numeric parsers ---
 
