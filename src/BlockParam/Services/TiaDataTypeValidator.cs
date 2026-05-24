@@ -1,5 +1,4 @@
 using System.Globalization;
-using System.Text.RegularExpressions;
 using BlockParam.Localization;
 
 namespace BlockParam.Services;
@@ -55,29 +54,6 @@ public static class TiaDataTypeValidator
             ["LDT"] = v => ValidateLDateTime(v, "LDT#", "LDT"),
         };
 
-    // Regex for time components: optional negative, then one or more groups of digits+unit
-    private static readonly Regex TimeComponentsRegex = new(
-        @"^-?(\d+d)?(\d+h)?(\d+m(?!s))?(\d+s)?(\d+ms)?(\d+us)?(\d+ns)?$",
-        RegexOptions.Compiled | RegexOptions.IgnoreCase);
-
-    // Regex for date: YYYY-MM-DD
-    private static readonly Regex DateRegex = new(
-        @"^\d{4}-\d{2}-\d{2}$", RegexOptions.Compiled);
-
-    // Regex for time of day: HH:MM:SS (optional .mmm fractional)
-    private static readonly Regex TimeOfDayRegex = new(
-        @"^\d{1,2}:\d{2}:\d{2}$", RegexOptions.Compiled);
-
-    private static readonly Regex LTimeOfDayRegex = new(
-        @"^\d{1,2}:\d{2}:\d{2}\.\d{1,9}$", RegexOptions.Compiled);
-
-    // Regex for datetime: YYYY-MM-DD-HH:MM:SS
-    private static readonly Regex DateTimeRegex = new(
-        @"^\d{4}-\d{2}-\d{2}-\d{1,2}:\d{2}:\d{2}$", RegexOptions.Compiled);
-
-    private static readonly Regex LDateTimeRegex = new(
-        @"^\d{4}-\d{2}-\d{2}-\d{1,2}:\d{2}:\d{2}\.\d{1,9}$", RegexOptions.Compiled);
-
     /// <summary>
     /// Validates a value against the TIA literal format for the given data type.
     /// Returns null if valid, or an error message with format example if invalid.
@@ -109,9 +85,16 @@ public static class TiaDataTypeValidator
 
         var key = datatype?.Trim('"') ?? "";
 
-        // Temporal types: parse to milliseconds or ticks
-        if (TemporalTypes.Contains(key))
-            return TryParseTemporalValue(value, key, out result);
+        // Temporal types: delegate to the shared parser (#171)
+        if (TemporalFormatParser.TryResolveType(key, out var temporalType))
+        {
+            if (TemporalFormatParser.TryParse(value, temporalType, out var temporal))
+            {
+                result = temporal.NumericValue;
+                return true;
+            }
+            return false;
+        }
 
         // Try base-prefixed parsing first (16#, 8#, 2#)
         if (TryParseBasePrefixed(value, out var prefixedValue))
@@ -133,16 +116,6 @@ public static class TiaDataTypeValidator
         "Real", "LReal"
     };
 
-    private static readonly HashSet<string> TemporalTypes = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "Time", "LTime", "S5Time",
-        "Date", "LDate",
-        "Time_Of_Day", "TimeOfDay", "Tod",
-        "LTime_Of_Day", "LTimeOfDay", "LTod",
-        "Date_And_Time", "DateTime", "DT",
-        "LDate_And_Time", "LDateTime", "LDT"
-    };
-
     /// <summary>
     /// Returns whether the given data type supports Min/Max constraints.
     /// Includes numeric types and temporal types (Time, Date, etc.).
@@ -152,7 +125,7 @@ public static class TiaDataTypeValidator
     {
         if (string.IsNullOrEmpty(datatype)) return true;
         var key = datatype!.Trim('"');
-        return NumericTypes.Contains(key) || TemporalTypes.Contains(key);
+        return NumericTypes.Contains(key) || TemporalFormatParser.IsTemporalType(key);
     }
 
     /// <summary>
@@ -205,156 +178,6 @@ public static class TiaDataTypeValidator
             }
         }
 
-        return false;
-    }
-
-    // --- Temporal parsing for Min/Max ---
-
-    /// <summary>
-    /// Routes temporal value parsing to the correct method based on type.
-    /// All temporal types are normalized to milliseconds for comparison.
-    /// </summary>
-    private static bool TryParseTemporalValue(string value, string typeKey, out double result)
-    {
-        result = 0;
-        var v = value.Trim();
-
-        // Time / LTime / S5Time → parse T#/LT#/S5T# to milliseconds
-        if (typeKey.Equals("Time", StringComparison.OrdinalIgnoreCase)
-            || typeKey.Equals("S5Time", StringComparison.OrdinalIgnoreCase))
-            return TryParseTimeLiteral(v, "T#", out result)
-                || TryParseTimeLiteral(v, "S5T#", out result);
-
-        if (typeKey.Equals("LTime", StringComparison.OrdinalIgnoreCase))
-            return TryParseTimeLiteral(v, "LT#", out result);
-
-        // Date / LDate → parse D#YYYY-MM-DD to ticks
-        if (typeKey.Equals("Date", StringComparison.OrdinalIgnoreCase)
-            || typeKey.Equals("LDate", StringComparison.OrdinalIgnoreCase))
-            return TryParseDateLiteral(v, "D#", out result);
-
-        // TimeOfDay variants → parse TOD#HH:MM:SS to milliseconds
-        if (typeKey.Equals("Time_Of_Day", StringComparison.OrdinalIgnoreCase)
-            || typeKey.Equals("TimeOfDay", StringComparison.OrdinalIgnoreCase)
-            || typeKey.Equals("Tod", StringComparison.OrdinalIgnoreCase))
-            return TryParseTimeOfDayLiteral(v, "TOD#", out result);
-
-        if (typeKey.Equals("LTime_Of_Day", StringComparison.OrdinalIgnoreCase)
-            || typeKey.Equals("LTimeOfDay", StringComparison.OrdinalIgnoreCase)
-            || typeKey.Equals("LTod", StringComparison.OrdinalIgnoreCase))
-            return TryParseTimeOfDayLiteral(v, "LTOD#", out result);
-
-        // DateTime variants → parse DT#/LDT# to ticks
-        if (typeKey.Equals("Date_And_Time", StringComparison.OrdinalIgnoreCase)
-            || typeKey.Equals("DateTime", StringComparison.OrdinalIgnoreCase)
-            || typeKey.Equals("DT", StringComparison.OrdinalIgnoreCase))
-            return TryParseDateTimeLiteral(v, "DT#", out result);
-
-        if (typeKey.Equals("LDate_And_Time", StringComparison.OrdinalIgnoreCase)
-            || typeKey.Equals("LDateTime", StringComparison.OrdinalIgnoreCase)
-            || typeKey.Equals("LDT", StringComparison.OrdinalIgnoreCase))
-            return TryParseDateTimeLiteral(v, "LDT#", out result);
-
-        return false;
-    }
-
-    /// <summary>
-    /// Parses T#2h30m15s500ms into total milliseconds.
-    /// Supports components: d, h, m, s, ms, us, ns. Optional leading minus.
-    /// </summary>
-    private static bool TryParseTimeLiteral(string value, string prefix, out double ms)
-    {
-        ms = 0;
-        if (!value.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
-            return false;
-
-        var body = value.Substring(prefix.Length);
-        var match = TimeComponentsRegex.Match(body);
-        if (!match.Success || body.Length == 0 || body.Replace("-", "").Length == 0)
-            return false;
-
-        bool negative = body.StartsWith("-");
-        double total = 0;
-
-        if (match.Groups[1].Success) total += ParseDigits(match.Groups[1].Value, 'd') * 86_400_000.0;
-        if (match.Groups[2].Success) total += ParseDigits(match.Groups[2].Value, 'h') * 3_600_000.0;
-        if (match.Groups[3].Success) total += ParseDigits(match.Groups[3].Value, 'm') * 60_000.0;
-        if (match.Groups[4].Success) total += ParseDigits(match.Groups[4].Value, 's') * 1_000.0;
-        if (match.Groups[5].Success) total += ParseDigitsMultiSuffix(match.Groups[5].Value, "ms");
-        if (match.Groups[6].Success) total += ParseDigitsMultiSuffix(match.Groups[6].Value, "us") * 0.001;
-        if (match.Groups[7].Success) total += ParseDigitsMultiSuffix(match.Groups[7].Value, "ns") * 0.000001;
-
-        ms = negative ? -total : total;
-        return true;
-    }
-
-    /// <summary>Extracts digits from a time component like "30m" → 30.</summary>
-    private static long ParseDigits(string component, char suffix)
-    {
-        var digits = component.Substring(0, component.Length - 1);
-        return long.TryParse(digits, NumberStyles.None, CultureInfo.InvariantCulture, out var val) ? val : 0;
-    }
-
-    /// <summary>Extracts digits from a multi-char suffix component like "500ms" → 500.</summary>
-    private static long ParseDigitsMultiSuffix(string component, string suffix)
-    {
-        var digits = component.Substring(0, component.Length - suffix.Length);
-        return long.TryParse(digits, NumberStyles.None, CultureInfo.InvariantCulture, out var val) ? val : 0;
-    }
-
-    /// <summary>Parses D#2024-01-15 into ticks for comparison.</summary>
-    private static bool TryParseDateLiteral(string value, string prefix, out double result)
-    {
-        result = 0;
-        if (!value.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
-            return false;
-
-        var body = value.Substring(prefix.Length);
-        if (System.DateTime.TryParseExact(body, "yyyy-MM-dd",
-            CultureInfo.InvariantCulture, DateTimeStyles.None, out var date))
-        {
-            result = date.Ticks;
-            return true;
-        }
-        return false;
-    }
-
-    /// <summary>Parses TOD#12:30:00 or LTOD#12:30:00.123 into milliseconds.</summary>
-    private static bool TryParseTimeOfDayLiteral(string value, string prefix, out double result)
-    {
-        result = 0;
-        if (!value.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
-            return false;
-
-        var body = value.Substring(prefix.Length);
-        if (TimeSpan.TryParseExact(body, new[] { @"h\:mm\:ss", @"hh\:mm\:ss",
-            @"h\:mm\:ss\.FFFFFFF", @"hh\:mm\:ss\.FFFFFFF" },
-            CultureInfo.InvariantCulture, out var tod))
-        {
-            result = tod.TotalMilliseconds;
-            return true;
-        }
-        return false;
-    }
-
-    /// <summary>Parses DT#2024-01-15-12:30:00 or LDT# with fractional seconds into ticks.</summary>
-    private static bool TryParseDateTimeLiteral(string value, string prefix, out double result)
-    {
-        result = 0;
-        if (!value.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
-            return false;
-
-        var body = value.Substring(prefix.Length);
-        // TIA uses dash between date and time: 2024-01-15-12:30:00
-        // Try multiple formats to cover with/without fractional seconds
-        if (System.DateTime.TryParseExact(body,
-            new[] { "yyyy-MM-dd-H:mm:ss", "yyyy-MM-dd-HH:mm:ss",
-                    "yyyy-MM-dd-H:mm:ss.FFFFFFF", "yyyy-MM-dd-HH:mm:ss.FFFFFFF" },
-            CultureInfo.InvariantCulture, DateTimeStyles.None, out var dt))
-        {
-            result = dt.Ticks;
-            return true;
-        }
         return false;
     }
 
@@ -459,8 +282,7 @@ public static class TiaDataTypeValidator
         if (v.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
         {
             var body = v.Substring(prefix.Length);
-            if (TimeComponentsRegex.IsMatch(body) && body.Length > 0
-                && body.Replace("-", "").Length > 0)
+            if (TemporalFormatParser.IsValidTimeBody(body))
                 return null;
         }
 
@@ -474,7 +296,7 @@ public static class TiaDataTypeValidator
         if (v.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
         {
             var body = v.Substring(prefix.Length);
-            if (DateRegex.IsMatch(body))
+            if (TemporalFormatParser.IsValidDateBody(body))
                 return null;
         }
 
@@ -488,7 +310,7 @@ public static class TiaDataTypeValidator
         if (v.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
         {
             var body = v.Substring(prefix.Length);
-            if (TimeOfDayRegex.IsMatch(body))
+            if (TemporalFormatParser.IsValidTimeOfDayBody(body))
                 return null;
         }
 
@@ -502,8 +324,7 @@ public static class TiaDataTypeValidator
         if (v.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
         {
             var body = v.Substring(prefix.Length);
-            // Accept both with and without fractional seconds
-            if (LTimeOfDayRegex.IsMatch(body) || TimeOfDayRegex.IsMatch(body))
+            if (TemporalFormatParser.IsValidLTimeOfDayBody(body))
                 return null;
         }
 
@@ -517,7 +338,7 @@ public static class TiaDataTypeValidator
         if (v.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
         {
             var body = v.Substring(prefix.Length);
-            if (DateTimeRegex.IsMatch(body))
+            if (TemporalFormatParser.IsValidDateTimeBody(body))
                 return null;
         }
 
@@ -531,18 +352,13 @@ public static class TiaDataTypeValidator
         if (v.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
         {
             var body = v.Substring(prefix.Length);
-            // Accept both with and without fractional seconds
-            if (LDateTimeRegex.IsMatch(body) || DateTimeRegex.IsMatch(body))
+            if (TemporalFormatParser.IsValidLDateTimeBody(body))
                 return null;
         }
 
         return Res.Get("TypeValidation_DateTime");
     }
 
-    /// <summary>
-    /// Determines if a value is likely a constant name (starts with a letter,
-    /// no known literal prefix). Constants are passed through without validation.
-    /// </summary>
     /// <summary>
     /// Checks if a value is a known constant name from loaded tag tables.
     /// Known constants bypass format validation since they resolve at TIA runtime.
