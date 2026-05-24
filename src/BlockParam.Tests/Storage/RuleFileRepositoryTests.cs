@@ -1,3 +1,4 @@
+using System.Security;
 using BlockParam.Services;
 using BlockParam.Services.Storage;
 using FluentAssertions;
@@ -102,5 +103,50 @@ public class RuleFileRepositoryTests
 
         var repo = new RuleFileRepository(fs);
         repo.ReadAllText(file.FullPath).Should().Be("{\"version\":\"1.0\"}");
+    }
+
+    [Fact]
+    public void ListJsonFiles_swallows_SecurityException_and_returns_empty()
+    {
+        // Pins the partial-trust behavior the old ConfigEditorViewModel.ClaimsFor
+        // relied on (bare catch). Under TIA's Add-In Loader sandbox,
+        // EnumerateFiles can throw SecurityException; ListJsonFiles must seed
+        // an empty result so SaveAll falls through to its own clearer error
+        // path instead of crashing the dispatcher.
+        var fs = new ThrowingStorage(new SecurityException("denied by sandbox"));
+        var repo = new RuleFileRepository(fs);
+
+        repo.ListJsonFiles(RulesDir.FullPath).Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// Minimal IBlockParamStorage stub that pretends a directory exists but
+    /// throws on enumeration. The full InMemoryBlockParamStorage doesn't
+    /// surface SecurityException so we wrap it instead.
+    /// </summary>
+    private sealed class ThrowingStorage : IBlockParamStorage
+    {
+        private readonly Exception _toThrow;
+        public ThrowingStorage(Exception toThrow) { _toThrow = toThrow; }
+
+        public bool DirectoryExists(StoragePath path) => true;
+        public IEnumerable<StoragePath> EnumerateFiles(StoragePath directory, string pattern = "*", bool recursive = false)
+            => throw _toThrow;
+
+        // Unused — defaulted to throw so any accidental call surfaces loudly.
+        public bool FileExists(StoragePath path) => throw new NotImplementedException();
+        public string ReadAllText(StoragePath path) => throw new NotImplementedException();
+        public byte[] ReadAllBytes(StoragePath path) => throw new NotImplementedException();
+        public System.IO.Stream OpenRead(StoragePath path) => throw new NotImplementedException();
+        public void WriteAllText(StoragePath path, string contents) => throw new NotImplementedException();
+        public void WriteAllBytes(StoragePath path, byte[] contents) => throw new NotImplementedException();
+        public void AppendAllText(StoragePath path, string contents) => throw new NotImplementedException();
+        public void EnsureDirectory(StoragePath path) => throw new NotImplementedException();
+        public void DeleteFile(StoragePath path) => throw new NotImplementedException();
+        public void DeleteDirectory(StoragePath path) => throw new NotImplementedException();
+        public DateTime GetLastWriteTime(StoragePath path) => throw new NotImplementedException();
+        public IEnumerable<StoragePath> EnumerateDirectories(StoragePath directory, string pattern = "*", bool recursive = false) => throw new NotImplementedException();
+        public bool HasAnyEntries(StoragePath directory) => throw new NotImplementedException();
+        public void Replace(StoragePath source, StoragePath destination) => throw new NotImplementedException();
     }
 }

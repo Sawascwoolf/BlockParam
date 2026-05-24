@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using BlockParam.Diagnostics;
 
 namespace BlockParam.Services.Storage;
 
@@ -120,12 +121,36 @@ public sealed class FileSystemBlockParamStorage : IBlockParamStorage
                 File.Move(source.FullPath, destination.FullPath);
             }
         }
-        catch (IOException)
+        catch (IOException ex)
         {
             // ReplaceFile fails across volumes and on non-NTFS filesystems.
-            // Fall back to overwrite-copy — non-atomic but FS-agnostic.
+            // Fall back to overwrite-copy — non-atomic but FS-agnostic. Log
+            // the fallback once per write: the pre-#85-followup LocalUsageTracker
+            // emitted this from its own catch so support could grep the per-day
+            // runtime log for "torn write resets counter" tickets and confirm
+            // a non-NTFS / network-redirected %APPDATA% is the cause. Logging
+            // belongs here now that the catch lives in the storage layer.
+            Log.Warning(ex,
+                "FileSystemBlockParamStorage.Replace fell back to overwrite-copy " +
+                "(cross-volume or non-NTFS): {Source} → {Destination}",
+                source.FullPath, destination.FullPath);
             File.Copy(source.FullPath, destination.FullPath, overwrite: true);
-            try { File.Delete(source.FullPath); } catch (IOException) { /* best-effort */ }
+            // UnauthorizedAccessException alongside IOException: AV holding an
+            // open handle on the temp file can fail the delete while the copy
+            // already succeeded. Leaking a .tmp is the price; surfacing the
+            // exception to a caller that has no recovery path would crash the
+            // user-visible flow (counter save → Apply pipeline). Logged so the
+            // leak is at least visible.
+            try
+            {
+                File.Delete(source.FullPath);
+            }
+            catch (Exception delEx) when (delEx is IOException or UnauthorizedAccessException)
+            {
+                Log.Warning(delEx,
+                    "FileSystemBlockParamStorage.Replace could not remove source temp {Source}; orphaned",
+                    source.FullPath);
+            }
         }
     }
 

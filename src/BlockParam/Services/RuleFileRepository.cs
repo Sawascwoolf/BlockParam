@@ -1,4 +1,5 @@
 using System.IO;
+using System.Security;
 using BlockParam.Diagnostics;
 using BlockParam.Services.Storage;
 
@@ -62,7 +63,15 @@ public class RuleFileRepository
             Array.Sort(files, StringComparer.OrdinalIgnoreCase);
             return files;
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        // SecurityException is intentional alongside IO/UnauthorizedAccess:
+        // under TIA's partial-trust Add-In Loader sandbox, EnumerateFiles can
+        // throw SecurityException on paths the host process denies — the old
+        // ConfigEditorViewModel.ClaimsFor used a bare catch precisely so the
+        // save flow could fall through with an empty claim seed and let
+        // SaveRuleFile surface a clearer error later. PEVerify + the
+        // PartialTrustSandboxTests defend against the IL pattern; this catch
+        // defends against the runtime exception path that pattern produces.
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or SecurityException)
         {
             Log.Warning(ex, "Cannot access rules directory: {Path}", directoryPath);
             return Array.Empty<string>();

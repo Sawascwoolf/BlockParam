@@ -155,8 +155,22 @@ public sealed class InMemoryBlockParamStorage : IBlockParamStorage
         if (!_files.TryGetValue(source.FullPath, out var bytes))
             throw new FileNotFoundException($"In-memory file not found: {source.FullPath}", source.FullPath);
         EnsureParent(destination);
-        _files[destination.FullPath] = bytes;
-        _lastWriteTimes[destination.FullPath] = Clock();
+        // Defensive copy of the byte[]: WriteAllBytes and ReadAllBytes both
+        // clone on cross-boundary access to keep the in-memory store immune
+        // to caller mutation. Aliasing source's array into the destination
+        // key would silently violate that invariant — and the bug would only
+        // surface against the real FS impl where File.Replace gives the
+        // destination its own bytes.
+        _files[destination.FullPath] = (byte[])bytes.Clone();
+        // Carry the source's last-write time across to the destination. The
+        // FS implementation's File.Replace / File.Move preserves the source's
+        // mtime; stamping Clock() here would make age-based sweepers
+        // (TempCacheCleanup style) green against the fake and red against
+        // real disk.
+        _lastWriteTimes[destination.FullPath] =
+            _lastWriteTimes.TryGetValue(source.FullPath, out var sourceMtime)
+                ? sourceMtime
+                : Clock();
         _files.Remove(source.FullPath);
         _lastWriteTimes.Remove(source.FullPath);
     }
