@@ -132,7 +132,7 @@
                Opened="OnPopupOpened">
             <!--
                 Popup chrome (rounded white card + drop shadow) lives here
-                on the pill side so PillDropdownList stays chrome-agnostic —
+                on the pill side so MultiSelectDropdown stays chrome-agnostic —
                 DataGrid cells, fly-out panels, or other hosts can wrap the
                 dropdown in their own container. Width binding stays on the
                 outer Border so the dropdown's intrinsic sizing kicks in
@@ -151,7 +151,7 @@
                 <!-- DataContext inherits from the popup's content (which the
                      code-behind sets to _internalState); the dropdown reads
                      the same state the trigger does. -->
-                <local:PillDropdownList x:Name="Dropdown"/>
+                <local:MultiSelectDropdown x:Name="Dropdown"/>
             </Border>
         </Popup>
     </Grid>

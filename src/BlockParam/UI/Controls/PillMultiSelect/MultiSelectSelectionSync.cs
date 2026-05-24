@@ -11,19 +11,19 @@ namespace BlockParam.UI.Controls.PillMultiSelect;
 /// Keeps three selection edges consistent for one <see cref="PillMultiSelect"/>
 /// instance:
 /// <list type="bullet">
-///   <item><b>Edge A</b> — row <see cref="PillRowViewModel.IsSelected"/> ↔
+///   <item><b>Edge A</b> — row <see cref="MultiSelectRowViewModel.IsSelected"/> ↔
 ///     <see cref="PillMultiSelect.SelectedItems"/> collection. Toggling a
 ///     checkbox adds/removes the source from the host's collection; adding/
 ///     removing from the collection flips the row's checkbox. Indeterminate
 ///     (<c>null</c>) is treated as "not in SelectedItems" — the host's
 ///     collection always represents *fully-checked* source items.</item>
-///   <item><b>Edge B</b> — row <see cref="PillRowViewModel.IsSelected"/> ↔
+///   <item><b>Edge B</b> — row <see cref="MultiSelectRowViewModel.IsSelected"/> ↔
 ///     source item's <c>IsSelectedMemberPath</c> property. Supports both
 ///     <c>bool</c> and <c>bool?</c> source properties; null writes through
 ///     when the source declares a <c>bool?</c>, and reads back faithfully.
 ///     An external <see cref="INotifyPropertyChanged"/> raise on the bound
 ///     property flips the row back.</item>
-///   <item><b>Edge C</b> — when <see cref="PillItemSource"/> adds or removes
+///   <item><b>Edge C</b> — when <see cref="MultiSelectItemSource"/> adds or removes
 ///     rows (ItemsSource collection mutation), new rows are reconciled against
 ///     both <see cref="PillMultiSelect.SelectedItems"/> membership and the
 ///     IsSelectedMemberPath value. Removed rows are unsubscribed.</item>
@@ -59,9 +59,9 @@ namespace BlockParam.UI.Controls.PillMultiSelect;
 /// instances, otherwise the checkbox-to-host edge silently breaks.
 /// </para>
 /// </remarks>
-public sealed class PillSelectionSync
+public sealed class MultiSelectSelectionSync
 {
-    private readonly PillMultiSelectInternalState _state;
+    private readonly MultiSelectInternalState _state;
     private readonly MemberPathResolver _resolver;
 
     // The host's SelectedItems collection (may change via DP swap).
@@ -80,15 +80,15 @@ public sealed class PillSelectionSync
     // converts this into a routed RoutedEvent.
     internal event EventHandler? SelectionChanged;
 
-    internal PillSelectionSync(
-        PillMultiSelectInternalState state,
-        PillItemSource itemSource,
+    internal MultiSelectSelectionSync(
+        MultiSelectInternalState state,
+        MultiSelectItemSource itemSource,
         MemberPathResolver resolver)
     {
         _state = state;
         _resolver = resolver;
 
-        // Subscribe to row lifecycle events from PillItemSource so we can
+        // Subscribe to row lifecycle events from MultiSelectItemSource so we can
         // reconcile new rows and unsubscribe from removed ones (Edge C).
         itemSource.RowAdded += OnRowAdded;
         itemSource.RowRemoved += OnRowRemoved;
@@ -106,7 +106,7 @@ public sealed class PillSelectionSync
     /// <summary>
     /// Called when the <c>SelectedItems</c> DP changes on the UserControl.
     /// Unsubscribes from the old collection, subscribes to the new one, and
-    /// reconciles row <see cref="PillRowViewModel.IsSelected"/> flags.
+    /// reconciles row <see cref="MultiSelectRowViewModel.IsSelected"/> flags.
     /// </summary>
     internal void SetSelectedItems(IList? newValue)
     {
@@ -148,7 +148,7 @@ public sealed class PillSelectionSync
 
     // ── Edge C — row lifecycle ───────────────────────────────────────────────
 
-    private void OnRowAdded(PillRowViewModel row)
+    private void OnRowAdded(MultiSelectRowViewModel row)
     {
         // Subscribe to the new row's IsSelected so Edge A/B propagation fires.
         row.PropertyChanged += OnRowPropertyChanged;
@@ -185,7 +185,7 @@ public sealed class PillSelectionSync
             SubscribeSourceInpc(row.Source);
     }
 
-    private void OnRowRemoved(PillRowViewModel row)
+    private void OnRowRemoved(MultiSelectRowViewModel row)
     {
         row.PropertyChanged -= OnRowPropertyChanged;
 
@@ -203,9 +203,9 @@ public sealed class PillSelectionSync
 
     private void OnRowPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (e.PropertyName != nameof(PillRowViewModel.IsSelected)) return;
+        if (e.PropertyName != nameof(MultiSelectRowViewModel.IsSelected)) return;
         if (_syncing) return;
-        if (sender is not PillRowViewModel row) return;
+        if (sender is not MultiSelectRowViewModel row) return;
 
         _syncing = true;
         _pendingSelectionChanged = true;
@@ -327,7 +327,7 @@ public sealed class PillSelectionSync
     // ── Reconcile helpers ────────────────────────────────────────────────────
 
     /// <summary>
-    /// Reads each existing row's <see cref="PillRowViewModel.IsSelected"/> from
+    /// Reads each existing row's <see cref="MultiSelectRowViewModel.IsSelected"/> from
     /// the current <see cref="_selectedItems"/> membership. Called when
     /// <c>SelectedItems</c> is swapped (Edge A initial sync).
     /// </summary>

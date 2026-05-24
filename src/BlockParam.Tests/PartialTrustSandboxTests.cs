@@ -97,8 +97,8 @@ public sealed class PartialTrustSandboxTests
     // #141 — partial-trust WPF binding regression
     //
     // The PillMultiSelect UserControl's content DataContext is a
-    // PillMultiSelectInternalState; rows bind to PillRowViewModel; groups bind
-    // to PillGroupViewModel. WPF's binding engine resolves `{Binding Member}`
+    // MultiSelectInternalState; rows bind to MultiSelectRowViewModel; groups bind
+    // to MultiSelectGroupViewModel. WPF's binding engine resolves `{Binding Member}`
     // by reflecting from PresentationFramework (a foreign assembly) over the
     // bound object. Under TIA Portal V20's partial-trust SandboxDomain that
     // reflection silently fails on non-public types — the trigger renders
@@ -131,17 +131,17 @@ public sealed class PartialTrustSandboxTests
             + "see #141. Keep this `public`; the type is still presentation "
             + "infrastructure, hosts use the PillMultiSelect UserControl's DPs.";
 
-        typeof(PillViewModelBase).IsPublic.Should().BeTrue(why);
-        typeof(PillMultiSelectInternalState).IsPublic.Should().BeTrue(why);
-        typeof(PillRowViewModel).IsPublic.Should().BeTrue(why);
-        typeof(PillGroupViewModel).IsPublic.Should().BeTrue(why);
+        typeof(MultiSelectViewModelBase).IsPublic.Should().BeTrue(why);
+        typeof(MultiSelectInternalState).IsPublic.Should().BeTrue(why);
+        typeof(MultiSelectRowViewModel).IsPublic.Should().BeTrue(why);
+        typeof(MultiSelectGroupViewModel).IsPublic.Should().BeTrue(why);
 
         // Converters referenced by `{Binding … Converter={StaticResource …}}`
         // and the ICommand implementation handed out through public command
         // properties — same partial-trust foreign-assembly reflection rule.
-        typeof(PillGroupHeaderVisibilityConverter).IsPublic.Should().BeTrue(why);
-        typeof(PillGroupExpandedVisibilityConverter).IsPublic.Should().BeTrue(why);
-        typeof(PillRelayCommand).IsPublic.Should().BeTrue(why);
+        typeof(MultiSelectGroupHeaderVisibilityConverter).IsPublic.Should().BeTrue(why);
+        typeof(MultiSelectGroupExpandedVisibilityConverter).IsPublic.Should().BeTrue(why);
+        typeof(MultiSelectRelayCommand).IsPublic.Should().BeTrue(why);
     }
 
     [Fact]
@@ -177,7 +177,7 @@ public sealed class PartialTrustSandboxTests
     public void Pill_internal_state_property_binds_through_wpf()
     {
         // Behavioural positive test (full trust): drive a real WPF {Binding}
-        // against a PillMultiSelectInternalState instance and verify the
+        // against a MultiSelectInternalState instance and verify the
         // bound DependencyProperty receives the source value. This proves
         // the surface that mattered for #141 — Label / IsOpen / HasSelection
         // / SelectedCount on the internal state — actually resolves through
@@ -191,14 +191,14 @@ public sealed class PartialTrustSandboxTests
         var pill = new PillMultiSelect();
         pill.Label = "Bound";
 
-        var source = (PillMultiSelectInternalState)((FrameworkElement)pill.Content).DataContext;
+        var source = (MultiSelectInternalState)((FrameworkElement)pill.Content).DataContext;
         source.IsOpen = true;
 
         var target = new BindingTarget();
         BindingOperations.SetBinding(target, BindingTarget.LabelValueProperty,
-            new Binding(nameof(PillMultiSelectInternalState.Label)) { Source = source, Mode = BindingMode.OneWay });
+            new Binding(nameof(MultiSelectInternalState.Label)) { Source = source, Mode = BindingMode.OneWay });
         BindingOperations.SetBinding(target, BindingTarget.OpenValueProperty,
-            new Binding(nameof(PillMultiSelectInternalState.IsOpen)) { Source = source, Mode = BindingMode.OneWay });
+            new Binding(nameof(MultiSelectInternalState.IsOpen)) { Source = source, Mode = BindingMode.OneWay });
 
         target.LabelValue.Should().Be("Bound", "Label binding must resolve via reflection on the public VM type");
         target.OpenValue.Should().Be(true, "IsOpen binding must resolve via reflection on the public VM type");
@@ -359,13 +359,13 @@ public sealed class PartialTrustWorker : MarshalByRefObject
 
             var checks = new[]
             {
-                "BlockParam.UI.Controls.PillMultiSelect.PillViewModelBase",
-                "BlockParam.UI.Controls.PillMultiSelect.PillMultiSelectInternalState",
-                "BlockParam.UI.Controls.PillMultiSelect.PillRowViewModel",
-                "BlockParam.UI.Controls.PillMultiSelect.PillGroupViewModel",
-                "BlockParam.UI.Controls.PillMultiSelect.PillGroupHeaderVisibilityConverter",
-                "BlockParam.UI.Controls.PillMultiSelect.PillGroupExpandedVisibilityConverter",
-                "BlockParam.UI.Controls.PillMultiSelect.PillRelayCommand",
+                "BlockParam.UI.Controls.PillMultiSelect.MultiSelectViewModelBase",
+                "BlockParam.UI.Controls.PillMultiSelect.MultiSelectInternalState",
+                "BlockParam.UI.Controls.PillMultiSelect.MultiSelectRowViewModel",
+                "BlockParam.UI.Controls.PillMultiSelect.MultiSelectGroupViewModel",
+                "BlockParam.UI.Controls.PillMultiSelect.MultiSelectGroupHeaderVisibilityConverter",
+                "BlockParam.UI.Controls.PillMultiSelect.MultiSelectGroupExpandedVisibilityConverter",
+                "BlockParam.UI.Controls.PillMultiSelect.MultiSelectRelayCommand",
             };
 
             foreach (var fullName in checks)

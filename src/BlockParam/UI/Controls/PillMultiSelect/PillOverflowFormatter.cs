@@ -16,7 +16,7 @@ namespace BlockParam.UI.Controls.PillMultiSelect;
 /// <remarks>
 /// The generic overload works on any source type <c>T</c> — code-only hosts
 /// can call it directly with their own domain objects. The UserControl uses
-/// it internally with <see cref="PillRowViewModel"/> rows via
+/// it internally with <see cref="MultiSelectRowViewModel"/> rows via
 /// <see cref="FormatRows"/>, which pre-binds the row-accessor lambdas so
 /// call sites in the code-behind remain concise.
 /// </remarks>
@@ -69,11 +69,11 @@ public static class PillOverflowFormatter
 
     /// <summary>
     /// Convenience shim used internally by the UserControl. Adapts
-    /// <see cref="PillRowViewModel"/> rows to the generic overload without
+    /// <see cref="MultiSelectRowViewModel"/> rows to the generic overload without
     /// forcing call sites to spell out the lambdas every time.
     /// </summary>
     internal static string FormatRows(
-        IReadOnlyList<PillRowViewModel> selected,
+        IReadOnlyList<MultiSelectRowViewModel> selected,
         PillOverflowOptions options)
         => Format(selected, r => r.Display, r => r.Abbreviation, options);
 

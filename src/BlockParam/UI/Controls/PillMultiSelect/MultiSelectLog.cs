@@ -19,7 +19,7 @@ namespace BlockParam.UI.Controls.PillMultiSelect;
 /// Implementation is partial-trust safe — no readonly-struct field access,
 /// no unverifiable IL.
 /// </remarks>
-public static class PillLog
+public static class MultiSelectLog
 {
     private static readonly Regex PlaceholderRegex = new(@"\{[^{}]+\}", RegexOptions.Compiled);
 

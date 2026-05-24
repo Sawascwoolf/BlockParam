@@ -471,7 +471,7 @@ internal static class PillRowCapture
         // The capture bypasses each pill's async LoadCommand entirely (so
         // popup-open scenes render synchronously). Pre-populate AvailableDbs
         // with the full per-PLC list, then re-point SelectedDbs at the same
-        // instances — PillSelectionSync uses reference equality, so the
+        // instances — MultiSelectSelectionSync uses reference equality, so the
         // selected items have to be the very objects backing the rows or
         // the trigger renders an empty count.
         foreach (var vm in pillVms)

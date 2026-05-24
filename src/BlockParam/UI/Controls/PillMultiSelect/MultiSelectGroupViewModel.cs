@@ -28,21 +28,21 @@ namespace BlockParam.UI.Controls.PillMultiSelect;
 /// row passing the filter and restores the prior value when search clears.
 /// </para>
 /// </remarks>
-// `public`, not `internal`: see PillViewModelBase comment / #141. The group
+// `public`, not `internal`: see MultiSelectViewModelBase comment / #141. The group
 // header template binds `{Binding Header}`, `{Binding IsSelected}`,
 // `{Binding IsExpanded}`, `{Binding SelectedCount}`, `{Binding TotalCount}`
 // against instances of this type — same partial-trust reflection failure
 // otherwise.
-public sealed class PillGroupViewModel : PillViewModelBase
+public sealed class MultiSelectGroupViewModel : MultiSelectViewModelBase
 {
-    private readonly List<PillRowViewModel> _children = new();
+    private readonly List<MultiSelectRowViewModel> _children = new();
     private bool _isExpanded = true;
     private bool? _isSelected = false;
     private string _header;
 
     // While propagating IsSelected to children (header → leaves), suppress the
     // aggregate-recompute callback from each child so we don't re-derive the
-    // header state mid-loop. Same shape as PillSelectionSync's _syncing guard.
+    // header state mid-loop. Same shape as MultiSelectSelectionSync's _syncing guard.
     private bool _propagatingToChildren;
 
     // While the internal state forces IsExpanded for an active search,
@@ -61,20 +61,20 @@ public sealed class PillGroupViewModel : PillViewModelBase
     // RestoreUserExpandedAfterSearch when the search ends.
     private bool _userOverrodeExpandedDuringSearch;
 
-    internal PillGroupViewModel(object key, string header)
+    internal MultiSelectGroupViewModel(object key, string header)
     {
         Key = key;
         _header = header;
 
-        ToggleExpandedCommand = new PillRelayCommand(() => IsExpanded = !IsExpanded);
+        ToggleExpandedCommand = new MultiSelectRelayCommand(() => IsExpanded = !IsExpanded);
     }
 
     /// <summary>
     /// The raw group-key value (e.g. the property value pulled from each
     /// source item via <c>GroupKeyMemberPath</c>). Used by
-    /// <see cref="PillItemSource"/> for the
-    /// <c>Dictionary&lt;key, PillGroupViewModel&gt;</c> lookup and by
-    /// <see cref="PillMultiSelectInternalState"/> to expose this VM as the
+    /// <see cref="MultiSelectItemSource"/> for the
+    /// <c>Dictionary&lt;key, MultiSelectGroupViewModel&gt;</c> lookup and by
+    /// <see cref="MultiSelectInternalState"/> to expose this VM as the
     /// <see cref="System.Windows.Data.CollectionViewGroup.Name"/> of the
     /// matching <see cref="System.Windows.Data.CollectionViewGroup"/>.
     /// </summary>
@@ -166,13 +166,13 @@ public sealed class PillGroupViewModel : PillViewModelBase
 
     /// <summary>
     /// Child rows owned by this group. The list reference is owned by this
-    /// VM — <see cref="PillItemSource"/> mutates it via <see cref="AddChild"/>
+    /// VM — <see cref="MultiSelectItemSource"/> mutates it via <see cref="AddChild"/>
     /// / <see cref="RemoveChild"/> so PropertyChanged subscriptions stay
     /// consistent.
     /// </summary>
-    public IReadOnlyList<PillRowViewModel> Children => _children;
+    public IReadOnlyList<MultiSelectRowViewModel> Children => _children;
 
-    internal void AddChild(PillRowViewModel child)
+    internal void AddChild(MultiSelectRowViewModel child)
     {
         _children.Add(child);
         child.OwningGroup = this;
@@ -180,7 +180,7 @@ public sealed class PillGroupViewModel : PillViewModelBase
         RecomputeFromChildren();
     }
 
-    internal bool RemoveChild(PillRowViewModel child)
+    internal bool RemoveChild(MultiSelectRowViewModel child)
     {
         if (!_children.Remove(child)) return false;
         child.PropertyChanged -= OnChildPropertyChanged;
@@ -193,13 +193,13 @@ public sealed class PillGroupViewModel : PillViewModelBase
     private void OnChildPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
         if (_propagatingToChildren) return;
-        if (e.PropertyName != nameof(PillRowViewModel.IsSelected)) return;
+        if (e.PropertyName != nameof(MultiSelectRowViewModel.IsSelected)) return;
         RecomputeFromChildren();
     }
 
     /// <summary>
     /// Re-derives <see cref="IsSelected"/> from the children's current
-    /// <see cref="PillRowViewModel.IsSelected"/> values:
+    /// <see cref="MultiSelectRowViewModel.IsSelected"/> values:
     /// <list type="bullet">
     ///   <item>All children <c>true</c> → header <c>true</c>.</item>
     ///   <item>All children <c>false</c> → header <c>false</c>.</item>

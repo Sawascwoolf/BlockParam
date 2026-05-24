@@ -219,7 +219,7 @@ internal static class PillMultiSelectCapture
     /// <summary>
     /// Grouped-popup scenes: open with mixed-selection tri-state headers,
     /// user-collapsed group, and search-forces-expanded-group. Exercises
-    /// the GroupKeyMemberPath / PillGroupViewModel rendering and the
+    /// the GroupKeyMemberPath / MultiSelectGroupViewModel rendering and the
     /// search-into-collapsed expansion policy.
     /// </summary>
     public static void RunGrouped(string outDir)
@@ -271,7 +271,7 @@ internal static class PillMultiSelectCapture
     private static CaptureScene BuildGroupedScene(
         string fileName,
         string[] selectedAbbrevs,
-        Action<PillMultiSelectInternalState> configure,
+        Action<MultiSelectInternalState> configure,
         string outDir)
     {
         PillMultiSelect? control = null;
@@ -576,7 +576,7 @@ internal static class PillMultiSelectCapture
     /// filtering the control's actual <c>ItemsSource</c> and assigning the
     /// matching items to the <see cref="PillMultiSelect.SelectedItems"/> DP.
     /// Reading from <c>ItemsSource</c> (not the static seed) is critical —
-    /// <see cref="PillSelectionSync"/> uses reference equality, so the
+    /// <see cref="MultiSelectSelectionSync"/> uses reference equality, so the
     /// SelectedItems entries must be the same object instances the rows
     /// wrap.
     /// </summary>

@@ -23,11 +23,11 @@ namespace BlockParam.UI.Controls.PillMultiSelect;
 /// </summary>
 public partial class PillMultiSelect : UserControl
 {
-    private readonly PillMultiSelectInternalState _internalState;
+    private readonly MultiSelectInternalState _internalState;
     private readonly MemberPathResolver _memberPathResolver;
-    private readonly PillItemSource _itemSource;
-    private readonly PillSelectionSync _selectionSync;
-    private readonly PillFormatterCoordinator _formatter;
+    private readonly MultiSelectItemSource _itemSource;
+    private readonly MultiSelectSelectionSync _selectionSync;
+    private readonly MultiSelectFormatter _formatter;
 
     // Guards the IsOpen DP ↔ _internalState.IsOpen two-way propagation
     // from cycling indefinitely.
@@ -37,11 +37,11 @@ public partial class PillMultiSelect : UserControl
     {
         InitializeComponent();
 
-        _internalState = new PillMultiSelectInternalState();
+        _internalState = new MultiSelectInternalState();
         _memberPathResolver = new MemberPathResolver();
-        _itemSource = new PillItemSource(_internalState, _memberPathResolver);
-        _selectionSync = new PillSelectionSync(_internalState, _itemSource, _memberPathResolver);
-        _formatter = new PillFormatterCoordinator(_internalState, _itemSource);
+        _itemSource = new MultiSelectItemSource(_internalState, _memberPathResolver);
+        _selectionSync = new MultiSelectSelectionSync(_internalState, _itemSource, _memberPathResolver);
+        _formatter = new MultiSelectFormatter(_internalState, _itemSource);
 
         _selectionSync.SelectionChanged += OnSyncSelectionChanged;
 
@@ -62,7 +62,7 @@ public partial class PillMultiSelect : UserControl
         // "shared default across instances" trap for collection DPs.
         SetCurrentValue(SelectedItemsProperty, new ObservableCollection<object>());
 
-        PillLog.Information("PillMultiSelect: control instantiated");
+        MultiSelectLog.Information("PillMultiSelect: control instantiated");
     }
 
     // ── DependencyProperties ─────────────────────────────────────────────────
@@ -121,7 +121,7 @@ public partial class PillMultiSelect : UserControl
     /// Optional custom <see cref="DataTemplate"/> for the group header row
     /// (checkbox + label + expand chevron + count). When null, the control's
     /// built-in default template defined in XAML is used. The template's
-    /// DataContext is the <see cref="PillGroupViewModel"/> itself — the
+    /// DataContext is the <see cref="MultiSelectGroupViewModel"/> itself — the
     /// container template unwraps the <see cref="System.Windows.Data.CollectionViewGroup.Name"/>
     /// (which is the group VM) into a <c>ContentControl.Content</c>, so a
     /// host template binds directly against the group VM's members:
@@ -222,7 +222,7 @@ public partial class PillMultiSelect : UserControl
 
     private void OnIsOpenDpChanged(bool value)
     {
-        PillLog.Information("PillMultiSelect DP: IsOpen={Value} (host->control)", value);
+        MultiSelectLog.Information("PillMultiSelect DP: IsOpen={Value} (host->control)", value);
         if (_syncingIsOpen) return;
         _syncingIsOpen = true;
         try { _internalState.IsOpen = value; }
@@ -235,28 +235,28 @@ public partial class PillMultiSelect : UserControl
     // boundary observable in the runtime log instead of a silent blank.
     private void OnLabelDpChanged(string value)
     {
-        PillLog.Information("PillMultiSelect DP: Label='{Label}' (host->control)", value ?? "");
+        MultiSelectLog.Information("PillMultiSelect DP: Label='{Label}' (host->control)", value ?? "");
         _internalState.Label = value;
     }
 
     private void OnItemsSourceDpChanged(IEnumerable? value)
     {
         int n = value is ICollection c ? c.Count : -1;
-        PillLog.Information("PillMultiSelect DP: ItemsSource set (items={N}, null={Null})",
+        MultiSelectLog.Information("PillMultiSelect DP: ItemsSource set (items={N}, null={Null})",
             n, value == null);
         _itemSource.ItemsSource = value;
     }
 
     private void OnSelectedItemsDpChanged(IList? value)
     {
-        PillLog.Information("PillMultiSelect DP: SelectedItems set (count={N}, null={Null})",
+        MultiSelectLog.Information("PillMultiSelect DP: SelectedItems set (count={N}, null={Null})",
             value?.Count ?? -1, value == null);
         _selectionSync.SetSelectedItems(value);
     }
 
     private void OnInternalStatePropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (e.PropertyName != nameof(PillMultiSelectInternalState.IsOpen)) return;
+        if (e.PropertyName != nameof(MultiSelectInternalState.IsOpen)) return;
         if (_syncingIsOpen) return;
         _syncingIsOpen = true;
         try { SetCurrentValue(IsOpenProperty, _internalState.IsOpen); }
@@ -348,7 +348,7 @@ public partial class PillMultiSelect : UserControl
     }
 
     // ── Selection DPs + routed event ─────────────────────────────────────────
-    // Logic lives in PillSelectionSync; the code-behind just owns the DP
+    // Logic lives in MultiSelectSelectionSync; the code-behind just owns the DP
     // declarations, forwards callbacks, and raises the routed event.
 
     /// <summary>Two-way bindable selection. Per-instance default set in ctor via
@@ -378,7 +378,7 @@ public partial class PillMultiSelect : UserControl
     }
 
     /// <summary>Fires once per selection-set change (deduplicated across a full
-    /// reconciliation cycle). See <see cref="PillSelectionSync"/> for details.</summary>
+    /// reconciliation cycle). See <see cref="MultiSelectSelectionSync"/> for details.</summary>
     public static readonly RoutedEvent SelectionChangedEvent =
         EventManager.RegisterRoutedEvent(nameof(SelectionChanged),
             RoutingStrategy.Bubble, typeof(RoutedEventHandler), typeof(PillMultiSelect));
@@ -486,7 +486,7 @@ public partial class PillMultiSelect : UserControl
     /// they can drive non-DP state — search text, group expansion — without
     /// reflection. Not part of the public API surface.
     /// </summary>
-    internal PillMultiSelectInternalState InternalState => _internalState;
+    internal MultiSelectInternalState InternalState => _internalState;
 
     // ── Event handlers ────────────────────────────────────────────────────────
 
@@ -494,7 +494,7 @@ public partial class PillMultiSelect : UserControl
     {
         // Push focus into the search box so the user can start typing
         // immediately on click — same affordance as Linear / Notion / cmdk.
-        // The SearchBox lives in PillDropdownList now; route through it.
+        // The SearchBox lives in MultiSelectDropdown now; route through it.
         Dropdown.FocusSearchBox();
     }
 

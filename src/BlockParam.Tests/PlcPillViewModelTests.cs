@@ -149,7 +149,7 @@ public class PlcPillViewModelTests
         vm.IsLoaded.Should().BeFalse("the lazy PLC-list fetch has not run");
 
         // AvailableDbs is pre-populated with initialActiveItems (7882cc1) and
-        // SelectedDbs is seeded with the SAME reference, so PillSelectionSync's
+        // SelectedDbs is seeded with the SAME reference, so MultiSelectSelectionSync's
         // per-row seed can mark the row IsCheckedTrue and the closed trigger
         // renders the summary — no OnIsOpenFlippedToTrue / popup-open needed.
         vm.SelectedDbs.Should().ContainSingle().Which.Should().BeSameAs(idb);
@@ -200,7 +200,7 @@ public class PlcPillViewModelTests
         //   SelectedItems = SelectedDbs (Mode=OneWay)
         //   IsOpen        = TwoWay
         // The CLOSED trigger must show HasSelection and the DB name without
-        // any popup-open — driven purely by PillSelectionSync's per-row seed
+        // any popup-open — driven purely by MultiSelectSelectionSync's per-row seed
         // + RaiseAggregatesChanged INPC push (no deferred reconcile exists).
         var idb = InstanceDbItem("Gen_Main_IDB", "CPU_1");
         var vm = new PlcPillViewModel(

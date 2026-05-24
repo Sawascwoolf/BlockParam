@@ -7,7 +7,7 @@ namespace BlockParam.Tests;
 
 public class PillTooltipTests
 {
-    private static PillRowViewModel Item(string display, string abbrev, bool selected = true)
+    private static MultiSelectRowViewModel Item(string display, string abbrev, bool selected = true)
         => new(new object(), display, abbrev) { IsSelected = selected };
 
     // ── PillTooltipFormatters generic API ────────────────────────────────────
@@ -23,7 +23,7 @@ public class PillTooltipTests
     [Fact]
     public void AbbrevAndFullNames_generic_renders_mapping_per_line()
     {
-        // Arbitrary source type — demonstrates generic API is not coupled to PillRowViewModel.
+        // Arbitrary source type — demonstrates generic API is not coupled to MultiSelectRowViewModel.
         var items = new[] { (Display: "DB_ProcessControl_HighPriority", Abbrev: "DB10"),
                             (Display: "DB_ConfigParams", Abbrev: "DB99") };
         PillTooltipFormatters.AbbrevAndFullNames(items, t => t.Display, t => t.Abbrev)
@@ -47,12 +47,12 @@ public class PillTooltipTests
             .Should().Be("DB10 — DB_ProcessControl_HighPriority\nDB99 — DB_ConfigParams");
     }
 
-    // ── PillMultiSelectInternalState.SelectionTooltip (internal state wiring) ─
+    // ── MultiSelectInternalState.SelectionTooltip (internal state wiring) ─
 
     [Fact]
     public void SelectionTooltip_is_null_when_no_formatter_set()
     {
-        var vm = new PillMultiSelectInternalState();
+        var vm = new MultiSelectInternalState();
         vm.AddItem(Item("DB_A", "DB1"));
         vm.SelectionTooltip.Should().BeNull();
     }
@@ -60,7 +60,7 @@ public class PillTooltipTests
     [Fact]
     public void SelectionTooltip_is_null_when_nothing_selected()
     {
-        var vm = new PillMultiSelectInternalState
+        var vm = new MultiSelectInternalState
         {
             TooltipFormatter = rows => PillTooltipFormatters.FullNamesRows(rows)
         };
@@ -72,7 +72,7 @@ public class PillTooltipTests
     [Fact]
     public void SelectionTooltip_runs_formatter_and_excludes_unselected_items()
     {
-        var vm = new PillMultiSelectInternalState
+        var vm = new MultiSelectInternalState
         {
             TooltipFormatter = rows => PillTooltipFormatters.FullNamesRows(rows)
         };
@@ -85,7 +85,7 @@ public class PillTooltipTests
     [Fact]
     public void SelectionTooltip_updates_when_selection_changes()
     {
-        var vm = new PillMultiSelectInternalState
+        var vm = new MultiSelectInternalState
         {
             TooltipFormatter = rows => PillTooltipFormatters.FullNamesRows(rows)
         };

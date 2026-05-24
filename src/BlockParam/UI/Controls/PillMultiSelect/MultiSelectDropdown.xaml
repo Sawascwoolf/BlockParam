@@ -1,4 +1,4 @@
-<UserControl x:Class="BlockParam.UI.Controls.PillMultiSelect.PillDropdownList"
+<UserControl x:Class="BlockParam.UI.Controls.PillMultiSelect.MultiSelectDropdown"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:local="clr-namespace:BlockParam.UI.Controls.PillMultiSelect"
@@ -8,19 +8,19 @@
         UserControl so hosts can embed it outside the pill's popup —
         DataGrid cell editors, fly-out panels, sidebar lists, etc.
 
-        DataContext contract: PillMultiSelectInternalState. Hosts wire it
+        DataContext contract: MultiSelectInternalState. Hosts wire it
         themselves (see README "Standalone dropdown"). When this control
         sits inside PillMultiSelect's popup, the state is inherited from
         the pill's outer Grid; no extra setup needed.
     -->
     <UserControl.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVis"/>
-        <local:PillGroupHeaderVisibilityConverter x:Key="GroupHeaderVis"/>
-        <local:PillGroupExpandedVisibilityConverter x:Key="GroupExpandedVis"/>
+        <local:MultiSelectGroupHeaderVisibilityConverter x:Key="GroupHeaderVis"/>
+        <local:MultiSelectGroupExpandedVisibilityConverter x:Key="GroupExpandedVis"/>
 
         <!-- Default header template used when GroupKeyMemberPath / GroupKeySelector
              is set on the state but the host has not supplied a
-             GroupHeaderTemplate of its own. DataContext is the PillGroupViewModel. -->
+             GroupHeaderTemplate of its own. DataContext is the MultiSelectGroupViewModel. -->
         <DataTemplate x:Key="DefaultPillGroupHeaderTemplate">
             <Border Background="#F4F6F9"
                     BorderBrush="#E5E7EB" BorderThickness="0,0,0,1"

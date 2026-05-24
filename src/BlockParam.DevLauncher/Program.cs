@@ -43,8 +43,8 @@ class Program
 
         // Forward the pill control's diagnostic shims (#141) into Serilog
         // so the DevLauncher's log keeps the host->control DP-boundary
-        // breadcrumbs. PillLog stays vendorable — see PillLog.cs.
-        PillLog.Sink = msg => Log.Information("{Msg}", msg);
+        // breadcrumbs. MultiSelectLog stays vendorable — see MultiSelectLog.cs.
+        MultiSelectLog.Sink = msg => Log.Information("{Msg}", msg);
 
         // --capture-license <out-dir>             #20: license-dialog visual states
         if (args.Length >= 2 && args[0] == "--capture-license")

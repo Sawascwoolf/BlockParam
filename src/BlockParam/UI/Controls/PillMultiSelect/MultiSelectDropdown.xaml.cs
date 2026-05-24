@@ -10,7 +10,7 @@ namespace BlockParam.UI.Controls.PillMultiSelect;
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>DataContext contract:</b> a <see cref="PillMultiSelectInternalState"/>.
+/// <b>DataContext contract:</b> a <see cref="MultiSelectInternalState"/>.
 /// All bindings inside this control resolve against that state — there are
 /// no DPs on this UserControl itself.
 /// </para>
@@ -23,29 +23,29 @@ namespace BlockParam.UI.Controls.PillMultiSelect;
 /// <para>
 /// <b>Standalone usage</b> (DataGrid cells, fly-out panels, sidebar lists):
 /// the host wires up its own state. The four collaborators
-/// (<see cref="MemberPathResolver"/>, <see cref="PillItemSource"/>,
-/// <see cref="PillSelectionSync"/>, <see cref="PillFormatterCoordinator"/>)
+/// (<see cref="MemberPathResolver"/>, <see cref="MultiSelectItemSource"/>,
+/// <see cref="MultiSelectSelectionSync"/>, <see cref="MultiSelectFormatter"/>)
 /// are <c>public</c> for exactly this reason. Minimal wire-up:
 /// <code>
-/// var state    = new PillMultiSelectInternalState();
+/// var state    = new MultiSelectInternalState();
 /// var resolver = new MemberPathResolver();
-/// var source   = new PillItemSource(state, resolver) { ItemsSource = myItems, DisplayMemberPath = "Name" };
-/// var sync     = new PillSelectionSync(state, source, resolver);
-/// var _        = new PillFormatterCoordinator(state, source); // formatter is trigger-only but harmless here
+/// var source   = new MultiSelectItemSource(state, resolver) { ItemsSource = myItems, DisplayMemberPath = "Name" };
+/// var sync     = new MultiSelectSelectionSync(state, source, resolver);
+/// var _        = new MultiSelectFormatter(state, source); // formatter is trigger-only but harmless here
 /// sync.SetSelectedItems(mySelectedList);
 ///
-/// var dropdown = new PillDropdownList { DataContext = state };
+/// var dropdown = new MultiSelectDropdown { DataContext = state };
 /// // host the dropdown wherever — DataGrid cell editor, Popup, panel, etc.
 /// </code>
 /// See <c>README.md</c> for the longer write-up.
 /// </para>
 /// </remarks>
-public partial class PillDropdownList : UserControl
+public partial class MultiSelectDropdown : UserControl
 {
-    public PillDropdownList()
+    public MultiSelectDropdown()
     {
         InitializeComponent();
-        PillLog.Information("PillDropdownList: control instantiated");
+        MultiSelectLog.Information("MultiSelectDropdown: control instantiated");
     }
 
     /// <summary>

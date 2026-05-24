@@ -19,7 +19,7 @@ public class BulkChangeAddInProvider : ProjectTreeAddInProvider
         // injectable sink so the control stays vendorable into other repos
         // with zero project-internal dependencies. Wire it to our own
         // partial-trust-safe Log so nothing changes in the runtime log.
-        PillLog.Sink = msg => Log.Information("{Msg}", msg);
+        MultiSelectLog.Sink = msg => Log.Information("{Msg}", msg);
     }
 
     public BulkChangeAddInProvider(TiaPortal tiaPortal)

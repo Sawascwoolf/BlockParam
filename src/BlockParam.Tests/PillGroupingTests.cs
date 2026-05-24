@@ -42,16 +42,16 @@ file sealed class TeamMember : INotifyPropertyChanged
 /// </summary>
 file sealed class GroupingFixture
 {
-    internal PillMultiSelectInternalState State { get; }
-    internal PillItemSource ItemSource { get; }
+    internal MultiSelectInternalState State { get; }
+    internal MultiSelectItemSource ItemSource { get; }
     internal MemberPathResolver Resolver { get; }
     internal ObservableCollection<TeamMember> Sources { get; }
 
     internal GroupingFixture()
     {
-        State = new PillMultiSelectInternalState();
+        State = new MultiSelectInternalState();
         Resolver = new MemberPathResolver();
-        ItemSource = new PillItemSource(State, Resolver);
+        ItemSource = new MultiSelectItemSource(State, Resolver);
 
         Sources = new ObservableCollection<TeamMember>();
         ItemSource.ItemsSource = Sources;
@@ -459,7 +459,7 @@ public class PillGrouping_CollectionView_Tests
     }
 
     [Fact]
-    public void CollectionView_group_name_is_the_PillGroupViewModel()
+    public void CollectionView_group_name_is_the_MultiSelectGroupViewModel()
     {
         var fx = new GroupingFixture();
         fx.Add(new TeamMember("Alice", "Eng"));
@@ -472,8 +472,8 @@ public class PillGrouping_CollectionView_Tests
             .Select(g => g.Name)
             .ToList();
 
-        groupNames.Should().AllBeOfType<PillGroupViewModel>();
-        groupNames.OfType<PillGroupViewModel>()
+        groupNames.Should().AllBeOfType<MultiSelectGroupViewModel>();
+        groupNames.OfType<MultiSelectGroupViewModel>()
             .Select(g => g.Key)
             .Should().BeEquivalentTo(new[] { "Eng", "Sales" });
     }
@@ -630,14 +630,14 @@ public class PillRow_TriState_Tests
     [Fact]
     public void Row_IsSelected_defaults_to_false()
     {
-        var row = new PillRowViewModel(new object(), "A", "1");
+        var row = new MultiSelectRowViewModel(new object(), "A", "1");
         row.IsSelected.Should().Be(false);
     }
 
     [Fact]
     public void Row_IsSelected_can_be_set_to_null()
     {
-        var row = new PillRowViewModel(new object(), "A", "1");
+        var row = new MultiSelectRowViewModel(new object(), "A", "1");
         row.IsSelected = null;
         row.IsSelected.Should().BeNull();
         row.IsCheckedTrue.Should().BeFalse();
@@ -646,10 +646,10 @@ public class PillRow_TriState_Tests
     [Fact]
     public void Indeterminate_row_is_not_added_to_SelectedItems()
     {
-        var state = new PillMultiSelectInternalState();
+        var state = new MultiSelectInternalState();
         var resolver = new MemberPathResolver();
-        var itemSource = new PillItemSource(state, resolver);
-        var sync = new PillSelectionSync(state, itemSource, resolver);
+        var itemSource = new MultiSelectItemSource(state, resolver);
+        var sync = new MultiSelectSelectionSync(state, itemSource, resolver);
 
         var sources = new ObservableCollection<object>();
         var selectedItems = new ObservableCollection<object>();
@@ -668,10 +668,10 @@ public class PillRow_TriState_Tests
     [Fact]
     public void Transition_from_true_to_null_removes_from_SelectedItems()
     {
-        var state = new PillMultiSelectInternalState();
+        var state = new MultiSelectInternalState();
         var resolver = new MemberPathResolver();
-        var itemSource = new PillItemSource(state, resolver);
-        var sync = new PillSelectionSync(state, itemSource, resolver);
+        var itemSource = new MultiSelectItemSource(state, resolver);
+        var sync = new MultiSelectSelectionSync(state, itemSource, resolver);
 
         var sources = new ObservableCollection<object>();
         var selectedItems = new ObservableCollection<object>();
