@@ -24,8 +24,26 @@ public static class MultiSelectLog
     private static readonly Regex PlaceholderRegex = new(@"\{[^{}]+\}", RegexOptions.Compiled);
 
     /// <summary>
-    /// Receives formatted log messages. Null = silent (default). Set once
-    /// at app startup; the control swallows any exception the sink throws.
+    /// Receives formatted log messages. Null = silent (default).
+    /// <para>
+    /// <b>Set once at app startup, from the host that owns the AddIn /
+    /// process</b> (BlockParam wires this in <c>BulkChangeAddInProvider</c>'s
+    /// static ctor; DevLauncher in <c>Main</c>). Not threadsafe to mutate
+    /// after startup — there's no lock around the read in
+    /// <see cref="Information"/>, just a local capture that prevents a
+    /// torn-tear of the delegate reference. Per-test sinks or hot-swapping
+    /// at runtime are out of scope.
+    /// </b>
+    /// </para>
+    /// <para>
+    /// Wiring is host-bound, not assembly-bound: code paths that exercise
+    /// the control without going through the host (unit tests, the WPF
+    /// designer) will see <c>null</c> and the diagnostic shims silently
+    /// drop. That's intentional.
+    /// </para>
+    /// <para>
+    /// The control swallows any exception the sink throws.
+    /// </para>
     /// </summary>
     public static Action<string>? Sink { get; set; }
 

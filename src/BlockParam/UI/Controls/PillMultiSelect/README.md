@@ -55,7 +55,11 @@ The sink defaults to no-op. To forward into your logger:
 MultiSelectLog.Sink = msg => YourLogger.Information(msg);
 ```
 
-Wire it once at app startup. If you don't, the lines are silently dropped.
+Wire it once at app startup **in the host that owns the process / AddIn**
+(in BlockParam: `BulkChangeAddInProvider`'s static ctor; in DevLauncher:
+`Main`). Wiring is host-bound, not assembly-bound — code paths that
+instantiate the control without the host (unit tests, the WPF designer)
+will see no sink and the lines silently drop. That's intentional.
 
 ## Public API
 
@@ -176,10 +180,12 @@ surface, selection sync, overflow formatter, item lifecycle, tooltip modes,
 and snapshot ordering. They only need xUnit + StaFact + FluentAssertions —
 no other host-project setup — and can travel with the control if desired.
 
-Caveat for vendoring the tests: several reach `internal` types
-(`MultiSelectRowViewModel` and friends were promoted to `public` in #141 to
-unblock partial-trust WPF binding, so the public surface is wider now —
-but some test-only fixtures still use `[InternalsVisibleTo]`). The project
-that owns the control needs `[InternalsVisibleTo("YourTestProject")]` for
-those to compile. Tests that only touch the public DP surface
-(`PillBindableApiTests.cs`, `PillOverflowFormatterTests.cs`) don't need it.
+Caveat for vendoring the tests: most of the surface they touch is now
+`public` (the VM family was promoted in #141 to unblock partial-trust WPF
+binding; the four collaborators were promoted in PR #168 to unblock
+standalone hosting). The remaining `internal` touchpoint is
+`PartialTrustSandboxTests`, which subclasses an internal sandbox worker
+to JIT-verify the assembly under TIA-like CAS — vendoring that test
+requires `[InternalsVisibleTo("YourTestProject")]`. Tests that only
+touch the public DP surface (`PillBindableApiTests.cs`,
+`PillOverflowFormatterTests.cs`) don't.

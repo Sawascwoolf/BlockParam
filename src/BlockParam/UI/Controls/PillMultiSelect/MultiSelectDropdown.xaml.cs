@@ -51,8 +51,10 @@ public partial class MultiSelectDropdown : UserControl
     /// <summary>
     /// Push focus into the search box. Called by hosts that open the
     /// dropdown in response to a click, so the user can start typing
-    /// immediately (Linear / Notion / cmdk affordance). No-op when the
-    /// search box is hidden via <c>ShowSearchBox=false</c>.
+    /// immediately (Linear / Notion / cmdk affordance). Returns <c>false</c>
+    /// when the search box is hidden via <c>ShowSearchBox=false</c> (or for
+    /// any other reason WPF refuses focus) so hosts can fall back to
+    /// focusing the list-box.
     /// </summary>
-    public void FocusSearchBox() => SearchBox.Focus();
+    public bool FocusSearchBox() => SearchBox.Focus();
 }

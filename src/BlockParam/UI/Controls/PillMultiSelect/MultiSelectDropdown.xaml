@@ -21,7 +21,7 @@
         <!-- Default header template used when GroupKeyMemberPath / GroupKeySelector
              is set on the state but the host has not supplied a
              GroupHeaderTemplate of its own. DataContext is the MultiSelectGroupViewModel. -->
-        <DataTemplate x:Key="DefaultPillGroupHeaderTemplate">
+        <DataTemplate x:Key="DefaultGroupHeaderTemplate">
             <Border Background="#F4F6F9"
                     BorderBrush="#E5E7EB" BorderThickness="0,0,0,1"
                     Padding="6,5">
@@ -112,7 +112,7 @@
             </Style.Triggers>
         </Style>
 
-        <Style x:Key="PillRowStyle" TargetType="ListBoxItem">
+        <Style x:Key="MultiSelectRowStyle" TargetType="ListBoxItem">
             <Setter Property="Padding" Value="8,5"/>
             <Setter Property="Cursor" Value="Hand"/>
             <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
@@ -195,7 +195,7 @@
         <!-- Item list -->
         <ListBox Grid.Row="1"
                  ItemsSource="{Binding FilteredItems}"
-                 ItemContainerStyle="{StaticResource PillRowStyle}"
+                 ItemContainerStyle="{StaticResource MultiSelectRowStyle}"
                  MaxHeight="{Binding PopupMaxListHeight}" Margin="4,0"
                  BorderThickness="0" Background="Transparent"
                  ScrollViewer.HorizontalScrollBarVisibility="Disabled"
@@ -216,7 +216,7 @@
                                             <ContentControl x:Name="ExplicitHeader"
                                                             Content="{Binding Name}"
                                                             Visibility="{Binding Name, Converter={StaticResource GroupHeaderVis}}"
-                                                            ContentTemplate="{Binding DataContext.GroupHeaderTemplate, RelativeSource={RelativeSource AncestorType=ListBox}, FallbackValue={StaticResource DefaultPillGroupHeaderTemplate}, TargetNullValue={StaticResource DefaultPillGroupHeaderTemplate}}"/>
+                                                            ContentTemplate="{Binding DataContext.GroupHeaderTemplate, RelativeSource={RelativeSource AncestorType=ListBox}, FallbackValue={StaticResource DefaultGroupHeaderTemplate}, TargetNullValue={StaticResource DefaultGroupHeaderTemplate}}"/>
 
                                             <ItemsPresenter x:Name="LeafItems"
                                                             Visibility="{Binding Name.IsExpanded, Converter={StaticResource GroupExpandedVis}}"/>
