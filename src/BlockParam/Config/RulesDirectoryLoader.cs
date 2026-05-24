@@ -2,6 +2,7 @@ using System.IO;
 using Newtonsoft.Json;
 using BlockParam.Diagnostics;
 using BlockParam.Services;
+using BlockParam.Services.Storage;
 
 namespace BlockParam.Config;
 
@@ -9,9 +10,23 @@ namespace BlockParam.Config;
 /// Loads rule files from a shared directory and merges them.
 /// Files are loaded alphabetically for deterministic ordering.
 /// Only files with "version": "1.0" are recognized as BlockParam rules.
+///
+/// File I/O is routed through <see cref="IBlockParamStorage"/> so the
+/// storage-injecting <see cref="ConfigLoader"/> path stays disk-free in
+/// tests, satisfying the "no new <c>File.*</c> / <c>Directory.*</c> outside
+/// the storage layer" guardrail (#85).
 /// </summary>
 public class RulesDirectoryLoader
 {
+    private readonly IBlockParamStorage _storage;
+
+    public RulesDirectoryLoader() : this(FileSystemBlockParamStorage.Instance) { }
+
+    public RulesDirectoryLoader(IBlockParamStorage storage)
+    {
+        _storage = storage ?? throw new ArgumentNullException(nameof(storage));
+    }
+
     /// <summary>
     /// Loads all .json rule files from the directory.
     /// Tolerates missing/unreachable directories (returns empty with warning).
@@ -27,17 +42,19 @@ public class RulesDirectoryLoader
         if (string.IsNullOrWhiteSpace(directoryPath))
             return result;
 
-        if (!Directory.Exists(directoryPath))
+        var dir = StoragePath.FromAbsolute(directoryPath);
+        if (!_storage.DirectoryExists(dir))
         {
             result.Warnings.Add($"Rules directory not found: {directoryPath}");
             return result;
         }
 
-        string[] files;
+        StoragePath[] files;
         try
         {
-            files = Directory.GetFiles(directoryPath, "*.json");
-            Array.Sort(files, StringComparer.OrdinalIgnoreCase); // Alphabetical
+            files = _storage.EnumerateFiles(dir, "*.json")
+                .OrderBy(p => p.FullPath, StringComparer.OrdinalIgnoreCase)
+                .ToArray();
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
@@ -49,7 +66,7 @@ public class RulesDirectoryLoader
         foreach (var file in files)
         {
             // Skip files that exist in the local override directory
-            var fileName = Path.GetFileName(file);
+            var fileName = file.FileName;
             if (skipFileNames != null && fileName != null && skipFileNames.Contains(fileName))
             {
                 continue;
@@ -57,7 +74,7 @@ public class RulesDirectoryLoader
 
             try
             {
-                var json = File.ReadAllText(file);
+                var json = _storage.ReadAllText(file);
                 var config = JsonConvert.DeserializeObject<BulkChangeConfig>(json);
 
                 if (config == null) continue;
@@ -65,7 +82,7 @@ public class RulesDirectoryLoader
                 // Sentinel check: only files with version field are BlockParam rules
                 if (string.IsNullOrEmpty(config.Version))
                 {
-                    result.Warnings.Add($"Skipped non-rule file (no version): {Path.GetFileName(file)}");
+                    result.Warnings.Add($"Skipped non-rule file (no version): {file.FileName}");
                     continue;
                 }
 
@@ -77,7 +94,7 @@ public class RulesDirectoryLoader
                         var error = PathPatternMatcher.ValidatePattern(rule.PathPattern!);
                         if (error != null)
                         {
-                            result.Warnings.Add($"Skipped rule with invalid pattern in {Path.GetFileName(file)}: {error}");
+                            result.Warnings.Add($"Skipped rule with invalid pattern in {file.FileName}: {error}");
                             continue;
                         }
                     }
@@ -88,12 +105,12 @@ public class RulesDirectoryLoader
             }
             catch (JsonException ex)
             {
-                result.Warnings.Add($"Invalid JSON in {Path.GetFileName(file)}: {ex.Message}");
+                result.Warnings.Add($"Invalid JSON in {file.FileName}: {ex.Message}");
                 Log.Warning(ex, "Invalid JSON in rule file: {File}", file);
             }
             catch (IOException ex)
             {
-                result.Warnings.Add($"Cannot read {Path.GetFileName(file)}: {ex.Message}");
+                result.Warnings.Add($"Cannot read {file.FileName}: {ex.Message}");
                 Log.Warning(ex, "Cannot read rule file: {File}", file);
             }
         }

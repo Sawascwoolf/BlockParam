@@ -80,7 +80,7 @@ public class ConfigLoader
         // load ONLY from there and skip every other source.
         if (_scriptedRulesDirOverride != null)
         {
-            var loader = new RulesDirectoryLoader();
+            var loader = new RulesDirectoryLoader(_storage);
             var only = loader.LoadFromDirectory(_scriptedRulesDirOverride,
                 ruleSource: RuleSource.Shared);
             foreach (var w in only.Warnings)
@@ -102,7 +102,7 @@ public class ConfigLoader
         var localRulesDir = GetLocalRulesDirectory();
         _storage.EnsureDirectory(StoragePath.FromAbsolute(localRulesDir));
 
-        var dirLoader = new RulesDirectoryLoader();
+        var dirLoader = new RulesDirectoryLoader(_storage);
         var localResult = dirLoader.LoadFromDirectory(localRulesDir, ruleSource: RuleSource.Local);
         var localFileNames = new HashSet<string>(
             EnumerateJsonFileNames(localRulesDir),

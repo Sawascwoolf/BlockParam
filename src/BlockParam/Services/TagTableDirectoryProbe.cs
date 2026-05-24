@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using BlockParam.Services.Storage;
 
 namespace BlockParam.Services;
@@ -24,7 +25,7 @@ public class TagTableDirectoryProbe
         _storage = storage ?? throw new ArgumentNullException(nameof(storage));
     }
 
-    public bool Exists(string? directoryPath)
+    public bool Exists([NotNullWhen(true)] string? directoryPath)
     {
         if (string.IsNullOrWhiteSpace(directoryPath)) return false;
         return _storage.DirectoryExists(StoragePath.FromAbsolute(directoryPath!));
