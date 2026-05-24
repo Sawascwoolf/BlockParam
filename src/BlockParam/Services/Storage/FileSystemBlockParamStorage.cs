@@ -100,6 +100,35 @@ public sealed class FileSystemBlockParamStorage : IBlockParamStorage
         return e.MoveNext();
     }
 
+    public void Replace(StoragePath source, StoragePath destination)
+    {
+        EnsureParent(destination);
+        try
+        {
+            if (File.Exists(destination.FullPath))
+            {
+                // File.Replace is atomic on NTFS via Win32 ReplaceFile — no gap
+                // between deleting the destination and renaming the temp file
+                // where another writer could create the destination and make a
+                // naive Move throw. .NET 5+ has File.Move(overwrite); we target
+                // net48 and don't want P/Invoke MoveFileEx just for this.
+                File.Replace(source.FullPath, destination.FullPath,
+                    destinationBackupFileName: null);
+            }
+            else
+            {
+                File.Move(source.FullPath, destination.FullPath);
+            }
+        }
+        catch (IOException)
+        {
+            // ReplaceFile fails across volumes and on non-NTFS filesystems.
+            // Fall back to overwrite-copy — non-atomic but FS-agnostic.
+            File.Copy(source.FullPath, destination.FullPath, overwrite: true);
+            try { File.Delete(source.FullPath); } catch (IOException) { /* best-effort */ }
+        }
+    }
+
     private static void EnsureParent(StoragePath path)
     {
         var parent = Path.GetDirectoryName(path.FullPath);

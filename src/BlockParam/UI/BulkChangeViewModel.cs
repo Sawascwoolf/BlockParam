@@ -97,6 +97,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
 
     private readonly Action? _onRefreshTagTables;
     private readonly string? _tagTableDir;
+    private readonly TagTableDirectoryProbe _tagTableProbe = TagTableDirectoryProbe.Default;
     private readonly Action? _onRefreshUdtTypes;
     private readonly string? _udtDir;
     // #155 cross-open staleness valves: clear the TIA-session gates owned by
@@ -1935,7 +1936,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         if (_tagTableDir == null) return;
 
         _onRefreshTagTables?.Invoke();
-        if (System.IO.Directory.Exists(_tagTableDir))
+        if (_tagTableProbe.Exists(_tagTableDir))
         {
             var tagReader = new XmlFileTagTableReader(_tagTableDir);
             _tagTableCache = new TagTableCache(tagReader);
@@ -2031,7 +2032,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         _onInvalidateTagTableSession?.Invoke();
         _onRefreshTagTables?.Invoke();
 
-        if (_tagTableDir != null && System.IO.Directory.Exists(_tagTableDir))
+        if (_tagTableProbe.Exists(_tagTableDir))
         {
             var tagReader = new XmlFileTagTableReader(_tagTableDir);
             _tagTableCache = new TagTableCache(tagReader);
@@ -2049,23 +2050,17 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
 
     private void UpdateTagTableAge()
     {
-        if (_tagTableDir == null || !System.IO.Directory.Exists(_tagTableDir))
+        var newest = _tagTableProbe.GetNewestXmlWriteTime(_tagTableDir);
+        if (newest == null)
         {
             TagTableAge = "no data";
             return;
         }
-        var files = System.IO.Directory.GetFiles(_tagTableDir, "*.xml");
-        if (files.Length == 0)
-        {
-            TagTableAge = "no data";
-            return;
-        }
-        var newest = files.Max(f => System.IO.File.GetLastWriteTime(f));
-        var age = DateTime.Now - newest;
+        var age = DateTime.Now - newest.Value;
         TagTableAge = age.TotalMinutes < 1 ? "just now"
             : age.TotalMinutes < 60 ? $"{(int)age.TotalMinutes}m ago"
             : age.TotalHours < 24 ? $"{(int)age.TotalHours}h ago"
-            : $"{newest:yyyy-MM-dd HH:mm}";
+            : $"{newest.Value:yyyy-MM-dd HH:mm}";
     }
 
     // ExpandAll / CollapseAll commands + ExpandAllChildren / CollapseAllChildren

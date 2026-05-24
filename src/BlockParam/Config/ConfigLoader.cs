@@ -3,6 +3,7 @@ using Newtonsoft.Json;
 using Newtonsoft.Json.Serialization;
 using BlockParam.Diagnostics;
 using BlockParam.Services;
+using BlockParam.Services.Storage;
 using BlockParam.Updates;
 
 namespace BlockParam.Config;
@@ -10,9 +11,15 @@ namespace BlockParam.Config;
 /// <summary>
 /// Loads and merges rule files from 3 directories (Project > Local > Shared).
 /// The optional config.json only stores the shared rulesDirectory path.
+///
+/// File I/O is routed through <see cref="IBlockParamStorage"/> so tests can
+/// substitute an in-memory fake and so the "no new <c>File.*</c> /
+/// <c>Directory.*</c> outside the storage layer" guardrail (#85) stays
+/// satisfied. The string-path constructor remains for legacy callers.
 /// </summary>
 public class ConfigLoader
 {
+    private readonly IBlockParamStorage _storage;
     private readonly string? _configPath;
     private readonly string? _scriptedRulesDirOverride;
     private string? _tiaProjectPath;
@@ -27,8 +34,8 @@ public class ConfigLoader
     internal string? ManagedConfigPathOverride { get; set; }
 
     public ConfigLoader(string? configPath = null)
+        : this(FileSystemBlockParamStorage.Instance, configPath, scriptedRulesDirOverride: null)
     {
-        _configPath = configPath;
     }
 
     /// <summary>
@@ -38,7 +45,22 @@ public class ConfigLoader
     /// personal %APPDATA% config from leaking into marketing screenshots.
     /// </summary>
     internal ConfigLoader(string? configPath, string? scriptedRulesDirOverride)
+        : this(FileSystemBlockParamStorage.Instance, configPath, scriptedRulesDirOverride)
     {
+    }
+
+    /// <summary>
+    /// Storage-injecting constructor for tests and any future caller that
+    /// needs to swap out the file system (in-memory fake, restricted-perms
+    /// view, etc.). Production callers should keep using the string-path
+    /// constructors above.
+    /// </summary>
+    internal ConfigLoader(
+        IBlockParamStorage storage,
+        string? configPath,
+        string? scriptedRulesDirOverride = null)
+    {
+        _storage = storage ?? throw new ArgumentNullException(nameof(storage));
         _configPath = configPath;
         _scriptedRulesDirOverride = scriptedRulesDirOverride;
     }
@@ -78,15 +100,12 @@ public class ConfigLoader
 
         // 2. Load local rule files
         var localRulesDir = GetLocalRulesDirectory();
-        Directory.CreateDirectory(localRulesDir);
+        _storage.EnsureDirectory(StoragePath.FromAbsolute(localRulesDir));
 
         var dirLoader = new RulesDirectoryLoader();
         var localResult = dirLoader.LoadFromDirectory(localRulesDir, ruleSource: RuleSource.Local);
         var localFileNames = new HashSet<string>(
-            Directory.Exists(localRulesDir)
-                ? Directory.GetFiles(localRulesDir, "*.json").Select(Path.GetFileName)
-                    .Where(n => n != null).Select(n => n!)
-                : Array.Empty<string>(),
+            EnumerateJsonFileNames(localRulesDir),
             StringComparer.OrdinalIgnoreCase);
 
         // 3. Load shared rule files (skip files that exist locally)
@@ -107,7 +126,8 @@ public class ConfigLoader
         if (!string.IsNullOrEmpty(_tiaProjectPath))
         {
             var projectRulesDir = GetTiaProjectRulesDirectory();
-            if (projectRulesDir != null && Directory.Exists(projectRulesDir))
+            if (projectRulesDir != null
+                && _storage.DirectoryExists(StoragePath.FromAbsolute(projectRulesDir)))
             {
                 projectResult = dirLoader.LoadFromDirectory(projectRulesDir,
                     ruleSource: RuleSource.TiaProject);
@@ -134,6 +154,14 @@ public class ConfigLoader
             localResult.Rules.Count, sharedResult.Rules.Count);
 
         return _cachedConfig;
+    }
+
+    private IEnumerable<string> EnumerateJsonFileNames(string directoryPath)
+    {
+        var dir = StoragePath.FromAbsolute(directoryPath);
+        if (!_storage.DirectoryExists(dir)) yield break;
+        foreach (var f in _storage.EnumerateFiles(dir, "*.json"))
+            yield return f.FileName;
     }
 
     private string? ReadSharedRulesDirectory() => TryReadConfig("config file")?.RulesDirectory;
@@ -181,11 +209,12 @@ public class ConfigLoader
     public void SaveUpdateCheckSettings(UpdateCheckSettings settings)
     {
         var targetPath = _configPath ?? AppDirectories.ConfigFile;
+        var sp = StoragePath.FromAbsolute(targetPath);
 
         BulkChangeConfig config;
-        if (File.Exists(targetPath))
+        if (_storage.FileExists(sp))
         {
-            try { config = Deserialize(File.ReadAllText(targetPath)) ?? new BulkChangeConfig(); }
+            try { config = Deserialize(_storage.ReadAllText(sp)) ?? new BulkChangeConfig(); }
             catch { config = new BulkChangeConfig(); }
         }
         else
@@ -196,16 +225,12 @@ public class ConfigLoader
         config.UpdateCheck = settings;
         if (string.IsNullOrEmpty(config.Version)) config.Version = "1.0";
 
-        var dir = Path.GetDirectoryName(targetPath);
-        if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
-            Directory.CreateDirectory(dir);
-
         var json = JsonConvert.SerializeObject(config, Formatting.Indented, new JsonSerializerSettings
         {
             ContractResolver = new CamelCasePropertyNamesContractResolver(),
             NullValueHandling = NullValueHandling.Ignore
         });
-        File.WriteAllText(targetPath, json);
+        _storage.WriteAllText(sp, json);
         Invalidate();
     }
 
@@ -214,9 +239,10 @@ public class ConfigLoader
         try
         {
             var managedPath = ManagedConfigPathOverride ?? AppDirectories.ProgramDataConfigFile;
-            if (!File.Exists(managedPath)) return null;
+            var sp = StoragePath.FromAbsolute(managedPath);
+            if (!_storage.FileExists(sp)) return null;
 
-            var json = File.ReadAllText(managedPath);
+            var json = _storage.ReadAllText(sp);
             var token = JsonConvert.DeserializeObject<Newtonsoft.Json.Linq.JObject>(json);
             var node = token?["updateCheck"] as Newtonsoft.Json.Linq.JObject;
             if (node == null) return null;
@@ -245,12 +271,13 @@ public class ConfigLoader
 
     private BulkChangeConfig? TryReadConfig(string context)
     {
-        if (string.IsNullOrEmpty(_configPath) || !File.Exists(_configPath))
-            return null;
+        if (string.IsNullOrEmpty(_configPath)) return null;
+        var sp = StoragePath.FromAbsolute(_configPath!);
+        if (!_storage.FileExists(sp)) return null;
 
         try
         {
-            return Deserialize(File.ReadAllText(_configPath));
+            return Deserialize(_storage.ReadAllText(sp));
         }
         catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException)
         {
@@ -318,16 +345,12 @@ public class ConfigLoader
     /// </summary>
     public void SaveRuleFile(string filePath, BulkChangeConfig ruleFileContent)
     {
-        var dir = Path.GetDirectoryName(filePath);
-        if (!string.IsNullOrEmpty(dir))
-            Directory.CreateDirectory(dir);
-
         var json = JsonConvert.SerializeObject(ruleFileContent, Formatting.Indented, new JsonSerializerSettings
         {
             ContractResolver = new CamelCasePropertyNamesContractResolver(),
             NullValueHandling = NullValueHandling.Ignore
         });
-        File.WriteAllText(filePath, json);
+        _storage.WriteAllText(StoragePath.FromAbsolute(filePath), json);
         Invalidate();
     }
 
@@ -344,16 +367,12 @@ public class ConfigLoader
             RulesDirectory = string.IsNullOrWhiteSpace(rulesDirectory) ? null : rulesDirectory
         };
 
-        var dir = Path.GetDirectoryName(targetPath);
-        if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
-            Directory.CreateDirectory(dir);
-
         var json = JsonConvert.SerializeObject(config, Formatting.Indented, new JsonSerializerSettings
         {
             ContractResolver = new CamelCasePropertyNamesContractResolver(),
             NullValueHandling = NullValueHandling.Ignore
         });
-        File.WriteAllText(targetPath, json);
+        _storage.WriteAllText(StoragePath.FromAbsolute(targetPath), json);
         Invalidate();
     }
 

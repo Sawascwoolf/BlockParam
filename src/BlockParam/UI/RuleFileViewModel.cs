@@ -323,13 +323,19 @@ public class RuleFileViewModel : ViewModelBase
     /// <summary>
     /// Loads a rule file from disk. Returns null when the file is missing,
     /// unreadable, or doesn't carry the BlockParam version sentinel.
+    /// File I/O is routed through <see cref="RuleFileRepository"/> so this
+    /// stays inside the storage-layer guardrail (#85).
     /// </summary>
-    public static RuleFileViewModel? FromFile(string filePath, RuleSource source)
+    public static RuleFileViewModel? FromFile(string filePath, RuleSource source) =>
+        FromFile(filePath, source, RuleFileRepository.Default);
+
+    internal static RuleFileViewModel? FromFile(
+        string filePath, RuleSource source, RuleFileRepository repository)
     {
-        if (!File.Exists(filePath)) return null;
+        if (!repository.FileExists(filePath)) return null;
 
         string json;
-        try { json = File.ReadAllText(filePath); }
+        try { json = repository.ReadAllText(filePath); }
         catch { return null; }
 
         BulkChangeConfig? config;

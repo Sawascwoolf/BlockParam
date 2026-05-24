@@ -1,4 +1,3 @@
-using System.IO;
 using System.Net.Http;
 using System.Text;
 using System.Threading;
@@ -7,6 +6,7 @@ using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using BlockParam.Diagnostics;
 using BlockParam.Services;
+using BlockParam.Services.Storage;
 
 namespace BlockParam.Licensing;
 
@@ -38,9 +38,11 @@ public class OnlineLicenseService : ILicenseService
     private static readonly TimeSpan CacheGracePeriod = TimeSpan.FromHours(48);
     private static readonly int MaxRetryAttempts = 4;
 
-    private readonly string _storagePath;
+    private readonly IBlockParamStorage _storage;
+    private readonly StoragePath _licenseDataPath;
+    private readonly StoragePath _cachePath;
+    private readonly StoragePath _sharedLicenseFilePath;
     private readonly string? _serverBaseUrl;
-    private readonly string? _sharedLicenseFilePath;
     private readonly Func<DateTime> _utcNow;
     private readonly object _lock = new();
 
@@ -65,12 +67,28 @@ public class OnlineLicenseService : ILicenseService
         string? serverBaseUrl,
         Func<DateTime>? utcNow = null,
         string? sharedLicenseFilePath = null)
+        : this(FileSystemBlockParamStorage.Instance,
+               StoragePath.FromAbsolute(storagePath),
+               serverBaseUrl,
+               utcNow,
+               string.IsNullOrWhiteSpace(sharedLicenseFilePath)
+                   ? default
+                   : StoragePath.FromAbsolute(sharedLicenseFilePath!))
     {
-        _storagePath = storagePath;
+    }
+
+    public OnlineLicenseService(
+        IBlockParamStorage storage,
+        StoragePath storageDir,
+        string? serverBaseUrl,
+        Func<DateTime>? utcNow = null,
+        StoragePath sharedLicenseFilePath = default)
+    {
+        _storage = storage ?? throw new ArgumentNullException(nameof(storage));
+        _licenseDataPath = storageDir / "license.json";
+        _cachePath = storageDir / "license_cache.dat";
+        _sharedLicenseFilePath = sharedLicenseFilePath;
         _serverBaseUrl = serverBaseUrl?.TrimEnd('/');
-        _sharedLicenseFilePath = string.IsNullOrWhiteSpace(sharedLicenseFilePath)
-            ? null
-            : sharedLicenseFilePath;
         _utcNow = utcNow ?? (() => DateTime.UtcNow);
 
         _licenseData = LoadLicenseData();
@@ -98,7 +116,7 @@ public class OnlineLicenseService : ILicenseService
                 IsServerReachable = _cache != null && (_utcNow() - _cache.ReceivedAtUtc).TotalMinutes < 5,
                 ErrorMessage = _cache?.ErrorMessage,
                 IsManagedKey = _isManagedKey,
-                ManagedKeyFilePath = _isManagedKey ? _sharedLicenseFilePath : null
+                ManagedKeyFilePath = _isManagedKey ? ManagedKeyFilePathString() : null
             };
         }
     }
@@ -188,8 +206,8 @@ public class OnlineLicenseService : ILicenseService
             _licenseData = null;
             _cache = null;
             _proActive = false;
-            DeleteFile(LicenseDataPath);
-            DeleteFile(CachePath);
+            BestEffortDelete(_licenseDataPath);
+            BestEffortDelete(_cachePath);
         }
 
         StopHeartbeat();
@@ -368,12 +386,16 @@ public class OnlineLicenseService : ILicenseService
     /// </summary>
     private void AdoptSharedLicenseKeyIfPresent()
     {
-        if (_sharedLicenseFilePath == null) return;
+        // Local copy of the readonly struct — never call instance members on
+        // the field directly (partial-trust IL gate, see UiZoomService).
+        var shared = _sharedLicenseFilePath;
+        if (shared.IsEmpty) return;
 
-        var sharedKey = TryReadSharedLicenseKey(_sharedLicenseFilePath);
+        var sharedKey = TryReadSharedLicenseKey(shared);
         if (string.IsNullOrEmpty(sharedKey)) return;
 
         _isManagedKey = true;
+        var sharedPath = shared.FullPath;
 
         // Same key as already cached → keep existing instanceId and cache so we
         // don't churn the server-side session on every Add-In start.
@@ -384,14 +406,14 @@ public class OnlineLicenseService : ILicenseService
             // this start?" — fires once per TIA launch, not per heartbeat, so
             // it doesn't flood the log even on the same-key (no-op) path.
             Log.Information("Managed license file at {Path} matches cached key — no change",
-                _sharedLicenseFilePath);
+                sharedPath);
             return;
         }
 
         // Key changed (rotation or first-time rollout). Replace the local copy and
         // drop the stale cache so EvaluateTier doesn't grant Pro on the old key.
         Log.Information("Adopting managed license key from {Path} (rotation or first rollout)",
-            _sharedLicenseFilePath);
+            sharedPath);
         _licenseData = new LicenseData
         {
             LicenseKey = sharedKey,
@@ -401,21 +423,21 @@ public class OnlineLicenseService : ILicenseService
         SaveLicenseData(_licenseData);
 
         _cache = null;
-        DeleteFile(CachePath);
+        BestEffortDelete(_cachePath);
     }
 
-    private static string? TryReadSharedLicenseKey(string path)
+    private string? TryReadSharedLicenseKey(StoragePath path)
     {
         try
         {
-            if (!File.Exists(path)) return null;
-            var content = File.ReadAllText(path).Trim();
+            if (!_storage.FileExists(path)) return null;
+            var content = _storage.ReadAllText(path).Trim();
             return string.IsNullOrEmpty(content) ? null : content;
         }
         catch (Exception ex)
         {
             // Unreadable shared file is non-fatal — fall back to user-local cache.
-            Log.Warning(ex, "Cannot read managed license file at {Path}", path);
+            Log.Warning(ex, "Cannot read managed license file at {Path}", path.FullPath);
             return null;
         }
     }
@@ -483,80 +505,87 @@ public class OnlineLicenseService : ILicenseService
     }
 
     // --- Persistence ---
-
-    private string LicenseDataPath => Path.Combine(_storagePath, "license.json");
-    private string CachePath => Path.Combine(_storagePath, "license_cache.dat");
+    //
+    // All file I/O goes through IBlockParamStorage so tests can substitute an
+    // in-memory fake and so the "no new File.*/Directory.* outside the storage
+    // layer" guardrail (#85) stays satisfied. WriteAll* auto-creates parents,
+    // which is why there's no explicit EnsureDirectory.
 
     private LicenseData? LoadLicenseData()
     {
+        var path = _licenseDataPath;
         try
         {
-            if (!File.Exists(LicenseDataPath)) return null;
-            var json = File.ReadAllText(LicenseDataPath);
+            if (!_storage.FileExists(path)) return null;
+            var json = _storage.ReadAllText(path);
             return JsonConvert.DeserializeObject<LicenseData>(json);
         }
         catch (Exception ex)
         {
-            Log.Warning(ex, "Cannot read license data from {Path}", LicenseDataPath);
+            Log.Warning(ex, "Cannot read license data from {Path}", path.FullPath);
             return null;
         }
     }
 
     private void SaveLicenseData(LicenseData data)
     {
+        var path = _licenseDataPath;
         try
         {
-            EnsureDirectory(_storagePath);
             var json = JsonConvert.SerializeObject(data, Formatting.Indented);
-            File.WriteAllText(LicenseDataPath, json);
+            _storage.WriteAllText(path, json);
         }
         catch (Exception ex)
         {
-            Log.Warning(ex, "Cannot save license data to {Path}", LicenseDataPath);
+            Log.Warning(ex, "Cannot save license data to {Path}", path.FullPath);
         }
     }
 
     private CachedLicenseResponse? LoadCache()
     {
+        var path = _cachePath;
         try
         {
-            if (!File.Exists(CachePath)) return null;
-            var bytes = File.ReadAllBytes(CachePath);
+            if (!_storage.FileExists(path)) return null;
+            var bytes = _storage.ReadAllBytes(path);
             var json = Obfuscation.Deobfuscate(bytes);
             return JsonConvert.DeserializeObject<CachedLicenseResponse>(json);
         }
         catch (Exception ex)
         {
-            Log.Warning(ex, "Cannot read license cache from {Path}", CachePath);
+            Log.Warning(ex, "Cannot read license cache from {Path}", path.FullPath);
             return null;
         }
     }
 
     private void SaveCache(CachedLicenseResponse cache)
     {
+        var path = _cachePath;
         try
         {
-            EnsureDirectory(_storagePath);
             var json = JsonConvert.SerializeObject(cache);
             var bytes = Obfuscation.Obfuscate(json);
-            File.WriteAllBytes(CachePath, bytes);
+            _storage.WriteAllBytes(path, bytes);
         }
         catch (Exception ex)
         {
-            Log.Warning(ex, "Cannot save license cache to {Path}", CachePath);
+            Log.Warning(ex, "Cannot save license cache to {Path}", path.FullPath);
         }
     }
 
-    private static void DeleteFile(string path)
+    private void BestEffortDelete(StoragePath path)
     {
-        try { if (File.Exists(path)) File.Delete(path); }
+        try { _storage.DeleteFile(path); }
         catch { /* best effort */ }
     }
 
-    private static void EnsureDirectory(string path)
+    private string? ManagedKeyFilePathString()
     {
-        if (!Directory.Exists(path))
-            Directory.CreateDirectory(path);
+        // Property accessor on a readonly struct field needs a local copy
+        // (partial-trust IL gate). Returns null when no shared file is
+        // configured, mirroring the legacy nullable-string field semantics.
+        var shared = _sharedLicenseFilePath;
+        return shared.IsEmpty ? null : shared.FullPath;
     }
 
     private static string GetAddinVersion()

@@ -1,5 +1,5 @@
-using System.IO;
 using BlockParam.Diagnostics;
+using BlockParam.Services.Storage;
 using Newtonsoft.Json;
 
 namespace BlockParam.Licensing;
@@ -7,12 +7,18 @@ namespace BlockParam.Licensing;
 /// <summary>
 /// Local, offline usage tracker that stores a daily counter in an encrypted file.
 /// Uses Windows DPAPI (ProtectedData) when available, falls back to obfuscation.
+///
+/// Persistence goes through <see cref="IBlockParamStorage"/> so the production
+/// file-system path and unit tests share the same code path. Direct
+/// <c>File.*</c> / <c>Directory.*</c> calls live in
+/// <see cref="FileSystemBlockParamStorage"/>, not here (#85 guardrail).
 /// </summary>
 public class LocalUsageTracker : IUsageTracker
 {
     public const int DefaultDailyLimit = 200;
 
-    private readonly string _storagePath;
+    private readonly IBlockParamStorage _storage;
+    private readonly StoragePath _storagePath;
     private readonly Func<DateTime> _dateProvider;
 
     public int DailyLimit { get; }
@@ -21,7 +27,20 @@ public class LocalUsageTracker : IUsageTracker
         string storagePath,
         int dailyLimit = DefaultDailyLimit,
         Func<DateTime>? dateProvider = null)
+        : this(FileSystemBlockParamStorage.Instance,
+               StoragePath.FromAbsolute(storagePath),
+               dailyLimit,
+               dateProvider)
     {
+    }
+
+    public LocalUsageTracker(
+        IBlockParamStorage storage,
+        StoragePath storagePath,
+        int dailyLimit = DefaultDailyLimit,
+        Func<DateTime>? dateProvider = null)
+    {
+        _storage = storage ?? throw new ArgumentNullException(nameof(storage));
         _storagePath = storagePath;
         DailyLimit = dailyLimit;
         _dateProvider = dateProvider ?? (() => DateTime.Now);
@@ -48,12 +67,17 @@ public class LocalUsageTracker : IUsageTracker
 
     private UsageData ReadData()
     {
-        if (!File.Exists(_storagePath))
+        // Local copy so any property access on the readonly StoragePath field
+        // emits ldloca rather than ldflda — partial-trust IL gate (see
+        // CLAUDE.md "Hard rules" and UiZoomService).
+        var path = _storagePath;
+
+        if (!_storage.FileExists(path))
             return new UsageData { Date = TodayString(), Count = 0 };
 
         try
         {
-            var bytes = File.ReadAllBytes(_storagePath);
+            var bytes = _storage.ReadAllBytes(path);
             var json = Obfuscation.Deobfuscate(bytes);
             var data = JsonConvert.DeserializeObject<UsageData>(json);
 
@@ -75,45 +99,25 @@ public class LocalUsageTracker : IUsageTracker
         {
             // Corrupt file: reset gracefully. Log so repeated resets don't
             // stay silent — they could signal tampering or a real read bug.
-            Log.Warning(ex, "LocalUsageTracker: resetting corrupt usage file {Path}", _storagePath);
+            Log.Warning(ex, "LocalUsageTracker: resetting corrupt usage file {Path}", path.FullPath);
             return new UsageData { Date = TodayString(), Count = 0 };
         }
     }
 
     private void WriteData(UsageData data)
     {
-        var dir = Path.GetDirectoryName(_storagePath);
-        if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
-            Directory.CreateDirectory(dir);
-
+        var path = _storagePath;
         var json = JsonConvert.SerializeObject(data);
         var bytes = Obfuscation.Obfuscate(json);
 
-        var tempPath = _storagePath + ".tmp";
-        File.WriteAllBytes(tempPath, bytes);
-
-        try
-        {
-            // File.Replace is atomic on NTFS via the Win32 ReplaceFile API —
-            // no gap between deleting the destination and renaming the temp
-            // file where another writer (or another Add-In instance) could
-            // create the destination and make our Move throw. .NET 5+ has
-            // File.Move(overwrite: true); we target net48 and don't want
-            // P/Invoke MoveFileEx just for this counter.
-            if (File.Exists(_storagePath))
-                File.Replace(tempPath, _storagePath, destinationBackupFileName: null);
-            else
-                File.Move(tempPath, _storagePath);
-        }
-        catch (IOException ex)
-        {
-            // ReplaceFile fails across volumes and on non-NTFS filesystems.
-            // Fall back to overwrite-copy — non-atomic but FS-agnostic, and
-            // a torn write here just resets the counter on next read.
-            Log.Warning(ex, "LocalUsageTracker: File.Replace fell back to overwrite-copy for {Path}", _storagePath);
-            File.Copy(tempPath, _storagePath, overwrite: true);
-            try { File.Delete(tempPath); } catch (IOException) { /* best-effort cleanup */ }
-        }
+        // Write-temp + atomic-replace via storage. IBlockParamStorage.Replace
+        // is atomic on NTFS (Win32 ReplaceFile) and falls back to overwrite-copy
+        // on cross-volume / non-NTFS — a torn write here just resets the counter
+        // on next read so the fallback is acceptable. WriteAllBytes auto-creates
+        // the parent directory, so no separate EnsureDirectory needed.
+        var tempPath = new StoragePath(path.FullPath + ".tmp");
+        _storage.WriteAllBytes(tempPath, bytes);
+        _storage.Replace(tempPath, path);
     }
 
     private string TodayString() => _dateProvider().ToString("yyyy-MM-dd");

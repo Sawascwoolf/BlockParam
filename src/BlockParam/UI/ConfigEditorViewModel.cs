@@ -21,6 +21,7 @@ namespace BlockParam.UI;
 public class ConfigEditorViewModel : ViewModelBase
 {
     private readonly ConfigLoader _configLoader;
+    private readonly RuleFileRepository _ruleFiles;
     private readonly Dispatcher _dispatcher;
     private string _sharedRulesDirectory = "";
     private string _validationMessage = "";
@@ -31,8 +32,17 @@ public class ConfigEditorViewModel : ViewModelBase
     public ConfigEditorViewModel(
         ConfigLoader configLoader,
         IEnumerable<string>? tagTableNames = null)
+        : this(configLoader, tagTableNames, RuleFileRepository.Default)
+    {
+    }
+
+    internal ConfigEditorViewModel(
+        ConfigLoader configLoader,
+        IEnumerable<string>? tagTableNames,
+        RuleFileRepository ruleFiles)
     {
         _configLoader = configLoader;
+        _ruleFiles = ruleFiles ?? throw new ArgumentNullException(nameof(ruleFiles));
         // Capture the UI-thread dispatcher at construction. Save flows defer
         // a reload via this dispatcher; using Dispatcher.CurrentDispatcher
         // inside the deferred callback would be wrong if Save was ever
@@ -195,7 +205,7 @@ public class ConfigEditorViewModel : ViewModelBase
         LoadFilesFromDirectory(localDir, RuleSource.Local, allFiles);
 
         var projectDir = _configLoader.GetTiaProjectRulesDirectory();
-        if (projectDir != null && Directory.Exists(projectDir))
+        if (projectDir != null && _ruleFiles.DirectoryExists(projectDir))
             LoadFilesFromDirectory(projectDir, RuleSource.TiaProject, allFiles);
 
         // Group by filename (override unit is the file). Same physical path
@@ -226,24 +236,11 @@ public class ConfigEditorViewModel : ViewModelBase
     private void LoadFilesFromDirectory(string directoryPath, RuleSource source,
         List<RuleFileViewModel> target)
     {
-        if (string.IsNullOrWhiteSpace(directoryPath) || !Directory.Exists(directoryPath))
-            return;
-
-        string[] files;
-        try
+        // Repository handles missing/unreadable directories (returns empty
+        // array + logs warning) so this stays a straight enumerate-and-map.
+        foreach (var file in _ruleFiles.ListJsonFiles(directoryPath))
         {
-            files = Directory.GetFiles(directoryPath, "*.json");
-            Array.Sort(files, StringComparer.OrdinalIgnoreCase);
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            Log.Warning(ex, "Cannot access rules directory: {Path}", directoryPath);
-            return;
-        }
-
-        foreach (var file in files)
-        {
-            var vm = RuleFileViewModel.FromFile(file, source);
+            var vm = RuleFileViewModel.FromFile(file, source, _ruleFiles);
             if (vm != null)
                 target.Add(vm);
         }
@@ -387,7 +384,7 @@ public class ConfigEditorViewModel : ViewModelBase
         {
             var candidate = i == 1 ? $"{baseName}.json" : $"{baseName}-{i}.json";
             var fullPath = Path.Combine(dir, candidate);
-            if (!stagedNames.Contains(candidate) && !File.Exists(fullPath))
+            if (!stagedNames.Contains(candidate) && !_ruleFiles.FileExists(fullPath))
                 return candidate;
         }
         return $"{baseName}-{Guid.NewGuid():N}.json";
@@ -400,18 +397,16 @@ public class ConfigEditorViewModel : ViewModelBase
     /// directory is fine — the claim set just stays seeded with whatever
     /// in-memory files have already been pre-claimed.
     /// </summary>
-    private static HashSet<string> ClaimsFor(
+    private HashSet<string> ClaimsFor(
         Dictionary<string, HashSet<string>> cache, string dir)
     {
         if (cache.TryGetValue(dir, out var set)) return set;
         set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        try
-        {
-            if (Directory.Exists(dir))
-                foreach (var p in Directory.EnumerateFiles(dir, "*.json"))
-                    set.Add(Path.GetFileName(p));
-        }
-        catch { /* unreadable dir → empty seed; SaveRuleFile will fail later with a clearer error */ }
+        // Repository swallows unreadable dirs and returns empty — the previous
+        // try/catch went away with the migration but the semantics are kept:
+        // empty seed lets SaveRuleFile fail later with a clearer error.
+        foreach (var name in _ruleFiles.ListJsonFileNames(dir))
+            set.Add(name);
         cache[dir] = set;
         return set;
     }
@@ -483,10 +478,10 @@ public class ConfigEditorViewModel : ViewModelBase
 
     private void DeleteFileFromDisk(RuleFileViewModel file)
     {
-        if (!File.Exists(file.FilePath)) return;
+        if (!_ruleFiles.FileExists(file.FilePath)) return;
         try
         {
-            File.Delete(file.FilePath);
+            _ruleFiles.DeleteFile(file.FilePath);
         }
         catch (Exception ex)
         {
@@ -507,12 +502,12 @@ public class ConfigEditorViewModel : ViewModelBase
 
         var currentPath = Path.GetFullPath(current.FilePath);
         var basePath = Path.GetFullPath(baseFile.FilePath);
-        if (File.Exists(currentPath)
+        if (_ruleFiles.FileExists(currentPath)
             && !string.Equals(currentPath, basePath, StringComparison.OrdinalIgnoreCase))
         {
             try
             {
-                File.Delete(currentPath);
+                _ruleFiles.DeleteFile(currentPath);
             }
             catch (Exception ex)
             {

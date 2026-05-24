@@ -150,6 +150,17 @@ public sealed class InMemoryBlockParamStorage : IBlockParamStorage
             || _directories.Any(d => !string.Equals(d, dir, StringComparison.OrdinalIgnoreCase) && IsUnder(d, dir));
     }
 
+    public void Replace(StoragePath source, StoragePath destination)
+    {
+        if (!_files.TryGetValue(source.FullPath, out var bytes))
+            throw new FileNotFoundException($"In-memory file not found: {source.FullPath}", source.FullPath);
+        EnsureParent(destination);
+        _files[destination.FullPath] = bytes;
+        _lastWriteTimes[destination.FullPath] = Clock();
+        _files.Remove(source.FullPath);
+        _lastWriteTimes.Remove(source.FullPath);
+    }
+
     /// <summary>
     /// Test-only helper: stamps an explicit last-write time on a file so
     /// tests can simulate "aged" files without juggling <see cref="Clock"/>.
