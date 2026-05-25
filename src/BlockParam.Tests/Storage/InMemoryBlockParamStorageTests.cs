@@ -260,27 +260,6 @@ public class InMemoryBlockParamStorageTests
     }
 
     [Fact]
-    public void Replace_defensive_copies_byte_array_into_destination()
-    {
-        // WriteAllBytes/ReadAllBytes both clone; Replace must too — otherwise
-        // a caller mutating the bytes it just wrote at src would also mutate
-        // what subsequent ReadAllBytes(dest) returns, which the real FS would
-        // never do.
-        var fs = new InMemoryBlockParamStorage();
-        var src = Root / "src.bin";
-        var dest = Root / "dest.bin";
-        var bytes = new byte[] { 0x10, 0x20 };
-        fs.WriteAllBytes(src, bytes);
-
-        fs.Replace(src, dest);
-
-        // Mutate what was originally written; the stored copy at dest must
-        // not move.
-        bytes[0] = 0xFF;
-        fs.ReadAllBytes(dest).Should().Equal(0x10, 0x20);
-    }
-
-    [Fact]
     public void OpenRead_returns_readable_stream_of_contents()
     {
         var fs = new InMemoryBlockParamStorage();

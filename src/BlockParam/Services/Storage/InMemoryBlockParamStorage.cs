@@ -155,12 +155,13 @@ public sealed class InMemoryBlockParamStorage : IBlockParamStorage
         if (!_files.TryGetValue(source.FullPath, out var bytes))
             throw new FileNotFoundException($"In-memory file not found: {source.FullPath}", source.FullPath);
         EnsureParent(destination);
-        // Defensive copy of the byte[]: WriteAllBytes and ReadAllBytes both
-        // clone on cross-boundary access to keep the in-memory store immune
-        // to caller mutation. Aliasing source's array into the destination
-        // key would silently violate that invariant — and the bug would only
-        // surface against the real FS impl where File.Replace gives the
-        // destination its own bytes.
+        // Defensive Clone matches the WriteAllBytes/ReadAllBytes contract.
+        // It is not currently observable through the public API (Replace
+        // immediately removes the source key so no caller can mutate the
+        // shared reference), but assigning the same array into two keys
+        // makes the invariant "each _files[key] is uniquely owned" silently
+        // false and would surface the moment someone adds a Copy() method or
+        // similar second-reference API. Cheap to keep correct here.
         _files[destination.FullPath] = (byte[])bytes.Clone();
         // Carry the source's last-write time across to the destination. The
         // FS implementation's File.Replace / File.Move preserves the source's
