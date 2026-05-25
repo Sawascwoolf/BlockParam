@@ -105,4 +105,33 @@ public class FileSystemBlockParamStorageTests : IDisposable
         _fs.WriteAllText(emptyDir / "now-has-a-file.txt", "");
         _fs.HasAnyEntries(emptyDir).Should().BeTrue();
     }
+
+    [Fact]
+    public void Replace_swaps_destination_atomically_on_same_volume()
+    {
+        var dest = _root / "live.dat";
+        var src = _root / "live.dat.tmp";
+        _fs.WriteAllText(dest, "old");
+        _fs.WriteAllText(src, "new");
+
+        _fs.Replace(src, dest);
+
+        _fs.FileExists(src).Should().BeFalse();
+        _fs.ReadAllText(dest).Should().Be("new");
+        File.Exists(src.FullPath).Should().BeFalse();
+        File.ReadAllText(dest.FullPath).Should().Be("new");
+    }
+
+    [Fact]
+    public void Replace_renames_when_destination_does_not_exist()
+    {
+        var dest = _root / "live.dat";
+        var src = _root / "live.dat.tmp";
+        _fs.WriteAllText(src, "first");
+
+        _fs.Replace(src, dest);
+
+        _fs.FileExists(src).Should().BeFalse();
+        _fs.ReadAllText(dest).Should().Be("first");
+    }
 }

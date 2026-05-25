@@ -88,4 +88,17 @@ public interface IBlockParamStorage
     /// remove" without enumerating the entire contents.
     /// </summary>
     bool HasAnyEntries(StoragePath directory);
+
+    /// <summary>
+    /// Moves <paramref name="source"/> over <paramref name="destination"/>,
+    /// replacing the destination if it exists. Best-effort atomic on NTFS
+    /// (Win32 ReplaceFile) when the destination already exists; falls back
+    /// to overwrite-copy + source-delete on cross-volume / non-NTFS targets
+    /// and uses a plain rename when the destination is absent. Source must
+    /// exist — throws otherwise.
+    ///
+    /// Used by callers that need write-temp-then-rename atomicity to avoid
+    /// torn writes on crash (see <c>LocalUsageTracker</c>'s counter file).
+    /// </summary>
+    void Replace(StoragePath source, StoragePath destination);
 }

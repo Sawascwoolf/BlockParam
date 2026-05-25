@@ -150,6 +150,32 @@ public sealed class InMemoryBlockParamStorage : IBlockParamStorage
             || _directories.Any(d => !string.Equals(d, dir, StringComparison.OrdinalIgnoreCase) && IsUnder(d, dir));
     }
 
+    public void Replace(StoragePath source, StoragePath destination)
+    {
+        if (!_files.TryGetValue(source.FullPath, out var bytes))
+            throw new FileNotFoundException($"In-memory file not found: {source.FullPath}", source.FullPath);
+        EnsureParent(destination);
+        // Defensive Clone matches the WriteAllBytes/ReadAllBytes contract.
+        // It is not currently observable through the public API (Replace
+        // immediately removes the source key so no caller can mutate the
+        // shared reference), but assigning the same array into two keys
+        // makes the invariant "each _files[key] is uniquely owned" silently
+        // false and would surface the moment someone adds a Copy() method or
+        // similar second-reference API. Cheap to keep correct here.
+        _files[destination.FullPath] = (byte[])bytes.Clone();
+        // Carry the source's last-write time across to the destination. The
+        // FS implementation's File.Replace / File.Move preserves the source's
+        // mtime; stamping Clock() here would make age-based sweepers
+        // (TempCacheCleanup style) green against the fake and red against
+        // real disk.
+        _lastWriteTimes[destination.FullPath] =
+            _lastWriteTimes.TryGetValue(source.FullPath, out var sourceMtime)
+                ? sourceMtime
+                : Clock();
+        _files.Remove(source.FullPath);
+        _lastWriteTimes.Remove(source.FullPath);
+    }
+
     /// <summary>
     /// Test-only helper: stamps an explicit last-write time on a file so
     /// tests can simulate "aged" files without juggling <see cref="Clock"/>.

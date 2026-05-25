@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using BlockParam.Diagnostics;
 
 namespace BlockParam.Services.Storage;
 
@@ -98,6 +99,59 @@ public sealed class FileSystemBlockParamStorage : IBlockParamStorage
         // returns lazily so we can early-exit on the first hit.
         using var e = Directory.EnumerateFileSystemEntries(directory.FullPath).GetEnumerator();
         return e.MoveNext();
+    }
+
+    public void Replace(StoragePath source, StoragePath destination)
+    {
+        EnsureParent(destination);
+        try
+        {
+            if (File.Exists(destination.FullPath))
+            {
+                // File.Replace is atomic on NTFS via Win32 ReplaceFile — no gap
+                // between deleting the destination and renaming the temp file
+                // where another writer could create the destination and make a
+                // naive Move throw. .NET 5+ has File.Move(overwrite); we target
+                // net48 and don't want P/Invoke MoveFileEx just for this.
+                File.Replace(source.FullPath, destination.FullPath,
+                    destinationBackupFileName: null);
+            }
+            else
+            {
+                File.Move(source.FullPath, destination.FullPath);
+            }
+        }
+        catch (IOException ex)
+        {
+            // ReplaceFile fails across volumes and on non-NTFS filesystems.
+            // Fall back to overwrite-copy — non-atomic but FS-agnostic. Log
+            // the fallback once per write: the pre-#85-followup LocalUsageTracker
+            // emitted this from its own catch so support could grep the per-day
+            // runtime log for "torn write resets counter" tickets and confirm
+            // a non-NTFS / network-redirected %APPDATA% is the cause. Logging
+            // belongs here now that the catch lives in the storage layer.
+            Log.Warning(ex,
+                "FileSystemBlockParamStorage.Replace fell back to overwrite-copy " +
+                "(cross-volume or non-NTFS): {Source} → {Destination}",
+                source.FullPath, destination.FullPath);
+            File.Copy(source.FullPath, destination.FullPath, overwrite: true);
+            // UnauthorizedAccessException alongside IOException: AV holding an
+            // open handle on the temp file can fail the delete while the copy
+            // already succeeded. Leaking a .tmp is the price; surfacing the
+            // exception to a caller that has no recovery path would crash the
+            // user-visible flow (counter save → Apply pipeline). Logged so the
+            // leak is at least visible.
+            try
+            {
+                File.Delete(source.FullPath);
+            }
+            catch (Exception delEx) when (delEx is IOException or UnauthorizedAccessException)
+            {
+                Log.Warning(delEx,
+                    "FileSystemBlockParamStorage.Replace could not remove source temp {Source}; orphaned",
+                    source.FullPath);
+            }
+        }
     }
 
     private static void EnsureParent(StoragePath path)

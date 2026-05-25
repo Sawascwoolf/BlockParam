@@ -197,6 +197,69 @@ public class InMemoryBlockParamStorageTests
     }
 
     [Fact]
+    public void Replace_moves_source_over_destination_atomically()
+    {
+        // LocalUsageTracker relies on Replace() to atomically swap a .tmp blob
+        // over the live counter file. The InMemory contract has to match that
+        // semantic exactly or the storage tests miss the regression that the
+        // disk tests cover.
+        var fs = new InMemoryBlockParamStorage();
+        var dest = Root / "live.dat";
+        var src = Root / "live.dat.tmp";
+        fs.WriteAllBytes(dest, new byte[] { 0x01 });
+        fs.WriteAllBytes(src, new byte[] { 0x02, 0x03 });
+
+        fs.Replace(src, dest);
+
+        fs.FileExists(src).Should().BeFalse();
+        fs.FileExists(dest).Should().BeTrue();
+        fs.ReadAllBytes(dest).Should().Equal(0x02, 0x03);
+    }
+
+    [Fact]
+    public void Replace_creates_destination_when_absent()
+    {
+        var fs = new InMemoryBlockParamStorage();
+        var dest = Root / "live.dat";
+        var src = Root / "live.dat.tmp";
+        fs.WriteAllText(src, "x");
+
+        fs.Replace(src, dest);
+
+        fs.FileExists(src).Should().BeFalse();
+        fs.ReadAllText(dest).Should().Be("x");
+    }
+
+    [Fact]
+    public void Replace_throws_when_source_missing()
+    {
+        var fs = new InMemoryBlockParamStorage();
+        Action act = () => fs.Replace(Root / "nope.tmp", Root / "live.dat");
+        act.Should().Throw<FileNotFoundException>();
+    }
+
+    [Fact]
+    public void Replace_preserves_source_last_write_time_at_destination()
+    {
+        // Real FS: File.Replace / File.Move carry the source's mtime onto the
+        // destination. The in-memory fake must do the same or age-based
+        // cleanup sweepers will be green against the fake and red on disk.
+        var fs = new InMemoryBlockParamStorage();
+        var srcMtime = new DateTime(2026, 1, 15, 9, 30, 0);
+        fs.Clock = () => srcMtime;
+        var src = Root / "live.dat.tmp";
+        var dest = Root / "live.dat";
+        fs.WriteAllBytes(src, new byte[] { 0x01 });
+
+        // Advance the clock so a Clock()-stamped destination would be obvious.
+        fs.Clock = () => srcMtime.AddHours(2);
+
+        fs.Replace(src, dest);
+
+        fs.GetLastWriteTime(dest).Should().Be(srcMtime);
+    }
+
+    [Fact]
     public void OpenRead_returns_readable_stream_of_contents()
     {
         var fs = new InMemoryBlockParamStorage();
