@@ -13,7 +13,14 @@ namespace BlockParam.Tests;
 /// matches (with a <c>*</c> wildcard for the varying instance/DB segment)
 /// and name the leaf field being written — not a single concrete
 /// DB-qualified example path. <see cref="ScopeLabelFormatter"/> is the
-/// single source of truth every render site routes through.
+/// single source of truth every dropdown render site routes through.
+///
+/// #174: the dropdown wording deliberately differs from the Set button
+/// caption — dropdown shows the in-scope total via Scope_DropdownItem
+/// ("N member(s) in pattern"); the button shows the will-change count
+/// via MenuTitle_SetAll ("Set all N in pattern"). They previously shared
+/// MenuTitle_SetAll and contradicted each other once some members already
+/// held the target value.
 /// </summary>
 public class ScopeLabelFormatterTests
 {
@@ -46,7 +53,7 @@ public class ScopeLabelFormatterTests
         var scope = Scope("DB21.resetButton", "resetButton", "elementId");
 
         ScopeLabelFormatter.Pattern(scope).Should().Be("*.resetButton.elementId");
-        scope.Label.Should().Be("Set all 4 in *.resetButton.elementId");
+        scope.Label.Should().Be("4 member(s) in *.resetButton.elementId");
     }
 
     [Fact]
@@ -56,7 +63,7 @@ public class ScopeLabelFormatterTests
         var scope = Scope("DB21", "", "elementId");
 
         ScopeLabelFormatter.Pattern(scope).Should().Be("*.elementId");
-        scope.Label.Should().Be("Set all 4 in *.elementId");
+        scope.Label.Should().Be("4 member(s) in *.elementId");
     }
 
     [Fact]
@@ -68,7 +75,7 @@ public class ScopeLabelFormatterTests
         var scope = Scope("DB21.resetButton", "resetButton", "elementId",
             matchCount: 8, isCrossDb: true);
 
-        scope.Label.Should().Be("Set all 8 in *.resetButton.elementId");
+        scope.Label.Should().Be("8 member(s) in *.resetButton.elementId");
         scope.Label.Should().NotContain("across all selected DBs");
         scope.Label.Should().NotContain("'");
     }
@@ -79,7 +86,7 @@ public class ScopeLabelFormatterTests
         var scope = Scope("All selected DBs", "", "elementId",
             matchCount: 12, isCrossDb: true);
 
-        scope.Label.Should().Be("Set all 12 in *.elementId");
+        scope.Label.Should().Be("12 member(s) in *.elementId");
     }
 
     [Fact]
@@ -90,7 +97,22 @@ public class ScopeLabelFormatterTests
         var scope = Scope("DB21.Motors", "Motors", leafName: "", matchCount: 5);
 
         ScopeLabelFormatter.Pattern(scope).Should().Be("*.Motors");
-        scope.Label.Should().Be("Set all 5 in *.Motors");
+        scope.Label.Should().Be("5 member(s) in *.Motors");
+    }
+
+    [Fact]
+    public void DropdownLabel_DoesNotUseTheSetVerb_174()
+    {
+        // The dropdown describes the scope (a thing to pick), not the action
+        // (a thing to do). The "Set" verb belongs to the button next to it,
+        // which advertises the will-change count. Sharing "Set all N" caused
+        // the two adjacent counters to contradict each other once some
+        // members already held the target value (#174).
+        var scope = Scope("DB21.resetButton", "resetButton", "elementId", matchCount: 48);
+        scope.Label.Should().NotStartWith("Set ",
+            "the dropdown is not the action — the Set button is");
+        scope.Label.Should().StartWith("48 ",
+            "dropdown always shows MatchCount, never CountWouldChangeMembers");
     }
 
     [Fact]
@@ -113,7 +135,7 @@ public class ScopeLabelFormatterTests
 
         var dbScope = result.Scopes.First(s => s.AncestorName == "UdtInstancesDB");
         dbScope.LeafName.Should().Be("ModuleId");
-        dbScope.Label.Should().Be($"Set all {dbScope.MatchCount} in *.ModuleId");
+        dbScope.Label.Should().Be($"{dbScope.MatchCount} member(s) in *.ModuleId");
         dbScope.Label.Should().NotContain("UdtInstancesDB",
             "the label states the pattern, not the concrete DB name");
     }
@@ -131,8 +153,7 @@ public class ScopeLabelFormatterTests
         crossDb.Should().NotBeEmpty("two identical DBs must produce cross-DB lifts");
         crossDb.Should().AllSatisfy(s =>
         {
-            s.Label.Should().StartWith("Set all ");
-            s.Label.Should().Contain("*.");
+            s.Label.Should().Contain(" member(s) in *.");
             s.Label.Should().NotContain("across all selected DBs");
             s.Label.Should().NotContain("'");
         });

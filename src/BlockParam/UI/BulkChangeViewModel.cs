@@ -586,10 +586,13 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         {
             if (Selection.IsManualMode)
                 return Res.Format("Dialog_SetManualCount", CountWouldChangeMembers());
-            // #143: single source of truth — the patterned scope label.
-            // CountWouldChangeMembers() (not MatchCount) is the staged count;
-            // route it through the same MenuTitle_SetAll template the dropdown
-            // / ToString use so the wording can't drift.
+            // #143/#174: the button advertises the will-change count via
+            // MenuTitle_SetAll ("Set all N in pattern"). The adjacent scope
+            // dropdown advertises MatchCount via Scope_DropdownItem
+            // ("N member(s) in pattern") — different verb, different count,
+            // on purpose: the dropdown describes the scope's size, the
+            // button describes the action's effect. Share only the pattern
+            // fragment so the *.path segment stays in lockstep.
             return Selection.SelectedScope != null
                 ? Res.Format("MenuTitle_SetAll",
                     CountWouldChangeMembers(),
