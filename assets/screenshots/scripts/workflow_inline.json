@@ -6,6 +6,16 @@
   "udt_dir": "../../fixtures/UdtTypes",
   "tag_table_dir": "../../fixtures/TagTables",
   "rules_dir": "../../fixtures/rules",
+  "anchor_plc": "Plant_A",
+  "peer_fixtures": [
+    { "plc": "Plant_A", "path": "../../fixtures/DB_ProcessPlant_A1.xml" },
+    { "plc": "Plant_A", "path": "../../fixtures/DB_FluidControl.xml" },
+    { "plc": "Plant_A", "path": "../../fixtures/DB_PressureLoop.xml" },
+    { "plc": "Plant_A", "path": "../../fixtures/DB_TemperatureSP.xml" },
+    { "plc": "Plant_A", "path": "../../fixtures/DB_BatchRecipe.xml" },
+    { "plc": "Plant_B", "path": "../../fixtures/DB_ProcessPlant_B1.xml" },
+    { "plc": "Plant_C", "path": "../../fixtures/DB_ProcessPlant_C1.xml" }
+  ],
   "scenes": [
 
     { "id": "wf01_ch_discover", "filename": "wf01_ch_discover.png", "beat": "chapterHold",
@@ -470,6 +480,14 @@
 
     { "id": "mdb06_tree_rebuilds", "filename": "mdb06_tree_rebuilds.png", "beat": "readingBulk", "dialog": "main", "preserveState": true,
       "cursor": { "target": "chip:DB_ProcessPlant_B1" } },
+
+    { "id": "mdb06a_pill_a_hover", "filename": "mdb06a_pill_a_hover.png", "beat": "pointingWithMouse", "dialog": "main", "preserveState": true,
+      "cursor": { "target": "chip:DB_ProcessPlant_A1" } },
+    { "id": "mdb06b_pill_a_press", "filename": "mdb06b_pill_a_press.png", "beat": "clickDown", "dialog": "main", "preserveState": true, "click": "press",
+      "cursor": { "target": "chip:DB_ProcessPlant_A1" } },
+    { "id": "mdb06c_pill_a_popup_open", "filename": "mdb06c_pill_a_popup_open.png", "beat": "readingShort", "dialog": "main", "preserveState": true, "click": "release",
+      "activeSet": { "openPillPopup": "Plant_A" },
+      "cursor": { "target": "chip:DB_ProcessPlant_A1" } },
 
     { "id": "mdb07_chip_strip_settled", "filename": "mdb07_chip_strip_settled.png", "beat": "readingShort", "dialog": "main", "preserveState": true,
       "cursor": { "target": "chip:DB_ProcessPlant_A1" } },

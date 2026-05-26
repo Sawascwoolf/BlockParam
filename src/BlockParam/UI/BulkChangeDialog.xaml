@@ -1828,5 +1828,65 @@
             </ListBox.ItemTemplate>
         </ListBox>
     </Border>
+
+    <!-- Scripted-only Add-DB dropdown overlay. Same HWND-popup problem as
+         ScopeOverlay above: the real <Popup> bound to IsAddDbPopupOpen lives
+         outside the dialog's visual tree and is invisible to RenderTargetBitmap,
+         so mdb02 / mdb03 / mdb04 captured a closed dropdown. This in-tree
+         mirror is shown only by ShowAddDbDropdownForScripted and stays
+         Collapsed everywhere else. Item template kept visually equivalent to
+         the AddPlcListBox template inside the real Popup. -->
+    <Border x:Name="AddDbOverlay" Panel.ZIndex="1001"
+            Background="White" BorderBrush="#E5E7EB" BorderThickness="1"
+            CornerRadius="6" Padding="4" MinWidth="180"
+            HorizontalAlignment="Left" VerticalAlignment="Top"
+            Visibility="Collapsed" MaxHeight="320">
+        <Border.Effect>
+            <DropShadowEffect Color="#000000" Opacity="0.18"
+                              BlurRadius="12" ShadowDepth="2"/>
+        </Border.Effect>
+        <ListBox x:Name="AddDbOverlayList" Background="Transparent"
+                 BorderThickness="0" MaxHeight="312">
+            <ListBox.ItemTemplate>
+                <DataTemplate>
+                    <StackPanel Orientation="Horizontal" Margin="2">
+                        <Path Data="{StaticResource DatabaseIconGeometry}"
+                              Fill="#1F2937"
+                              Stretch="Uniform" Width="14" Height="14"
+                              VerticalAlignment="Center"
+                              Margin="0,0,8,0"/>
+                        <TextBlock Text="{Binding}"
+                                   VerticalAlignment="Center"/>
+                    </StackPanel>
+                </DataTemplate>
+            </ListBox.ItemTemplate>
+        </ListBox>
+    </Border>
+
+    <!-- Scripted-only pill-popup overlay. Same HWND-popup problem as the
+         add-DB / scope overlays above, but here the mirror has to live at
+         the dialog level rather than inside the pill: if it sat inside the
+         pill's own Grid it would either stretch the chip's height (Grid
+         measure feedback) or be z-ordered beneath the toolbar / tree rows
+         that render after the chip strip. Sitting at the dialog root with
+         Panel.ZIndex 1001 sidesteps both problems.
+
+         The MultiSelectDropdown reuses the same UserControl the real popup
+         hosts, with DataContext wired in code-behind to the pill's
+         InternalState — single source of truth, identical visuals to the
+         live UI. -->
+    <Border x:Name="PillPopupOverlay" Panel.ZIndex="1001"
+            Background="White"
+            CornerRadius="8"
+            BorderBrush="#E5E7EB" BorderThickness="1"
+            HorizontalAlignment="Left" VerticalAlignment="Top"
+            Visibility="Collapsed">
+        <Border.Effect>
+            <DropShadowEffect Color="#000000" Opacity="0.18"
+                              BlurRadius="14" ShadowDepth="3"
+                              Direction="270"/>
+        </Border.Effect>
+        <controls:MultiSelectDropdown x:Name="PillPopupOverlayContent"/>
+    </Border>
     </Grid>
 </Window>

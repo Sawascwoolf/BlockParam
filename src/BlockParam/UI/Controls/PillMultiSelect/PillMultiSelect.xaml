@@ -154,5 +154,6 @@
                 <local:MultiSelectDropdown x:Name="Dropdown"/>
             </Border>
         </Popup>
+
     </Grid>
 </UserControl>

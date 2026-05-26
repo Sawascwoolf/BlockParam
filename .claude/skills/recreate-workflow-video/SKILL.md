@@ -22,7 +22,11 @@ bash assets/screenshots/workflow/external/render-external.sh
 bash assets/screenshots/scripts/build_workflow_video.sh
 ```
 
-Output: `assets/screenshots/workflow/workflow_inline.mp4`. The stitch script auto-opens it in the default player.
+Outputs:
+- `assets/screenshots/workflow/workflow_inline.mp4` — the marketing video.
+- `assets/screenshots/workflow/_validation_grid.png` — a 4-column row-major contact sheet of every scene in manifest order, captioned with `<idx>. <scene-id>`. Built automatically at the end of `build_workflow_video.sh` from the same frames as the MP4 so the two never go out of sync. Skipped (with a one-line warning) if Python or Pillow isn't installed — install with `python -m pip install Pillow`. Open it to spot-check every scene without scrubbing the video.
+
+The stitch script does NOT auto-open the MP4 by default; set `BLOCKPARAM_AUTO_OPEN=1` to restore the old behavior. The previous default spawned a `cmd //c start` child that kept the shell "running" until the player was closed, which hung headless and agent-driven rebuilds.
 
 ## Why four steps
 

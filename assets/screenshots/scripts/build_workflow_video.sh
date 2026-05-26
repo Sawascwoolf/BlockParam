@@ -79,6 +79,26 @@ rm -f "$concat_list"
 mp4_size=$(stat -c%s "$out_mp4" 2>/dev/null || stat -f%z "$out_mp4")
 echo "MP4: $((mp4_size / 1024)) KB"
 
-# Launch in the OS default video player so each iteration is a single command.
-# `cmd //c start` avoids msys path mangling; cygpath converts to a Windows path.
-cmd //c start "" "$(cygpath -w "$out_mp4")"
+# Validation contact sheet, built from the exact same frames just stitched into
+# the MP4 so the two never diverge. Skipped (with a one-line warning) when
+# Python or PIL is missing — the MP4 is the primary artifact; the grid is a
+# review aid that shouldn't block the pipeline.
+grid_script="$script_dir/build_workflow_grid.py"
+if [[ -f "$grid_script" ]]; then
+    if command -v python >/dev/null && python -c "import PIL" 2>/dev/null; then
+        echo "Building validation grid -> assets/screenshots/workflow/_validation_grid.png"
+        ( cd "$script_dir/../../.." && python "$grid_script" )
+    else
+        echo "WARN: skipping validation grid (python or Pillow not on PATH)."
+        echo "      Install: python -m pip install Pillow"
+    fi
+fi
+
+# Opt-in player launch only. The default behavior used to be `cmd //c start`,
+# which spawned a child cmd that never exits from this script's perspective —
+# the spawning shell stays "running" until the player is closed, which hangs
+# headless pipelines and any agent-driven rebuild. Set BLOCKPARAM_AUTO_OPEN=1
+# (interactive use) to restore the old behavior.
+if [[ "${BLOCKPARAM_AUTO_OPEN:-0}" == "1" ]]; then
+    cmd //c start "" "$(cygpath -w "$out_mp4")"
+fi

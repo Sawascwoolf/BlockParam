@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
@@ -473,6 +474,133 @@ public partial class BulkChangeDialog : Window
         ScopeOverlay.Visibility = Visibility.Collapsed;
         ScopeOverlayList.ItemsSource = null;
         ScopeOverlayList.SelectedItem = null;
+    }
+
+    /// <summary>
+    /// Scripted-only: opens a fake Add-DB dropdown anchored under the
+    /// "+ PLC" / AddDbButton, populated with the VM's InactiveProjectPlcs.
+    /// The real Popup bound to IsAddDbPopupOpen lives in a separate HWND
+    /// and is invisible to RenderTargetBitmap, so mdb02 / mdb03 / mdb04
+    /// captured an empty dialog instead of the open dropdown they expected
+    /// (#138). Mirrors the ScopeOverlay pattern: in-tree Border + ListBox
+    /// positioned by translating the button's bottom-left into Content
+    /// coordinates.
+    /// </summary>
+    internal void ShowAddDbDropdownForScripted()
+    {
+        if (DataContext is not BulkChangeViewModel vm) return;
+        if (vm.ActiveSet.InactiveProjectPlcs.Count == 0) return;
+
+        UpdateLayout();
+
+        AddDbOverlayList.ItemsSource = vm.ActiveSet.InactiveProjectPlcs;
+        AddDbOverlayList.SelectedItem = null;
+
+        var bottomLeft = AddDbButton.TranslatePoint(
+            new System.Windows.Point(0, AddDbButton.ActualHeight), (UIElement)Content);
+        AddDbOverlay.Margin = new Thickness(bottomLeft.X, bottomLeft.Y, 0, 0);
+        AddDbOverlay.Visibility = Visibility.Visible;
+
+        UpdateLayout();
+        foreach (var item in AddDbOverlayList.Items)
+            AddDbOverlayList.ItemContainerGenerator.ContainerFromItem(item);
+    }
+
+    /// <summary>Scripted-only: tears down the Add-DB dropdown overlay.</summary>
+    internal void HideAddDbDropdownScripted()
+    {
+        AddDbOverlay.Visibility = Visibility.Collapsed;
+        AddDbOverlayList.ItemsSource = null;
+        AddDbOverlayList.SelectedItem = null;
+    }
+
+    /// <summary>
+    /// Scripted-only: open the dialog-level pill popup mirror anchored under
+    /// the PLC pill whose VM matches <paramref name="plcName"/>. The mirror
+    /// lives at the dialog's root Grid (not inside the pill) for two
+    /// reasons: an in-pill overlay either stretches the chip via Grid
+    /// measure feedback, or gets z-ordered beneath the toolbar/tree rows
+    /// that paint after the chip strip. Sitting at root with ZIndex=1001
+    /// avoids both.
+    /// </summary>
+    internal void ShowPillPopupForScripted(string plcName)
+    {
+        UpdateLayout();
+        var match = FindPillByPlcName(plcName);
+        if (match == null)
+        {
+            Log.Warning(
+                "ShowPillPopupForScripted: no PillMultiSelect found for PLC '{Plc}'",
+                plcName);
+            return;
+        }
+
+        // Run the same lazy-load the real popup triggers, so the dropdown
+        // populates before we render the overlay.
+        match.SetScriptedOpenState(true);
+        UpdateLayout();
+
+        // Point the overlay's MultiSelectDropdown at this pill's state. Same
+        // source of truth as the real popup — no second copy of internal
+        // state, no drift.
+        PillPopupOverlayContent.DataContext = match.InternalState;
+
+        // Anchor under the trigger's bottom-left in dialog-content coords.
+        var bottomLeft = match.TriggerElement.TranslatePoint(
+            new System.Windows.Point(0, match.TriggerElement.ActualHeight),
+            (UIElement)Content);
+        PillPopupOverlay.Margin = new Thickness(bottomLeft.X, bottomLeft.Y + 4, 0, 0);
+        PillPopupOverlay.Visibility = Visibility.Visible;
+        UpdateLayout();
+    }
+
+    /// <summary>Scripted-only: hide the pill-popup overlay (per-scene reset).</summary>
+    internal void HideAllPillPopupsScripted()
+    {
+        PillPopupOverlay.Visibility = Visibility.Collapsed;
+        PillPopupOverlayContent.DataContext = null;
+        // Reset the IsOpen flag on every pill so a re-show doesn't inherit
+        // a previous scene's "already lazy-loaded" state.
+        foreach (var pill in EnumerateAllPills())
+            pill.SetScriptedOpenState(false);
+    }
+
+    /// <summary>
+    /// Walks the visual tree under this dialog and yields every
+    /// PillMultiSelect instance — used by capture-mode helpers that need to
+    /// address pills without each one having a named XAML hook.
+    /// </summary>
+    private IEnumerable<BlockParam.UI.Controls.PillMultiSelect.PillMultiSelect>
+        EnumerateAllPills()
+    {
+        var stack = new Stack<DependencyObject>();
+        stack.Push(this);
+        while (stack.Count > 0)
+        {
+            var current = stack.Pop();
+            int count = VisualTreeHelper.GetChildrenCount(current);
+            for (int i = 0; i < count; i++)
+            {
+                var child = VisualTreeHelper.GetChild(current, i);
+                if (child is BlockParam.UI.Controls.PillMultiSelect.PillMultiSelect pill)
+                    yield return pill;
+                else
+                    stack.Push(child);
+            }
+        }
+    }
+
+    private BlockParam.UI.Controls.PillMultiSelect.PillMultiSelect? FindPillByPlcName(string plcName)
+    {
+        foreach (var pill in EnumerateAllPills())
+        {
+            if (pill.DataContext is PlcPillViewModel vm
+                && string.Equals(vm.PlcName, plcName, System.StringComparison.OrdinalIgnoreCase))
+            {
+                return pill;
+            }
+        }
+        return null;
     }
 
     /// <summary>
@@ -1099,10 +1227,45 @@ public partial class BulkChangeDialog : Window
         return vm.PendingInlineEditCount == 0;
     }
 
+    /// <summary>
+    /// Scripted-only escape hatch: when true, OnClosing skips every
+    /// "unsaved changes" prompt and discards both active and stashed
+    /// pending edits silently. Set by DevLauncher capture mode before
+    /// <see cref="Window.Close"/>, because the late MessageBox.Show
+    /// fallbacks in OnClosing bypass the IMessageBoxService injection
+    /// and would otherwise pop a real modal that hangs the headless
+    /// run waiting for a human click.
+    /// <para>
+    /// Visibility is <c>internal</c> to match the rest of the
+    /// scripted-only API on this dialog; DevLauncher + Tests already
+    /// have InternalsVisibleTo, so widening is unnecessary.
+    /// </para>
+    /// </summary>
+    internal bool SuppressClosePromptsScripted { get; set; }
+
     protected override void OnClosing(System.ComponentModel.CancelEventArgs e)
     {
         base.OnClosing(e);
         if (DataContext is not BulkChangeViewModel vm) return;
+
+        if (SuppressClosePromptsScripted)
+        {
+            // Mirror the non-scripted DiscardAll branch: discard active
+            // edits AND wipe stashes. Stashes are in-memory only so they'd
+            // evaporate with the process anyway, but clearing them keeps
+            // the symmetry explicit and stops the asymmetry being a
+            // footgun if this flag ever gets reused in interactive mode.
+            if (vm.PendingInlineEditCount > 0)
+                vm.DiscardPendingSilent();
+            if (vm.ActiveSet.StashedDbs.Count > 0)
+            {
+                Log.Information(
+                    "SuppressClosePromptsScripted: dropping {Count} stashed DB(s)",
+                    vm.ActiveSet.StashedDbs.Count);
+                vm.ActiveSet.StashedDbs.Clear();
+            }
+            return;
+        }
 
         // Unsaved pending edits — across the active DB *and* any stashed DBs.
         // Stash-only loss used to be silent (#59 follow-up); now both states
