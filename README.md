@@ -71,8 +71,9 @@ single action.
 - **Live search** with hit count, match highlighting, and smart expansion of matching subtrees.
 - **Setpoint filter** hides internal/structural members (configurable per rule).
 - **Colour-coded rows**: search hits (yellow), pending edits (orange), already-matching (green),
-  affected by bulk op (blue), invalid (red).
-- **Unused struct-member cleanup** with safety confirmation (UDT members are never touched).
+  affected by bulk op (blue), invalid (red), pre-existing rule violations (purple) &mdash; entries
+  that already fail the configured rules in the TIA project, so you can see legacy violations
+  BlockParam did not introduce.
 
 ### Platform
 - **English &amp; German UI**.
@@ -128,7 +129,7 @@ release notes: [Releases page](https://github.com/Sawascwoolf/BlockParam/release
 | Tier | Daily limit | Features | Price |
 |---|---|---|---|
 | **Free** | 200 value changes per day | All features included | &euro; 0 |
-| **Pro** | Unlimited | All features + priority email support | 15 &euro; / year (net) |
+| **Pro** | Unlimited | All features + priority email support | 50 &euro; / year (net) |
 
 All features work in both tiers &mdash; the Pro tier lifts the daily quota and funds further
 development. Pro licenses are sold via [LemonSqueezy](https://blockparam.lemonsqueezy.com) as
