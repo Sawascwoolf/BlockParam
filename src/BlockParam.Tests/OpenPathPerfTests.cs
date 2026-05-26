@@ -174,6 +174,11 @@ public class OpenPathPerfTests
     {
         const int sticks = 50;
         const int depth = 100;
+        // depth must be ≥ 2: with depth==1 the wrapper loop body never runs,
+        // each "stick" collapses to a bare leaf, and HHD returns in O(1) per
+        // node — the degenerate #179 shape this test was rewritten to avoid.
+        System.Diagnostics.Debug.Assert(depth >= 2,
+            "H4 needs nested chains; depth<2 re-creates the #179 shape");
         var stickRoots = new MemberNode[sticks];
         for (int s = 0; s < sticks; s++)
         {
@@ -198,6 +203,16 @@ public class OpenPathPerfTests
             while (cur.Children.Count > 0) cur = cur.Children[0];
             cur.IsAffected = true;
         }
+
+        // JIT warmup: prime both code paths so the timed sections don't pay
+        // first-call compilation cost. swNew goes through four previously-
+        // uncalled product methods (BuildFlatList, RefreshHighlightCache,
+        // AddNodeToFlatList, BulkObservableCollection.ReplaceAll) — at the
+        // sub-millisecond absolute scale this test runs at, JIT alone can
+        // swamp the algorithmic gap and re-flip the assertion (#179).
+        var warmupOldFlat = new List<MemberNodeViewModel>();
+        OldAddNodeToFlatList(rootVm, warmupOldFlat);
+        new FlatTreeManager().Refresh(new[] { rootVm });
 
         // ---- before: reproduce old per-node recursive scan (O(depth²) per stick) ----
         var swOld = Stopwatch.StartNew();
@@ -229,12 +244,21 @@ public class OpenPathPerfTests
 
         newMs.Should().BeLessThan(oldMs,
             "the cached O(n) highlight pass must beat the old O(depth²) per-node recursion");
+        (oldMs / System.Math.Max(newMs, 0.001)).Should().BeGreaterThan(3,
+            "expected ratio ~20× (depth² vs depth) — a result below 3× means the "
+            + "cache regressed or the workload's quadratic structure was broken");
     }
 
     private static void SetExpandedRecursive(MemberNodeViewModel node)
     {
-        node.IsExpanded = true;
-        node.IsSmartExpanded = true;
+        // Match production ExpandRecursive's HasChildren guard — IsExpanded /
+        // IsSmartExpanded on a leaf is meaningless and the symmetry keeps any
+        // future "IsSmartExpanded ⇒ HasChildren" invariant from tripping here.
+        if (node.HasChildren)
+        {
+            node.IsExpanded = true;
+            node.IsSmartExpanded = true;
+        }
         foreach (var child in node.Children)
             SetExpandedRecursive(child);
     }
