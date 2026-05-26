@@ -39,8 +39,11 @@ The row highlights and the **Bulk Edit** panel on the right populates with the
 selection.
 
 The **Scope** dropdown shows one option per ancestor level. The dialog detects
-your DB's actual hierarchy and offers a "Set all N in `<path>`" entry for each
-level — from the immediate parent up to the DB root.
+your DB's actual hierarchy and offers an "N member(s) in `<path>`" entry for each
+level — from the immediate parent up to the DB root. (The blue **Set** button
+next to the dropdown advertises a separate count — how many of those members
+will actually change once you type a value, i.e. excluding ones that already
+hold the target value.)
 
 <p align="center">
   <img src="../../assets/screenshots/03_scope_module.png" alt="Bulk edit configured at the module level — 8 targets shown in blue" width="700">

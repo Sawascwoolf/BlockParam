@@ -638,10 +638,14 @@ public class ScopeLevel
     public int MatchCount => MatchingMembers.Count;
 
     /// <summary>
-    /// The single user-facing label, e.g. <c>Set all 4 in *.resetButton.elementId</c>.
-    /// All render sites (both XAML ItemTemplates, the Set button, its tooltip,
-    /// <see cref="ToString"/>, the context menu) bind/route through this so
-    /// they cannot drift (#143).
+    /// The dropdown / overlay item label, e.g.
+    /// <c>4 member(s) in *.resetButton.elementId</c>. Always advertises
+    /// <see cref="MatchCount"/> — the scope's size, not the action's
+    /// will-change count. The Set button composes its own caption with the
+    /// will-change count via <c>MenuTitle_SetAll</c>, so the dropdown and
+    /// the button next to it can read different numbers without
+    /// contradicting (#174). <see cref="ToString"/> mirrors this so logs
+    /// describe the scope, not a transient action count.
     /// </summary>
     public string Label => ScopeLabelFormatter.Format(this);
 

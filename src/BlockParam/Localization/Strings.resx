@@ -45,7 +45,7 @@
   </data>
   <data name="MenuTitle_SetAll" xml:space="preserve">
     <value>Set all {0} in {1}</value>
-    <comment>{0} = match count, {1} = scope match pattern (e.g. *.resetButton.elementId). Single source of truth for the bulk-scope label; rendered by ScopeLabelFormatter and reused by the dropdown, Set button, tooltip, ToString and context menu (#143).</comment>
+    <comment>{0} = will-change count (members whose effective value ≠ NewValue), {1} = scope match pattern (e.g. *.resetButton.elementId). Used by the Set button caption — count drops as members reach the target value. The scope dropdown advertises in-scope totals via Scope_DropdownItem instead, so the two adjacent counters don't contradict each other (#174).</comment>
   </data>
   <!-- Context menu action item label (#50). The submenu root is MenuTitle_BulkChange ("BlockParam..."); this is the leaf the user clicks. -->
   <data name="MenuTitle_EditStartValues" xml:space="preserve">
@@ -368,6 +368,10 @@ This cannot be undone.</value>
   </data>
   <data name="Dialog_SetTooltip" xml:space="preserve">
     <value>Stage bulk values as pending (yellow)</value>
+  </data>
+  <data name="Scope_DropdownItem" xml:space="preserve">
+    <value>{0} member(s) in {1}</value>
+    <comment>{0} = total in-scope member count, {1} = scope match pattern (e.g. *.resetButton.elementId). Dropdown wording (and the capture-overlay clone) — describes the scope's size, not the action. The Set button uses MenuTitle_SetAll for the will-change count (#174).</comment>
   </data>
   <data name="Dialog_SetTooltip_ScopeIdle" xml:space="preserve">
     <value>{0} member(s) in {1}</value>
