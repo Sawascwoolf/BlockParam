@@ -152,27 +152,69 @@ public class OpenPathPerfTests
 
     /// <summary>
     /// #154 H4. "Before": the removed recursive HasHighlightedDescendant
-    /// called per visible node under a smart-expanded parent (O(n²) on a flat
-    /// array). "After": the real <see cref="FlatTreeManager.Refresh"/>, which
-    /// fills the highlight cache in one O(n) pass. Asserts both produce the
-    /// identical visible sequence (timing equivalent work) plus a speedup.
+    /// called per visible node under a smart-expanded parent — quadratic in
+    /// the depth of every visible chain because HHD re-scans the subtree
+    /// from each level. "After": the real <see cref="FlatTreeManager.Refresh"/>,
+    /// which fills the highlight cache in one O(n) post-order pass.
+    ///
+    /// #179: the prior workload (single flat array, one mid-array highlight)
+    /// did not exercise the quadratic path — leaves have no children, so HHD
+    /// returns in O(1) and the new code's unconditional O(n) cache fill ended
+    /// up doing more total work than the old short-circuiting walk, flipping
+    /// the assertion on Windows runners with shifted constants. The workload
+    /// below replaces it with 50 "sticks" of depth 100 (single-child chains)
+    /// where the only highlight sits at each stick's bottom leaf: HHD at level
+    /// k must walk (depth-k-1) descendants down the chain before finding it,
+    /// summing to depth*(depth-1)/2 ≈ 5,000 ops per stick × 50 sticks ≈ 247k
+    /// ops for old vs. ~10k for new (2× walk over 5,001 nodes). That gives a
+    /// stable 20×+ ratio and matches the regression #154 H4 actually defends.
     /// </summary>
     [Fact]
     public void H4_SmartExpandFlatBuild_BeforeAfter()
     {
-        const int n = 5000;
-        var leaves = new MemberNode[n];
-        for (int i = 0; i < n; i++)
-            leaves[i] = new MemberNode($"[{i}]", "DInt", i.ToString(),
-                $"Big[{i}]", null, Array.Empty<MemberNode>());
-        var rootModel = new MemberNode("Big", "Array[0..4999] of DInt", null,
-            "Big", null, leaves);
+        const int sticks = 50;
+        const int depth = 100;
+        // depth must be ≥ 2: with depth==1 the wrapper loop body never runs,
+        // each "stick" collapses to a bare leaf, and HHD returns in O(1) per
+        // node — the degenerate #179 shape this test was rewritten to avoid.
+        System.Diagnostics.Debug.Assert(depth >= 2,
+            "H4 needs nested chains; depth<2 re-creates the #179 shape");
+        var stickRoots = new MemberNode[sticks];
+        for (int s = 0; s < sticks; s++)
+        {
+            // Build bottom leaf first, then wrap upwards into a chain.
+            MemberNode node = new MemberNode($"S{s}_Leaf", "DInt", "0",
+                $"S{s}.Leaf", null, Array.Empty<MemberNode>());
+            for (int d = depth - 2; d >= 0; d--)
+                node = new MemberNode($"S{s}_L{d}", "Struct", null,
+                    $"S{s}.L{d}", null, new[] { node });
+            stickRoots[s] = node;
+        }
+        var rootModel = new MemberNode("Root", "Struct", null,
+            "Root", null, stickRoots);
         var rootVm = new MemberNodeViewModel(rootModel, null);
-        rootVm.IsExpanded = true;
-        rootVm.IsSmartExpanded = true;
-        rootVm.Children[n / 2].IsAffected = true; // one highlighted, mid-array
+        SetExpandedRecursive(rootVm);
 
-        // ---- before: reproduce old per-node recursive scan (O(n²)) ----
+        // Highlight every stick's bottom leaf so each chain stays visible and
+        // every visible internal node's HHD has to walk to the bottom.
+        foreach (var stickTop in rootVm.Children)
+        {
+            var cur = stickTop;
+            while (cur.Children.Count > 0) cur = cur.Children[0];
+            cur.IsAffected = true;
+        }
+
+        // JIT warmup: prime both code paths so the timed sections don't pay
+        // first-call compilation cost. swNew goes through four previously-
+        // uncalled product methods (BuildFlatList, RefreshHighlightCache,
+        // AddNodeToFlatList, BulkObservableCollection.ReplaceAll) — at the
+        // sub-millisecond absolute scale this test runs at, JIT alone can
+        // swamp the algorithmic gap and re-flip the assertion (#179).
+        var warmupOldFlat = new List<MemberNodeViewModel>();
+        OldAddNodeToFlatList(rootVm, warmupOldFlat);
+        new FlatTreeManager().Refresh(new[] { rootVm });
+
+        // ---- before: reproduce old per-node recursive scan (O(depth²) per stick) ----
         var swOld = Stopwatch.StartNew();
         var oldFlat = new List<MemberNodeViewModel>();
         OldAddNodeToFlatList(rootVm, oldFlat);
@@ -184,20 +226,41 @@ public class OpenPathPerfTests
         mgr.Refresh(new[] { rootVm });
         swNew.Stop();
 
-        // Equivalence: identical visible sequence.
+        // Equivalence: identical visible sequence. Every node on every chain
+        // is visible (each is on the path to a highlighted leaf).
+        var totalNodes = 1 + sticks * depth;
         mgr.FlatList.Select(v => v.Name)
             .Should().Equal(oldFlat.Select(v => v.Name));
-        oldFlat.Select(v => v.Name).Should().Equal("Big", $"[{n / 2}]");
+        oldFlat.Should().HaveCount(totalNodes);
+        oldFlat[0].Name.Should().Be("Root");
+        oldFlat[oldFlat.Count - 1].Name.Should().Be($"S{sticks - 1}_Leaf");
 
         var oldMs = swOld.Elapsed.TotalMilliseconds;
         var newMs = swNew.Elapsed.TotalMilliseconds;
         _out.WriteLine(
-            $"[#154 H4] N={n}  before/recursive-scan={oldMs:F1} ms  "
-            + $"after/cached={newMs:F1} ms  "
+            $"[#154 H4] sticks={sticks} depth={depth} N={totalNodes}  "
+            + $"before/recursive-scan={oldMs:F1} ms  after/cached={newMs:F1} ms  "
             + $"speedup≈{oldMs / System.Math.Max(newMs, 0.001):F1}x");
 
         newMs.Should().BeLessThan(oldMs,
-            "the cached O(n) highlight pass must beat the old O(n²) per-node recursion");
+            "the cached O(n) highlight pass must beat the old O(depth²) per-node recursion");
+        (oldMs / System.Math.Max(newMs, 0.001)).Should().BeGreaterThan(3,
+            "expected ratio ~20× (depth² vs depth) — a result below 3× means the "
+            + "cache regressed or the workload's quadratic structure was broken");
+    }
+
+    private static void SetExpandedRecursive(MemberNodeViewModel node)
+    {
+        // Match production ExpandRecursive's HasChildren guard — IsExpanded /
+        // IsSmartExpanded on a leaf is meaningless and the symmetry keeps any
+        // future "IsSmartExpanded ⇒ HasChildren" invariant from tripping here.
+        if (node.HasChildren)
+        {
+            node.IsExpanded = true;
+            node.IsSmartExpanded = true;
+        }
+        foreach (var child in node.Children)
+            SetExpandedRecursive(child);
     }
 
     // Faithful reproduction of the REMOVED FlatTreeManager.AddNodeToFlatList +
