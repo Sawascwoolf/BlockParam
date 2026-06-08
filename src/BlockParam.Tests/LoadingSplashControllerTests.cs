@@ -125,9 +125,14 @@ public class LoadingSplashControllerTests
         var sw = Stopwatch.StartNew();
         while (sw.Elapsed < timeout)
         {
+            // HumorLine is written on the splash dispatcher thread; barrier so
+            // the read here is well-defined without relying on x86/x64 store
+            // ordering.
+            Thread.MemoryBarrier();
             if (condition()) return true;
             Thread.Sleep(15);
         }
+        Thread.MemoryBarrier();
         return condition();
     }
 }

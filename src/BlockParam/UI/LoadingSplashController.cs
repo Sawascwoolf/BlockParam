@@ -121,18 +121,20 @@ public sealed class LoadingSplashController : IProgress<string>, IDisposable
     {
         if (string.IsNullOrEmpty(_humorLine)) return;
 
-        _humorTimer = new DispatcherTimer(DispatcherPriority.Normal)
+        var timer = new DispatcherTimer(DispatcherPriority.Normal)
         {
             Interval = HumorRevealDelay,
         };
-        _humorTimer.Tick += (_, _) =>
+        timer.Tick += (_, _) =>
         {
             // One quip per session: fire once, then stop. The text never
-            // churns for the rest of the splash.
-            _humorTimer!.Stop();
+            // churns for the rest of the splash. Capturing the local (rather
+            // than the field) keeps this non-null regardless of teardown.
+            timer.Stop();
             _vm.HumorLine = _humorLine;
         };
-        _humorTimer.Start();
+        _humorTimer = timer;
+        timer.Start();
     }
 
     /// <summary>
