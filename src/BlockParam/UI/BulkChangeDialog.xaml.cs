@@ -570,11 +570,14 @@ public partial class BulkChangeDialog : Window
     /// PillMultiSelect instance — used by capture-mode helpers that need to
     /// address pills without each one having a named XAML hook.
     /// </summary>
-    private IEnumerable<BlockParam.UI.Controls.PillMultiSelect.PillMultiSelect>
-        EnumerateAllPills()
+    internal IEnumerable<BlockParam.UI.Controls.PillMultiSelect.PillMultiSelect>
+        EnumerateAllPills() => EnumerateAllPills(this);
+
+    internal static IEnumerable<BlockParam.UI.Controls.PillMultiSelect.PillMultiSelect>
+        EnumerateAllPills(DependencyObject root)
     {
         var stack = new Stack<DependencyObject>();
-        stack.Push(this);
+        stack.Push(root);
         while (stack.Count > 0)
         {
             var current = stack.Pop();
@@ -1243,6 +1246,19 @@ public partial class BulkChangeDialog : Window
     /// </summary>
     internal bool SuppressClosePromptsScripted { get; set; }
 
+    internal static void ScriptedClose(BulkChangeViewModel vm)
+    {
+        if (vm.PendingInlineEditCount > 0)
+            vm.DiscardPendingSilent();
+        if (vm.ActiveSet.StashedDbs.Count > 0)
+        {
+            Log.Information(
+                "SuppressClosePromptsScripted: dropping {Count} stashed DB(s)",
+                vm.ActiveSet.StashedDbs.Count);
+            vm.ActiveSet.StashedDbs.Clear();
+        }
+    }
+
     protected override void OnClosing(System.ComponentModel.CancelEventArgs e)
     {
         base.OnClosing(e);
@@ -1250,20 +1266,7 @@ public partial class BulkChangeDialog : Window
 
         if (SuppressClosePromptsScripted)
         {
-            // Mirror the non-scripted DiscardAll branch: discard active
-            // edits AND wipe stashes. Stashes are in-memory only so they'd
-            // evaporate with the process anyway, but clearing them keeps
-            // the symmetry explicit and stops the asymmetry being a
-            // footgun if this flag ever gets reused in interactive mode.
-            if (vm.PendingInlineEditCount > 0)
-                vm.DiscardPendingSilent();
-            if (vm.ActiveSet.StashedDbs.Count > 0)
-            {
-                Log.Information(
-                    "SuppressClosePromptsScripted: dropping {Count} stashed DB(s)",
-                    vm.ActiveSet.StashedDbs.Count);
-                vm.ActiveSet.StashedDbs.Clear();
-            }
+            ScriptedClose(vm);
             return;
         }
 
