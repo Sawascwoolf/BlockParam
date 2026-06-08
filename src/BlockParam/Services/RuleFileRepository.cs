@@ -43,6 +43,16 @@ public class RuleFileRepository
         _storage.ReadAllText(StoragePath.FromAbsolute(filePath));
 
     /// <summary>
+    /// Writes <paramref name="contents"/> to <paramref name="filePath"/> through
+    /// the storage layer (auto-creating the parent directory). Used by the
+    /// ConfigEditor export flow (#36) to write a rule file to a user-chosen path
+    /// outside the managed rules directories, while staying inside the
+    /// "no <c>File.*</c> outside storage" guardrail (#85).
+    /// </summary>
+    public void WriteAllText(string filePath, string contents) =>
+        _storage.WriteAllText(StoragePath.FromAbsolute(filePath), contents);
+
+    /// <summary>
     /// Returns the absolute paths of every <c>*.json</c> file directly under
     /// <paramref name="directoryPath"/>, sorted case-insensitively. Returns an
     /// empty array (never throws) when the directory is missing or unreadable,
