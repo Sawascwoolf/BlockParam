@@ -571,11 +571,16 @@ public class ConfigEditorViewModel : ViewModelBase
             var dir = GetDirectoryForSource(destination);
             if (dir == null) { ValidationMessage = Res.Get("ConfigEditor_NewFile_NoDir"); return; }
 
-            // Seed the claim set with both staged and on-disk names so two
-            // imports of the same filename (or a clash with an existing file)
-            // each get a distinct -2, -3, … suffix.
+            // Seed the claim set with the names that will actually live in the
+            // destination directory at save time — on-disk *.json there, plus
+            // staged files heading to the same destination — so two imports of
+            // the same filename (or a clash with an existing file) each get a
+            // distinct -2, -3, … suffix. Scoped to the destination on purpose:
+            // a same-named file in another source must NOT block the import, so
+            // the user can import to create a Local override of a Shared file.
             var claimed = new HashSet<string>(
-                RuleFiles.Select(f => f.FileName), StringComparer.OrdinalIgnoreCase);
+                RuleFiles.Where(f => f.SaveDestination == destination).Select(f => f.FileName),
+                StringComparer.OrdinalIgnoreCase);
             foreach (var name in _ruleFiles.ListJsonFileNames(dir))
                 claimed.Add(name);
 

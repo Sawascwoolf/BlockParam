@@ -219,6 +219,49 @@ public class ConfigEditorImportExportTests : IDisposable
     }
 
     [Fact]
+    public void Import_TwoBatchFilesWithSameName_BothUniquified()
+    {
+        // Two files named "dup.json" picked in one batch (from different folders)
+        // must each get a distinct name — exercises the per-batch claim tracking.
+        var a = WriteExternalRuleFile("dup.json", SampleRule);
+        var sub = Path.Combine(_externalDir, "sub");
+        Directory.CreateDirectory(sub);
+        var b = Path.Combine(sub, "dup.json");
+        File.WriteAllText(b, SampleRule);
+
+        var dialogs = new FakeFileDialogService { OpenResult = new[] { a, b } };
+        var vm = CreateVm(dialogs);
+
+        vm.ImportFilesCommand.Execute(null);
+
+        vm.RuleFiles.Select(f => f.FileName).Should()
+            .BeEquivalentTo(new[] { "dup.json", "dup-2.json" },
+                "same-named files in one batch each get a distinct name");
+    }
+
+    [Fact]
+    public void Import_DoesNotCollideWithSameNameInAnotherDestination()
+    {
+        // A staged file with the same name but a DIFFERENT save destination must
+        // not force a -2 suffix on the import — that is how a user imports a
+        // Local override of a same-named Shared/Project file.
+        var src = WriteExternalRuleFile("speed.json", SampleRule);
+        var dialogs = new FakeFileDialogService { OpenResult = new[] { src } };
+        var vm = CreateVm(dialogs);
+
+        vm.NewFileCommand.Execute(null);
+        var other = vm.RuleFiles.Single();
+        other.FileName = "speed.json";
+        other.SaveDestination = RuleSource.Shared; // different dir than the Local import
+
+        vm.ImportFilesCommand.Execute(null);
+
+        var imported = vm.RuleFiles.Single(f => f.SaveDestination == RuleSource.Local && f.IsNew);
+        imported.FileName.Should().Be("speed.json",
+            "a same-named file targeting another destination must not block the import");
+    }
+
+    [Fact]
     public void Import_SkipsInvalidFilesAndReports()
     {
         var good = WriteExternalRuleFile("good.json", SampleRule);
