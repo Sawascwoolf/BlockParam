@@ -20,7 +20,32 @@ public sealed class CaptureScript
     [JsonProperty("udt_dir")] public string? UdtDir { get; set; }
     [JsonProperty("tag_table_dir")] public string? TagTableDir { get; set; }
     [JsonProperty("rules_dir")] public string? RulesDir { get; set; }
+
+    /// <summary>
+    /// PLC name attached to the main <see cref="Fixture"/>. Drives
+    /// <c>ActiveSet.CurrentPlcName</c> and acts as the anchor PLC when
+    /// enumerating peers. Lets multi-PLC scenes (mdb02..mdb28) work
+    /// without a <c>--plc</c> arg on the DevLauncher command line.
+    /// </summary>
+    [JsonProperty("anchor_plc")] public string? AnchorPlc { get; set; }
+
+    /// <summary>
+    /// Extra fixture DBs to seed into <c>%TEMP%\BlockParam\</c> before
+    /// scenes run, so <c>EnumerateDevLauncherDbs</c> finds them when
+    /// <c>activeSet.addPeer</c> / <c>solo</c> / <c>reactivate</c> reference
+    /// peer DBs by name. Each entry is copied as
+    /// <c>&lt;plc&gt;__&lt;dbName&gt;.xml</c> so the PLC grouping shows
+    /// in the chip toolbar.
+    /// </summary>
+    [JsonProperty("peer_fixtures")] public List<PeerFixture>? PeerFixtures { get; set; }
+
     [JsonProperty("scenes")] public List<Scene> Scenes { get; set; } = new();
+}
+
+public sealed class PeerFixture
+{
+    [JsonProperty("plc")] public string Plc { get; set; } = "";
+    [JsonProperty("path")] public string Path { get; set; } = "";
 }
 
 public sealed class Viewport
@@ -249,6 +274,24 @@ public sealed class ActiveSetScene
     [JsonProperty("openAddDropdown")] public bool? OpenAddDropdown { get; set; }
 
     /// <summary>
+    /// PLC name of the pill whose popup should be painted open in the
+    /// snapshot. Walks the dialog's pill row to find the matching
+    /// <c>PillMultiSelect</c> and shows the dialog-level in-tree overlay
+    /// (the real WPF <c>&lt;Popup&gt;</c> lives in a separate HWND and is
+    /// invisible to <c>RenderTargetBitmap</c>, mirroring the
+    /// <see cref="OpenScopeDropdown"/> / <see cref="OpenAddDropdown"/>
+    /// pattern).
+    /// <para>
+    /// Cleared at the top of every scene's Apply() — same as the scope
+    /// and Add-DB overlays — so a scene that wants the popup to stay
+    /// open across frames must re-declare <c>openPillPopup</c> in each
+    /// frame. <c>preserveState</c> does NOT keep the overlay alive; it
+    /// only governs tree / selection / pending-edit state.
+    /// </para>
+    /// </summary>
+    [JsonProperty("openPillPopup")] public string? OpenPillPopup { get; set; }
+
+    /// <summary>
     /// DB name to add to the active set via
     /// <c>vm.ActiveSet.AddActiveDbFromSummary</c>. The DB must exist
     /// in <c>%TEMP%\BlockParam\</c> (discoverable by
@@ -355,6 +398,8 @@ public static class SceneApplier
         dialog.HideCursor();
         ClearHoverPreview(vm, dialog);
         dialog.HideScopeDropdownScripted();
+        dialog.HideAddDbDropdownScripted();
+        dialog.HideAllPillPopupsScripted();
         dialog.HidePromptOverlayScripted();
 
         // Reset zoom to the default (or per-scene override) so a previous
@@ -685,7 +730,17 @@ public static class SceneApplier
                 vm.ActiveSet.OpenDataBlocksDropdownCommand.Execute(null);
             else
                 vm.ActiveSet.IsAddDbPopupOpen = true;
+            // The real Popup is invisible to RenderTargetBitmap (separate HWND),
+            // so also paint the scripted in-tree overlay (mirrors ScopeOverlay).
+            dialog.ShowAddDbDropdownForScripted();
         }
+
+        // Open the pill popup for a specific PLC. Same HWND-popup problem as
+        // OpenAddDropdown / OpenScopeDropdown — we set the VM's IsOpen true so
+        // the real lazy-load runs (DB enumeration, group rollup), then paint
+        // the in-tree mirror on the matching PillMultiSelect instance.
+        if (!string.IsNullOrEmpty(block.OpenPillPopup))
+            dialog.ShowPillPopupForScripted(block.OpenPillPopup!);
 
         // Add a peer DB by name.
         if (block.AddPeer != null)

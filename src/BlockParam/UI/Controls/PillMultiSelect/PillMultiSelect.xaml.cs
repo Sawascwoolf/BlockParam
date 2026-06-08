@@ -505,4 +505,14 @@ public partial class PillMultiSelect : UserControl
         // user gets both behaviors per click which is jarring.
         e.Handled = true;
     }
+
+    /// <summary>
+    /// Scripted-only: drive the same lazy-load path the real popup uses
+    /// (<see cref="MultiSelectInternalState.IsOpen"/> → host VM's
+    /// <c>OnIsOpenFlippedToTrue</c>) without going through the trigger
+    /// click. <see cref="InternalState"/> and <see cref="TriggerElement"/>
+    /// already cover the read side; this method is the write side capture
+    /// mode needs.
+    /// </summary>
+    internal void SetScriptedOpenState(bool open) => _internalState.IsOpen = open;
 }

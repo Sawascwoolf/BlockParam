@@ -160,6 +160,49 @@ class Program
 
         // 1. Find DB XML. Capture plan fixture wins; bare arg next; else defaults.
         var tiaExportDir = Path.Combine(Path.GetTempPath(), "BlockParam");
+
+        // Capture-script peer seeding + anchor PLC. Multi-PLC scenes
+        // (mdb02..mdb28) need EnumerateDevLauncherDbs to find peer DBs under
+        // distinct PLCs, but the dev's %TEMP%\BlockParam\ usually has only
+        // whatever they last opened in TIA. Copy the manifest's peer_fixtures
+        // in with <Plc>__<DbName>.xml names so the picker has something to
+        // show — and override anchorPlc from the manifest so the main fixture
+        // is grouped under its declared PLC too.
+        if (capturePlan is CapturePlan seedPlan)
+        {
+            if (!string.IsNullOrEmpty(seedPlan.AnchorPlc))
+                anchorPlc = seedPlan.AnchorPlc;
+
+            if (seedPlan.PeerFixtures is { Count: > 0 })
+            {
+                Directory.CreateDirectory(tiaExportDir);
+                foreach (var peer in seedPlan.PeerFixtures)
+                {
+                    if (!File.Exists(peer.Path))
+                    {
+                        Log.Warning("Peer fixture not found: {Path}", peer.Path);
+                        continue;
+                    }
+                    var dbName = Path.GetFileNameWithoutExtension(peer.Path);
+                    var destName = $"{peer.Plc}__{dbName}.xml";
+                    var destPath = Path.Combine(tiaExportDir, destName);
+                    // Skip-if-exists: %TEMP%\BlockParam may contain a real TIA
+                    // export the dev is actively iterating on. The anchor DB's
+                    // own filename is in peer_fixtures, so silent overwrite
+                    // would clobber a real export on every capture run. Delete
+                    // the destination file by hand to force a reseed.
+                    if (File.Exists(destPath))
+                    {
+                        Log.Information(
+                            "Peer fixture skipped (already present, delete to reseed): {Dest}",
+                            destName);
+                        continue;
+                    }
+                    File.Copy(peer.Path, destPath);
+                    Log.Information("Seeded peer fixture: {Dest}", destName);
+                }
+            }
+        }
         string? xmlPath;
         var dbArg = (capturePlan as CapturePlan)?.FixturePath
                     ?? captureDbArg
@@ -453,6 +496,11 @@ class Program
             CaptureWindowToPng(dialog, outPath, plan.Scale);
             Log.Information("Scene {Id}: saved {Path}", scene.Id, outPath);
         }
+        // OnClosing's "unsaved changes" prompt uses MessageBox.Show directly
+        // (bypassing the scripted IMessageBoxService), so without this flag
+        // the headless run hangs on a real modal whenever the last scene
+        // leaves pending or stashed edits.
+        dialog.SuppressClosePromptsScripted = true;
         dialog.Close();
     }
 
@@ -595,6 +643,7 @@ class Program
     {
         public CapturePlan(string outputDir, double scale, Viewport? viewport,
             string? fixturePath, string? udtDir, string? tagTableDir, string? rulesDir,
+            string? anchorPlc, List<PeerFixture>? peerFixtures,
             List<Scene> scenes)
         {
             OutputDir = outputDir;
@@ -604,6 +653,8 @@ class Program
             UdtDir = udtDir;
             TagTableDir = tagTableDir;
             RulesDir = rulesDir;
+            AnchorPlc = anchorPlc;
+            PeerFixtures = peerFixtures;
             Scenes = scenes;
         }
         public string OutputDir { get; }
@@ -613,6 +664,8 @@ class Program
         public string? UdtDir { get; }
         public string? TagTableDir { get; }
         public string? RulesDir { get; }
+        public string? AnchorPlc { get; }
+        public List<PeerFixture>? PeerFixtures { get; }
         public List<Scene> Scenes { get; }
     }
 
@@ -640,6 +693,8 @@ class Program
                 udtDir: null,
                 tagTableDir: null,
                 rulesDir: null,
+                anchorPlc: null,
+                peerFixtures: null,
                 scenes: new List<Scene>
                 {
                     new Scene { Id = "default", Filename = Path.GetFileName(outFile), Dialog = "main" },
@@ -671,6 +726,21 @@ class Program
                 : null;
             // DPI 96 = 1x, 192 = 2x; convert to scale factor.
             var scale = (script.Dpi ?? 192.0) / 96.0;
+
+            // Resolve peer fixture paths to absolute now (the consumer at scene
+            // run time has no idea where baseDir is).
+            List<PeerFixture>? peerFixtures = null;
+            if (script.PeerFixtures is { Count: > 0 })
+            {
+                peerFixtures = script.PeerFixtures
+                    .Select(p => new PeerFixture
+                    {
+                        Plc = p.Plc,
+                        Path = CaptureScriptLoader.ResolveRelative(baseDir, p.Path),
+                    })
+                    .ToList();
+            }
+
             return new CapturePlan(
                 outputDir: outputDir,
                 scale: scale,
@@ -679,6 +749,8 @@ class Program
                 udtDir: udtDir,
                 tagTableDir: tagTableDir,
                 rulesDir: rulesDir,
+                anchorPlc: script.AnchorPlc,
+                peerFixtures: peerFixtures,
                 scenes: script.Scenes);
         }
 

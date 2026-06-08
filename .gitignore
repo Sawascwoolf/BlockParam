@@ -63,6 +63,13 @@ Thumbs.db
 assets/screenshots/workflow/wf*.png
 assets/screenshots/workflow/mdb*.png
 
+## Workflow validation contact sheet — co-output of build_workflow_video.sh,
+## same regenerable status as the per-scene PNGs above.
+assets/screenshots/workflow/_validation_grid.png
+
+## Python bytecode cache for screenshot helper scripts.
+assets/screenshots/scripts/__pycache__/
+
 ## Pill review composite — regenerated on demand by scripts/review-pill-screenshots.ps1.
 ## The 01-10 canonical scenes are tracked; the stitched composite is not.
 assets/screenshots/pill/composite.png
