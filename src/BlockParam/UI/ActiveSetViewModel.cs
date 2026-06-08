@@ -52,7 +52,7 @@ public sealed class ActiveSetViewModel : ViewModelBase
     private bool _isLoadingDataBlocks;
 
     // --- Pill-row coordination (#169) ---
-    private PillSelectionCoordinator? _pillCoordinator;
+    private PillSelectionCoordinator _pillCoordinator = null!;
 
     /// <summary>State-only ctor for tests that need no mutator wiring.</summary>
     public ActiveSetViewModel(ActiveSetState initial)
@@ -119,7 +119,7 @@ public sealed class ActiveSetViewModel : ViewModelBase
             hasDataBlockSwitcher: () => HasDataBlockSwitcher,
             loadAvailableDataBlocks: force => LoadAvailableDataBlocks(force),
             getAvailableDataBlocks: () => _availableDataBlocks,
-            hasEnumerateDataBlocks: _enumerateDataBlocks != null,
+            hasEnumerateDataBlocks: _enumerateDataBlocks != null, // fixed at ctor — field is wired once, never replaced
             onDataBlockListItemToggled: OnDataBlockListItemToggled);
 
         OpenDataBlocksDropdownCommand = new RelayCommand(ExecuteOpenDataBlocksDropdown,
@@ -514,22 +514,22 @@ public sealed class ActiveSetViewModel : ViewModelBase
     /// <see cref="PillSelectionCoordinator"/>.
     /// </summary>
     public ObservableCollection<PlcPillViewModel> PlcPills =>
-        _pillCoordinator!.PlcPills;
+        _pillCoordinator.PlcPills;
 
     public IReadOnlyList<string> InactiveProjectPlcs =>
-        _pillCoordinator!.InactiveProjectPlcs;
+        _pillCoordinator.InactiveProjectPlcs;
 
-    public bool CanAddPlc => _pillCoordinator!.CanAddPlc;
+    public bool CanAddPlc => _pillCoordinator.CanAddPlc;
 
     public bool IsAddDbPopupOpen
     {
-        get => _pillCoordinator!.IsAddDbPopupOpen;
-        set => _pillCoordinator!.IsAddDbPopupOpen = value;
+        get => _pillCoordinator.IsAddDbPopupOpen;
+        set => _pillCoordinator.IsAddDbPopupOpen = value;
     }
 
-    public void AddPlcToRow(string plcName) => _pillCoordinator!.AddPlcToRow(plcName);
+    public void AddPlcToRow(string plcName) => _pillCoordinator.AddPlcToRow(plcName);
 
-    public void RebuildPlcPills() => _pillCoordinator!.RebuildPlcPills();
+    public void RebuildPlcPills() => _pillCoordinator.RebuildPlcPills();
 
     // ===== Mutators ==========================================================
 
