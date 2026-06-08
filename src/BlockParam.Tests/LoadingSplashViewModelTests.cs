@@ -61,6 +61,29 @@ public class LoadingSplashViewModelTests
     }
 
     [Fact]
+    public void HumorLine_defaults_to_empty_and_setter_raises_PropertyChanged()
+    {
+        var vm = new LoadingSplashViewModel();
+        vm.HumorLine.Should().BeEmpty();
+        var changed = TrackChanges(vm);
+
+        vm.HumorLine = "Estimating time remaining…";
+
+        vm.HumorLine.Should().Be("Estimating time remaining…");
+        changed.Should().Contain(nameof(LoadingSplashViewModel.HumorLine));
+    }
+
+    [Fact]
+    public void HumorLine_null_is_coerced_to_empty()
+    {
+        var vm = new LoadingSplashViewModel { HumorLine = "Almost there." };
+
+        vm.HumorLine = null!;
+
+        vm.HumorLine.Should().BeEmpty();
+    }
+
+    [Fact]
     public void Setting_same_value_does_not_raise_PropertyChanged()
     {
         var vm = new LoadingSplashViewModel { StatusText = "Parsing…" };

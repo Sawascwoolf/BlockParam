@@ -29,15 +29,41 @@ namespace BlockParam.UI;
 public sealed class LoadingSplashController : IProgress<string>, IDisposable
 {
     private readonly LoadingSplashViewModel _vm;
+    private readonly string _humorLine;
     private Thread? _thread;
     private volatile Dispatcher? _dispatcher;
     private LoadingSplash? _window;
+    private DispatcherTimer? _humorTimer;
     private int _closed;
 
-    public LoadingSplashController(string title)
+    /// <param name="title">Splash title (pre-localized).</param>
+    /// <param name="humorLine">
+    /// Optional pre-localized quip (#127). Empty (the default) means no quip —
+    /// the Apply-time splash and any other caller that wants a strictly
+    /// professional splash pass nothing. When non-empty it is revealed once,
+    /// after <see cref="HumorRevealDelay"/> of elapsed prep time, and held for
+    /// the rest of the session. Pre-localized by the caller because the splash
+    /// render thread must never touch <c>Res</c> (the #125 render-only rule).
+    /// </param>
+    public LoadingSplashController(string title, string humorLine = "")
     {
         _vm = new LoadingSplashViewModel { Title = title };
+        _humorLine = humorLine ?? string.Empty;
     }
+
+    /// <summary>The ~1.5s slow-load threshold #127 specifies (mirrors #125's flash guard).</summary>
+    private const double HumorRevealSeconds = 1.5;
+
+    /// <summary>
+    /// How long the splash must already have been up before the quip line is
+    /// revealed (#127): fast opens stay strictly professional, only a load
+    /// that is already slow earns a quip. Settable for tests; defaults to
+    /// <see cref="HumorRevealSeconds"/>.
+    /// </summary>
+    internal TimeSpan HumorRevealDelay { get; set; } = TimeSpan.FromSeconds(HumorRevealSeconds);
+
+    /// <summary>For tests: the quip currently shown (empty until revealed).</summary>
+    internal string HumorLine => _vm.HumorLine;
 
     /// <summary>For tests: whether the splash window was created.</summary>
     internal bool WindowShown => _window != null;
@@ -66,6 +92,7 @@ public sealed class LoadingSplashController : IProgress<string>, IDisposable
             {
                 _window = new LoadingSplash { DataContext = _vm };
                 _window.Show();
+                StartHumorTimer();
             }
             else
             {
@@ -83,6 +110,34 @@ public sealed class LoadingSplashController : IProgress<string>, IDisposable
         _thread.Start();
 
         ready.Wait(TimeSpan.FromSeconds(5));
+    }
+
+    /// <summary>
+    /// Arms the one-shot quip reveal (#127) on the splash dispatcher thread.
+    /// Runs on that thread (called from the thread body), so it touches the VM
+    /// safely. If the splash closes before the delay elapses — the fast,
+    /// strictly-professional path — the dispatcher shuts down and the timer
+    /// never ticks, so <see cref="LoadingSplashViewModel.HumorLine"/> is never
+    /// evaluated and there is no cost on the happy path.
+    /// </summary>
+    private void StartHumorTimer()
+    {
+        if (string.IsNullOrEmpty(_humorLine)) return;
+
+        var timer = new DispatcherTimer(DispatcherPriority.Normal)
+        {
+            Interval = HumorRevealDelay,
+        };
+        timer.Tick += (_, _) =>
+        {
+            // One quip per session: fire once, then stop. The text never
+            // churns for the rest of the splash. Capturing the local (rather
+            // than the field) keeps this non-null regardless of teardown.
+            timer.Stop();
+            _vm.HumorLine = _humorLine;
+        };
+        _humorTimer = timer;
+        timer.Start();
     }
 
     /// <summary>
@@ -115,6 +170,7 @@ public sealed class LoadingSplashController : IProgress<string>, IDisposable
         if (d == null) return;
         d.BeginInvoke(() =>
         {
+            _humorTimer?.Stop();
             _window?.Close();
             Dispatcher.CurrentDispatcher.InvokeShutdown();
         });

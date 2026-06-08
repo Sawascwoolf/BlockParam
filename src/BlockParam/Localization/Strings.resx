@@ -1071,4 +1071,34 @@ Continue?</value>
   <data name="Splash_Counter" xml:space="preserve">
     <value>({0} of {1})</value>
   </data>
+  <!-- Rotating splash quips (#127). Light, dim/italic line shown UNDER the
+       status line only once a load is already slow (>~1.5s). One is picked at
+       random per session by LoadingHumorService. Keep them gentle, generic
+       engineering self-deprecation about loading screens — NEVER name TIA,
+       Siemens, Openness, SimaticML, or any competitor (Marketplace rule).
+       en-US ships first; other languages fall back to these keys. -->
+  <data name="Quip_EstimatingTime" xml:space="preserve">
+    <value>Estimating time remaining…</value>
+  </data>
+  <data name="Quip_UntanglingArrays" xml:space="preserve">
+    <value>Untangling the nested arrays…</value>
+  </data>
+  <data name="Quip_CountingDbs" xml:space="preserve">
+    <value>Counting your DBs (twice, to be sure)…</value>
+  </data>
+  <data name="Quip_NegotiatingTree" xml:space="preserve">
+    <value>Negotiating with the project tree…</value>
+  </data>
+  <data name="Quip_ReticulatingStartValues" xml:space="preserve">
+    <value>Reticulating start values…</value>
+  </data>
+  <data name="Quip_LongerThanEstimate" xml:space="preserve">
+    <value>This is taking longer than the estimate suggested. As usual.</value>
+  </data>
+  <data name="Quip_BigProjectBigPatience" xml:space="preserve">
+    <value>Big project, big patience. Almost there.</value>
+  </data>
+  <data name="Quip_LunchBreak" xml:space="preserve">
+    <value>If this is your lunch break, well played.</value>
+  </data>
 </root>

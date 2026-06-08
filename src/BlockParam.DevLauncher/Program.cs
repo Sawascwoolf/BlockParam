@@ -11,6 +11,7 @@ using System.Windows.Media.Imaging;
 using Serilog;
 using BlockParam.Config;
 using BlockParam.Licensing;
+using BlockParam.Localization;
 using BlockParam.Models;
 using BlockParam.Services;
 using BlockParam.SimaticML;
@@ -57,6 +58,15 @@ class Program
         if (args.Length >= 2 && args[0] == "--capture-splash")
         {
             SplashCapture.Run(Path.GetFullPath(args[1]));
+            return;
+        }
+
+        // --demo-splash [slow|fast] [holdSeconds]  #127: LIVE splash + quip timing
+        if (args.Length >= 1 && args[0] == "--demo-splash")
+        {
+            var slow = !(args.Length >= 2 && args[1].Equals("fast", StringComparison.OrdinalIgnoreCase));
+            var hold = args.Length >= 3 && int.TryParse(args[2], out var h) ? h : 8;
+            SplashDemo.Run(slow, hold);
             return;
         }
 
@@ -413,6 +423,24 @@ class Program
 
         licenseService.StartHeartbeat();
         var dialog = new BulkChangeDialog(vm);
+
+        // #127 integration demo: with --with-splash, run the REAL pre-dialog
+        // splash → quip → dialog handoff exactly as BulkChangeContextMenu does
+        // (interactive only; capture/script modes keep the deterministic path).
+        // The splash paints on its own STA thread while we simulate the slow
+        // Openness prep with a sleep; it closes the moment the dialog renders.
+        if (capturePlan is not CapturePlan
+            && args.Any(a => a.Equals("--with-splash", StringComparison.OrdinalIgnoreCase)))
+        {
+            var quipKey = LoadingHumorService.PickKey();
+            var splash = new LoadingSplashController(Res.Get("Splash_Title"), Res.Get(quipKey));
+            splash.Show();
+            splash.Report(Res.Get("Splash_Preparing"));
+            splash.Report(Res.Format("Splash_ExportingDb", dbInfo.Name));
+            Log.Information("Integration: splash up, quip '{Key}'. Simulating ~2.5s prep before the dialog opens…", quipKey);
+            Thread.Sleep(2500); // > 1.5s so the quip surfaces before the dialog
+            dialog.ContentRendered += (_, _) => splash.Close();
+        }
 
         if (capturePlan is CapturePlan plan)
         {

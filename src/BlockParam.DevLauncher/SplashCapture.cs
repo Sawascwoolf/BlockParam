@@ -61,6 +61,9 @@ internal static class SplashCapture
             Title = Res.Get("Splash_Title"),
             StatusText = Res.Format("Splash_ExportingDb", "DB_ProcessPlant_A1"),
             CounterText = Res.Format("Splash_Counter", 2, 3),
+            // #127: a representative quip line so the screenshot documents the
+            // dim/italic humor row a slow open shows under the status line.
+            HumorLine = Res.Get("Quip_EstimatingTime"),
         };
 
         var splash = new LoadingSplash
