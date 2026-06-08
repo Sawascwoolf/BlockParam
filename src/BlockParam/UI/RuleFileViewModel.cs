@@ -52,6 +52,7 @@ public class RuleFileViewModel : ViewModelBase
     private string _savedFileName = "";
     private bool _isNew;
     private bool _isExpanded = true;
+    private bool _keepExplicitName;
 
     /// <summary>
     /// Tracks which rules we've subscribed to. Doubles as the source of truth
@@ -163,8 +164,28 @@ public class RuleFileViewModel : ViewModelBase
     /// whether to derive the final filename from the first rule's pathPattern.
     /// Once the user types anything else, this becomes false and the user's
     /// name is preserved verbatim.
+    ///
+    /// <see cref="KeepExplicitName"/> forces this false even when the name
+    /// matches the pattern — set for imported files, whose name came from the
+    /// source file on disk (which may legitimately be "new-rule.json") and must
+    /// not be silently re-derived on save (#36).
     /// </summary>
-    public bool IsAutoNamed => AutoNamePattern.IsMatch(_fileName);
+    public bool IsAutoNamed => !_keepExplicitName && AutoNamePattern.IsMatch(_fileName);
+
+    /// <summary>
+    /// When true, the file's name is treated as intentional and is never
+    /// auto-derived from the first rule's pattern on save. Set for imported
+    /// files (their name is the source filename, not a placeholder).
+    /// </summary>
+    public bool KeepExplicitName
+    {
+        get => _keepExplicitName;
+        set
+        {
+            if (SetProperty(ref _keepExplicitName, value))
+                OnPropertyChanged(nameof(IsAutoNamed));
+        }
+    }
 
     public string FilePath
     {

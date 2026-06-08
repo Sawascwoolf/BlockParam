@@ -193,6 +193,32 @@ public class ConfigEditorImportExportTests : IDisposable
     }
 
     [Fact]
+    public void Import_OfPlaceholderNamedFile_KeepsNameOnSave()
+    {
+        // Regression: importing a file literally named "new-rule.json" (when one
+        // already exists on disk) used to stage as "new-rule-2.json" but then
+        // get silently re-derived from the rule pattern on Save, because the
+        // name matches the "+ File" placeholder shape. The imported name must
+        // survive verbatim.
+        WriteRuleFile("new-rule.json", SampleRule);                  // existing placeholder file
+        var src = WriteExternalRuleFile("new-rule.json", SampleRule); // import a same-named file
+        var dialogs = new FakeFileDialogService { OpenResult = new[] { src } };
+        var vm = CreateVm(dialogs);
+
+        vm.ImportFilesCommand.Execute(null);
+        var staged = vm.RuleFiles.Single(f => f.IsNew);
+        staged.FileName.Should().Be("new-rule-2.json", "uniquified against the existing file");
+
+        vm.SaveCommand.Execute(null);
+
+        File.Exists(Path.Combine(_rulesDir, "new-rule-2.json")).Should()
+            .BeTrue("the imported name is kept on save, not re-derived from the rule pattern");
+        Directory.GetFiles(_rulesDir, "*.json").Select(Path.GetFileName)
+            .Should().BeEquivalentTo(new[] { "new-rule.json", "new-rule-2.json" },
+                "no pattern-derived file is produced — the import keeps its explicit name");
+    }
+
+    [Fact]
     public void Import_SkipsInvalidFilesAndReports()
     {
         var good = WriteExternalRuleFile("good.json", SampleRule);

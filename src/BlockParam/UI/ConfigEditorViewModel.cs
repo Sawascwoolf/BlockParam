@@ -600,6 +600,9 @@ public class ConfigEditorViewModel : ViewModelBase
                 file.Source = destination;
                 file.SaveDestination = destination;
                 file.IsNew = true;        // staged, not yet on disk -> IsDirty
+                file.KeepExplicitName = true; // honor the imported name; never
+                                              // re-derive it even if it matches
+                                              // the "new-rule" placeholder shape
                 file.IsExpanded = true;
 
                 RuleFiles.Add(file);
