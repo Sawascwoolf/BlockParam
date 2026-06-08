@@ -15,19 +15,24 @@ namespace BlockParam.Licensing;
 /// Tracks concurrent sessions to prevent license sharing across VMs.
 /// Falls back gracefully: cached license (48h) → free tier.
 ///
-/// Sync model (single source of truth — see #11 audit on branch
-/// claude/review-code-architecture-lxZvn):
-///   - <c>_lock</c> guards the mutable state bundle: <c>_licenseData</c>,
-///     <c>_cache</c>, <c>_proActive</c>, <c>_retryCount</c>. Every read/write
-///     of those four fields runs inside <c>lock (_lock)</c>.
-///   - <c>volatile</c> is reserved for the lifecycle flag <c>_disposed</c> and
-///     the read-mostly mirror <c>_proActive</c> (read from binding threads
-///     without the lock; the lock provides happens-before for writes).
-///   - <c>_heartbeatTimer</c> is owned via <c>Interlocked.Exchange</c> so a
-///     racing <c>Dispose</c> always wins and never leaks a live timer.
-///   - HTTP calls (<c>PostAsync</c>) MUST run outside the lock — otherwise a
-///     slow server freezes every license read. Lock only the JSON-to-state
-///     copy after the response arrives.
+/// Concurrency model (#170 audit):
+///   - <c>lock (_lock)</c> guards mutable state: <c>_licenseData</c>, <c>_cache</c>,
+///     <c>_proActive</c>, <c>_retryCount</c>. All writes go through the lock.
+///   - <c>volatile bool _proActive</c>: written under <c>_lock</c> (atomically with
+///     the cache/licenseData it derives from); read lock-free from UI binding threads
+///     via <see cref="IsProActive"/>/<see cref="CurrentTier"/>. The <c>volatile</c>
+///     ensures the lock-free reads see the latest write.
+///   - <c>volatile bool _disposed</c>: lifecycle flag, single-writer (<see cref="Dispose"/>),
+///     multi-reader. No lock needed — <c>volatile</c> is the correct primitive.
+///   - <c>_heartbeatTimer</c>: owned via <c>Interlocked.Exchange</c>. Cannot use
+///     <c>_lock</c> because timer callbacks acquire the lock — holding it while
+///     disposing the timer would risk deadlock.
+///   - <c>_isManagedKey</c>: set once in the constructor, read-only after construction.
+///   - Lock-free reads of <c>_licenseData</c> in <see cref="StartHeartbeat"/> and
+///     <see cref="SendHeartbeatAsync"/> are fast-path null checks; reference reads
+///     are atomic on .NET. The full state is re-read under lock when needed.
+///   - HTTP / file I/O MUST run outside <c>lock (_lock)</c>. State is captured under
+///     the lock, then persisted after releasing it.
 /// </summary>
 public class OnlineLicenseService : ILicenseService
 {
@@ -149,6 +154,8 @@ public class OnlineLicenseService : ILicenseService
                 var json = await response.Content.ReadAsStringAsync();
                 var result = JObject.Parse(json);
 
+                LicenseData dataToSave;
+                CachedLicenseResponse cacheToSave;
                 lock (_lock)
                 {
                     _licenseData = new LicenseData
@@ -157,7 +164,7 @@ public class OnlineLicenseService : ILicenseService
                         InstanceId = instanceId,
                         ActivatedAt = _utcNow()
                     };
-                    SaveLicenseData(_licenseData);
+                    dataToSave = _licenseData;
 
                     _cache = new CachedLicenseResponse
                     {
@@ -166,10 +173,12 @@ public class OnlineLicenseService : ILicenseService
                         MaxConcurrent = result["maxConcurrent"]?.ToObject<int>() ?? 1,
                         ActiveSessions = 1
                     };
-                    SaveCache(_cache);
+                    cacheToSave = _cache;
                     EvaluateTier();
                 }
 
+                SaveLicenseData(dataToSave);
+                SaveCache(cacheToSave);
                 RaiseLicenseStateChanged();
 
                 return LicenseActivationResult.Success(GetLicenseInfo());
@@ -195,20 +204,26 @@ public class OnlineLicenseService : ILicenseService
 
     public void DeactivateKey()
     {
+        string? keyToDeactivate = null;
+        string? instanceToDeactivate = null;
+
         lock (_lock)
         {
             if (_licenseData != null)
             {
-                // Fire-and-forget deactivation on server
-                _ = SendDeactivateAsync(_licenseData.LicenseKey!, _licenseData.InstanceId!);
+                keyToDeactivate = _licenseData.LicenseKey;
+                instanceToDeactivate = _licenseData.InstanceId;
             }
 
             _licenseData = null;
             _cache = null;
             _proActive = false;
-            BestEffortDelete(_licenseDataPath);
-            BestEffortDelete(_cachePath);
         }
+
+        if (keyToDeactivate != null)
+            _ = SendDeactivateAsync(keyToDeactivate!, instanceToDeactivate!);
+        BestEffortDelete(_licenseDataPath);
+        BestEffortDelete(_cachePath);
 
         StopHeartbeat();
         RaiseLicenseStateChanged();
@@ -291,6 +306,7 @@ public class OnlineLicenseService : ILicenseService
                 var json = await response.Content.ReadAsStringAsync();
                 var result = JObject.Parse(json);
 
+                CachedLicenseResponse cacheToSave;
                 lock (_lock)
                 {
                     _cache = new CachedLicenseResponse
@@ -300,11 +316,12 @@ public class OnlineLicenseService : ILicenseService
                         MaxConcurrent = result["maxSessions"]?.ToObject<int>() ?? 1,
                         ActiveSessions = result["activeSessions"]?.ToObject<int>() ?? 1
                     };
-                    SaveCache(_cache);
+                    cacheToSave = _cache;
                     EvaluateTier();
+                    _retryCount = 0;
                 }
 
-                lock (_lock) { _retryCount = 0; } // Success — reset retry counter
+                SaveCache(cacheToSave);
                 ScheduleNextHeartbeat(HeartbeatInterval);
                 RaiseLicenseStateChanged();
                 return;
