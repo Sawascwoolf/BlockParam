@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
-using System.Threading.Tasks;
 using System.Windows.Input;
 using System.Windows.Threading;
 using BlockParam.Diagnostics;
@@ -15,28 +14,9 @@ namespace BlockParam.UI;
 /// <summary>
 /// State container + mutators for the dialog's active-DB set
 /// (#80 slices 8a + 8b). Owns the <see cref="ActiveSetState"/> snapshot,
-/// the bound <see cref="StashedDbs"/> collection, the DB-switcher
-/// dropdown state, and the PLC-pill row.
-///
-/// <para>
-/// <see cref="SetState"/> raises <see cref="StateChanged"/> with the
-/// (old, new) pair so the host's cross-slice cascade (tree rebuild,
-/// selection clear, filter pass, pill rebuild, anchor-display refresh)
-/// runs exactly once per snapshot change. <see cref="StashedDbs"/> is
-/// re-mirrored from the new snapshot internally — the host doesn't
-/// need a second copy.
-/// </para>
-///
-/// <para>
-/// Mutators (Add / Solo / Remove / Reactivate) compose the next
-/// snapshot in locals and assign once via <see cref="SetState"/>:
-/// exactly one cascade per user gesture regardless of how many DBs
-/// were swapped in or out. Operations with host-side side effects
-/// (Apply-in-place on remove, replay stashed edits onto the live tree)
-/// run through caller-supplied callbacks (<see cref="_tryApplyActiveDbInPlace"/>,
-/// <see cref="_restoreStashOntoLive"/>) so the slice never reaches
-/// into the host's <c>_writer</c> / <c>Tree</c> / <c>Subscription</c>.
-/// </para>
+/// the bound <see cref="StashedDbs"/> collection, and the DB-switcher
+/// dropdown state. Pill-row coordination is delegated to
+/// <see cref="PillSelectionCoordinator"/> (#169).
 /// </summary>
 public sealed class ActiveSetViewModel : ViewModelBase
 {
@@ -71,21 +51,10 @@ public sealed class ActiveSetViewModel : ViewModelBase
     private bool _isDataBlocksDropdownOpen;
     private bool _isLoadingDataBlocks;
 
-    // --- Pill-row state ---
-    private readonly HashSet<string> _extraPillPlcs = new(StringComparer.Ordinal);
-    // Re-entrancy guard: when the cascade rewrites SelectedDbs on each pill,
-    // the pill fires SelectionChanged → OnPillSelectionChanged. Without the
-    // guard we'd enter AddActiveDbToSet / RemoveActiveDb for every item in
-    // the selection sync, spiraling into multiple cascades.
-    private bool _syncingPillSelection;
-    private bool _isAddDbPopupOpen;
+    // --- Pill-row coordination (#169) ---
+    private PillSelectionCoordinator _pillCoordinator = null!;
 
-    /// <summary>
-    /// Legacy state-only constructor preserved for the slice-8a tests. The
-    /// slice operates as a pure snapshot container with no mutator wiring;
-    /// any call to a mutator method that needs an unwired dep throws
-    /// <see cref="InvalidOperationException"/>.
-    /// </summary>
+    /// <summary>State-only ctor for tests that need no mutator wiring.</summary>
     public ActiveSetViewModel(ActiveSetState initial)
         : this(initial,
             messageBox: null,
@@ -103,11 +72,6 @@ public sealed class ActiveSetViewModel : ViewModelBase
     {
     }
 
-    /// <summary>
-    /// Full constructor. Host VM wires every callback; tests pass only
-    /// the dependencies their scenario needs and rely on the no-op /
-    /// throw defaults for the rest.
-    /// </summary>
     public ActiveSetViewModel(
         ActiveSetState initial,
         IMessageBoxService? messageBox,
@@ -146,7 +110,17 @@ public sealed class ActiveSetViewModel : ViewModelBase
         _getPendingCount = getPendingCount;
         _ = dispatcher; // reserved for LoadDbsForPlcAsync continuation if it ever goes off-thread
 
-        PlcPills = new ObservableCollection<PlcPillViewModel>();
+        _pillCoordinator = new PillSelectionCoordinator(
+            getState: () => _state,
+            getActiveStatusFor: GetActiveStatusFor,
+            addActiveDbFromSummary: AddActiveDbFromSummary,
+            findActiveDb: s => FindActiveDb(s),
+            removeActiveDb: db => RemoveActiveDb(db),
+            hasDataBlockSwitcher: () => HasDataBlockSwitcher,
+            loadAvailableDataBlocks: force => LoadAvailableDataBlocks(force),
+            getAvailableDataBlocks: () => _availableDataBlocks,
+            hasEnumerateDataBlocks: _enumerateDataBlocks != null, // fixed at ctor — field is wired once, never replaced
+            onDataBlockListItemToggled: OnDataBlockListItemToggled);
 
         OpenDataBlocksDropdownCommand = new RelayCommand(ExecuteOpenDataBlocksDropdown,
             () => _enumerateDataBlocks != null && _switchToDataBlock != null);
@@ -533,205 +507,29 @@ public sealed class ActiveSetViewModel : ViewModelBase
         Log.Information("DB enabled via dropdown: {Name}", built.Info.Name);
     }
 
-    // ===== Pill row =========================================================
+    // ===== Pill row (delegated to PillSelectionCoordinator, #169) =============
 
     /// <summary>
-    /// One pill per PLC that has at least one active DB. Replaces the old
-    /// chip row + DbSwitcherButton / DbSwitcherPopup in the dialog toolbar.
-    /// Rebuilt by <see cref="RebuildPlcPills"/> whenever the active set changes.
+    /// One pill per PLC that has at least one active DB. Delegated to
+    /// <see cref="PillSelectionCoordinator"/>.
     /// </summary>
-    public ObservableCollection<PlcPillViewModel> PlcPills { get; }
+    public ObservableCollection<PlcPillViewModel> PlcPills =>
+        _pillCoordinator.PlcPills;
 
-    /// <summary>
-    /// PLC names present in the project but not yet represented in the
-    /// pill row. Drives the "+ PLC" popup's item list and the
-    /// <see cref="CanAddPlc"/> visibility gate.
-    /// </summary>
-    public IReadOnlyList<string> InactiveProjectPlcs
-    {
-        get
-        {
-            if (!HasDataBlockSwitcher) return Array.Empty<string>();
-            LoadAvailableDataBlocks(force: false);
-            var projectDbs = _availableDataBlocks;
-            if (projectDbs == null || projectDbs.Count == 0)
-                return Array.Empty<string>();
+    public IReadOnlyList<string> InactiveProjectPlcs =>
+        _pillCoordinator.InactiveProjectPlcs;
 
-            var rowPlcs = new HashSet<string>(
-                PlcPills.Select(p => p.PlcName ?? ""), StringComparer.Ordinal);
-            var seen = new HashSet<string>(StringComparer.Ordinal);
-            var result = new List<string>();
-            foreach (var db in projectDbs)
-            {
-                var plc = db.PlcName ?? "";
-                if (rowPlcs.Contains(plc)) continue;
-                if (!seen.Add(plc)) continue;
-                result.Add(plc);
-            }
-            return result;
-        }
-    }
-
-    /// <summary>
-    /// True when at least one project PLC is not yet in the row. Bound
-    /// to the "+ PLC" button's Visibility.
-    /// </summary>
-    public bool CanAddPlc => InactiveProjectPlcs.Count > 0;
+    public bool CanAddPlc => _pillCoordinator.CanAddPlc;
 
     public bool IsAddDbPopupOpen
     {
-        get => _isAddDbPopupOpen;
-        set => SetProperty(ref _isAddDbPopupOpen, value);
+        get => _pillCoordinator.IsAddDbPopupOpen;
+        set => _pillCoordinator.IsAddDbPopupOpen = value;
     }
 
-    /// <summary>
-    /// Adds <paramref name="plcName"/> to the row as an empty pill. The
-    /// new pill loads its DB list lazily on first popup open, same as the
-    /// active-set-derived pills. No-op if the PLC isn't a current candidate
-    /// (already in row, or not present in the project's DB list at all) —
-    /// this keeps <see cref="_extraPillPlcs"/> from accumulating stale
-    /// names if the click stream races a project mutation.
-    /// </summary>
-    public void AddPlcToRow(string plcName)
-    {
-        if (string.IsNullOrEmpty(plcName)) return;
-        if (!InactiveProjectPlcs.Contains(plcName, StringComparer.Ordinal)) return;
-        _extraPillPlcs.Add(plcName);
-        RebuildPlcPills();
-        OnPropertyChanged(nameof(InactiveProjectPlcs));
-    }
+    public void AddPlcToRow(string plcName) => _pillCoordinator.AddPlcToRow(plcName);
 
-    /// <summary>
-    /// Rebuilds <see cref="PlcPills"/> from the current snapshot. Called
-    /// on every active-set change by the host's cascade subscriber.
-    /// </summary>
-    public void RebuildPlcPills()
-    {
-        // Unsubscribe old pills before clearing.
-        foreach (var pill in PlcPills)
-            pill.SelectionChanged -= OnPillSelectionChanged;
-        PlcPills.Clear();
-
-        // Prune _extraPillPlcs of names that no longer correspond to any
-        // project PLC. Without this, a manually-added pill survives even
-        // after its PLC disappears from the project (e.g., after a
-        // refresh), and the orphan stays in the row indefinitely.
-        if (_extraPillPlcs.Count > 0 && _availableDataBlocks != null)
-        {
-            var projectPlcs = new HashSet<string>(
-                _availableDataBlocks.Select(d => d.PlcName ?? ""),
-                StringComparer.Ordinal);
-            _extraPillPlcs.RemoveWhere(p => !projectPlcs.Contains(p));
-        }
-
-        var newPills = PlcPillGroupsService.Build(
-            _state.Dbs,
-            _state.AnchorPlcName,
-            loadDbsForPlc: LoadDbsForPlcAsync,
-            extraPlcs: _extraPillPlcs);
-
-        foreach (var pill in newPills)
-        {
-            pill.SelectionChanged += OnPillSelectionChanged;
-            PlcPills.Add(pill);
-        }
-
-        // Pill row just changed — re-evaluate the inactive-PLCs list so
-        // the "+ PLC" popup and its button visibility stay in sync.
-        OnPropertyChanged(nameof(InactiveProjectPlcs));
-        OnPropertyChanged(nameof(CanAddPlc));
-    }
-
-    private void OnPillSelectionChanged(object? sender, PillSelectionChangedEventArgs e)
-    {
-        if (_syncingPillSelection) return;
-        _syncingPillSelection = true;
-        try
-        {
-            foreach (var summary in e.Added)
-            {
-                if (!GetActiveStatusFor(summary).isActive)
-                    AddActiveDbFromSummary(summary);
-            }
-            foreach (var summary in e.Removed)
-            {
-                if (_state.Dbs.Count <= 1)
-                {
-                    Log.Information(
-                        "Refusing pill remove on {Name} — at least one DB must stay active",
-                        summary.Name);
-                    // Snap pill selection back so the UI doesn't show a deselected last DB.
-                    if (sender is PlcPillViewModel pill)
-                    {
-                        var activeItems = GetActiveItemsForPlc(pill);
-                        pill.SyncSelectedDbs(activeItems);
-                    }
-                    return;
-                }
-                var match = FindActiveDb(summary);
-                if (match != null) RemoveActiveDb(match);
-            }
-        }
-        finally
-        {
-            _syncingPillSelection = false;
-        }
-    }
-
-    private IReadOnlyList<DataBlockListItem> GetActiveItemsForPlc(PlcPillViewModel pill)
-    {
-        var result = new List<DataBlockListItem>();
-        // Identity is by ActiveDb.PlcName uniformly across indices (#82) —
-        // the anchor is no longer special. isAnchor stays position-based:
-        // it's display state, not identity.
-        for (int i = 0; i < _state.Dbs.Count; i++)
-        {
-            var db = _state.Dbs[i];
-            var plc = db.PlcName ?? "";
-            if (!string.Equals(plc, pill.PlcName, StringComparison.Ordinal)) continue;
-            result.Add(new DataBlockListItem(
-                new DataBlockSummary(db.Info.Name, "", plcName: plc, number: db.Info.Number),
-                isActive: true,
-                isAnchor: i == 0));
-        }
-        return result;
-    }
-
-    /// <summary>
-    /// Lazy-loads the available DB list for a specific PLC. Called by each
-    /// <see cref="PlcPillViewModel"/> on first popup open.
-    ///
-    /// Reuses the same <see cref="_availableDataBlocks"/> cache that
-    /// <see cref="RefreshDataBlocksCommand"/> populates, then filters to the
-    /// requested PLC so each pill only shows its own DBs.
-    ///
-    /// Returns on the calling (UI) thread since <see cref="LoadAvailableDataBlocks"/>
-    /// already runs synchronously on the UI thread.
-    /// </summary>
-    internal Task<IReadOnlyList<DataBlockListItem>> LoadDbsForPlcAsync(string plcName)
-    {
-        if (_enumerateDataBlocks == null)
-            return Task.FromResult<IReadOnlyList<DataBlockListItem>>(Array.Empty<DataBlockListItem>());
-
-        LoadAvailableDataBlocks(force: false);
-
-        var source = _availableDataBlocks ?? Array.Empty<DataBlockSummary>();
-        var filtered = string.IsNullOrEmpty(plcName)
-            ? source
-            : source.Where(s => string.Equals(s.PlcName, plcName, StringComparison.Ordinal)).ToList();
-
-        var items = filtered
-            .Select(s =>
-            {
-                var (isActive, isAnchor) = GetActiveStatusFor(s);
-                var item = new DataBlockListItem(s, isActive, isAnchor);
-                item.ToggleRequested += OnDataBlockListItemToggled;
-                return item;
-            })
-            .ToList();
-
-        return Task.FromResult<IReadOnlyList<DataBlockListItem>>(items);
-    }
+    public void RebuildPlcPills() => _pillCoordinator.RebuildPlcPills();
 
     // ===== Mutators ==========================================================
 
