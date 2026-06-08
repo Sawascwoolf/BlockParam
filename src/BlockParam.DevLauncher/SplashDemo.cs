@@ -25,13 +25,21 @@ namespace BlockParam.DevLauncher;
 /// dotnet build src/BlockParam.DevLauncher -c Debug
 /// # slow open (~6s of fake prep) — quip appears after ~1.5s and stays:
 /// src/BlockParam.DevLauncher/bin/Debug/net48/BlockParam.DevLauncher.exe --demo-splash
+/// # hold the quip-visible splash open for 30s so you can study it:
+/// src/BlockParam.DevLauncher/bin/Debug/net48/BlockParam.DevLauncher.exe --demo-splash slow 30
 /// # fast open (~0.8s) — quip must NEVER appear:
 /// src/BlockParam.DevLauncher/bin/Debug/net48/BlockParam.DevLauncher.exe --demo-splash fast
 /// </code>
 /// </summary>
 internal static class SplashDemo
 {
-    public static void Run(bool slow)
+    /// <param name="slow">Slow open (quip shows) vs. fast open (quip suppressed).</param>
+    /// <param name="holdSeconds">
+    /// On a slow open, how long to keep the splash on screen AFTER the staged
+    /// prep finishes (quip already visible) so it can be studied. Default 8.
+    /// Ignored for fast opens.
+    /// </param>
+    public static void Run(bool slow, int holdSeconds = 8)
     {
         // en-US so the demo reads in English regardless of OS culture.
         var en = new CultureInfo("en-US");
@@ -71,6 +79,16 @@ internal static class SplashDemo
             Thread.Sleep(1200);
             splash.SetCounter(string.Empty);
             Step(splash, "Splash_LoadingConfig", null, 900);
+
+            // Hold the final, quip-visible frame so it can be studied. In the
+            // real Add-In the splash hands off to the dialog the instant prep
+            // finishes; here there is no dialog, so we just linger.
+            var hold = Math.Max(0, holdSeconds);
+            if (hold > 0)
+            {
+                Log.Information("Demo: holding the quip-visible splash for {Hold}s (pass a number to change, e.g. --demo-splash slow 30).", hold);
+                Thread.Sleep(hold * 1000);
+            }
         }
         else
         {

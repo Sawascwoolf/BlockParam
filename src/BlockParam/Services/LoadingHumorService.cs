@@ -24,7 +24,7 @@ public static class LoadingHumorService
     public static readonly IReadOnlyList<string> Keys = new[]
     {
         "Quip_EstimatingTime",
-        "Quip_AligningUdt",
+        "Quip_UntanglingArrays",
         "Quip_CountingDbs",
         "Quip_NegotiatingTree",
         "Quip_ReticulatingStartValues",

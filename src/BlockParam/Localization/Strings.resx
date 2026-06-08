@@ -1080,8 +1080,8 @@ Continue?</value>
   <data name="Quip_EstimatingTime" xml:space="preserve">
     <value>Estimating time remaining…</value>
   </data>
-  <data name="Quip_AligningUdt" xml:space="preserve">
-    <value>Aligning UDT instances…</value>
+  <data name="Quip_UntanglingArrays" xml:space="preserve">
+    <value>Untangling the nested arrays…</value>
   </data>
   <data name="Quip_CountingDbs" xml:space="preserve">
     <value>Counting your DBs (twice, to be sure)…</value>
