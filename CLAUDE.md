@@ -338,11 +338,13 @@ unrelated PRs — fix it under the issue that owns the cleanup.
   drag-select), write an attached behavior, not another `OnXyzChanged`
   handler.
 - **No new sync primitives in `OnlineLicenseService` without auditing the
-  existing ones.** The class currently mixes `lock`, `volatile`, and
-  `Interlocked` over overlapping state. Any change touching `_licenseData`,
-  `_cache`, `_proActive`, or `_heartbeatTimer` must pick one model and
-  remove the conflicts within the touched scope. Never call HTTP / I/O
-  inside `lock (_lock)`.
+  existing ones.** The concurrency model was audited in #170. Three
+  primitives, each with a clear role: `lock (_lock)` guards mutable state
+  writes (`_licenseData`, `_cache`, `_proActive`, `_retryCount`);
+  `volatile` enables lock-free reads of `_proActive` (UI) and `_disposed`
+  (lifecycle); `Interlocked.Exchange` owns `_heartbeatTimer` (avoids
+  deadlock with timer callbacks). Any change touching these fields must
+  preserve this model. Never call HTTP / I/O inside `lock (_lock)`.
 - **No new user-facing strings inline.** Every string the user sees goes
   through `Res.Get` / `Res.Format` against `Strings.resx`. Same key for
   the same concept across files — don't add a near-duplicate key when one
