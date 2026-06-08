@@ -534,13 +534,13 @@ This cannot be undone.</value>
     <value>Import...</value>
   </data>
   <data name="ConfigEditor_Import_Tooltip" xml:space="preserve">
-    <value>Import rule files (not yet implemented).</value>
+    <value>Import rule files from disk.</value>
   </data>
   <data name="ConfigEditor_Export" xml:space="preserve">
     <value>Export...</value>
   </data>
   <data name="ConfigEditor_Export_Tooltip" xml:space="preserve">
-    <value>Export the selected rule file (not yet implemented).</value>
+    <value>Export the selected rule file to disk.</value>
   </data>
   <data name="ConfigEditor_FileActions" xml:space="preserve">
     <value>File actions</value>
@@ -993,14 +993,35 @@ Continue?</value>
   <data name="ConfigEditor_DeleteFile_Failed" xml:space="preserve">
     <value>Cannot delete file: {0}</value>
   </data>
-  <data name="ConfigEditor_Import_NotImplemented" xml:space="preserve">
-    <value>Import is not yet implemented.</value>
+  <data name="ConfigEditor_Import_DialogTitle" xml:space="preserve">
+    <value>Import rule files</value>
   </data>
-  <data name="ConfigEditor_Export_NotImplemented" xml:space="preserve">
-    <value>Export is not yet implemented.</value>
+  <data name="ConfigEditor_Export_DialogTitle" xml:space="preserve">
+    <value>Export rule file</value>
   </data>
-  <data name="ConfigEditor_ExportFile_NotImplemented" xml:space="preserve">
-    <value>Export of '{0}' is not yet implemented.</value>
+  <data name="ConfigEditor_RuleFileFilter" xml:space="preserve">
+    <value>BlockParam rule files (*.json)|*.json|All files (*.*)|*.*</value>
+  </data>
+  <data name="ConfigEditor_Import_Result" xml:space="preserve">
+    <value>Imported {0} rule file(s) — review and Save to apply.</value>
+  </data>
+  <data name="ConfigEditor_Import_ResultWithErrors" xml:space="preserve">
+    <value>Imported {0} rule file(s); {1} skipped (not valid rule files): {2}</value>
+  </data>
+  <data name="ConfigEditor_Import_NoneValid" xml:space="preserve">
+    <value>No rule files imported — none were valid BlockParam rule files: {0}</value>
+  </data>
+  <data name="ConfigEditor_Import_Failed" xml:space="preserve">
+    <value>Import failed: {0}</value>
+  </data>
+  <data name="ConfigEditor_Export_Success" xml:space="preserve">
+    <value>Exported to '{0}'.</value>
+  </data>
+  <data name="ConfigEditor_Export_NoSelection" xml:space="preserve">
+    <value>Select a rule file to export first.</value>
+  </data>
+  <data name="ConfigEditor_ExportFile_Failed" xml:space="preserve">
+    <value>Could not export '{0}': {1}</value>
   </data>
   <!-- PillMultiSelect control (popup search box + footer actions) -->
   <data name="PillMultiSelect_SearchPlaceholder" xml:space="preserve">

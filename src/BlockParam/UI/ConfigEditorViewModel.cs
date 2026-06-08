@@ -22,6 +22,7 @@ public class ConfigEditorViewModel : ViewModelBase
 {
     private readonly ConfigLoader _configLoader;
     private readonly RuleFileRepository _ruleFiles;
+    private readonly IFileDialogService _fileDialogs;
     private readonly Dispatcher _dispatcher;
     private string _sharedRulesDirectory = "";
     private string _validationMessage = "";
@@ -32,17 +33,19 @@ public class ConfigEditorViewModel : ViewModelBase
     public ConfigEditorViewModel(
         ConfigLoader configLoader,
         IEnumerable<string>? tagTableNames = null)
-        : this(configLoader, tagTableNames, RuleFileRepository.Default)
+        : this(configLoader, tagTableNames, RuleFileRepository.Default, Win32FileDialogService.Instance)
     {
     }
 
     internal ConfigEditorViewModel(
         ConfigLoader configLoader,
         IEnumerable<string>? tagTableNames,
-        RuleFileRepository ruleFiles)
+        RuleFileRepository ruleFiles,
+        IFileDialogService? fileDialogs = null)
     {
         _configLoader = configLoader;
         _ruleFiles = ruleFiles ?? throw new ArgumentNullException(nameof(ruleFiles));
+        _fileDialogs = fileDialogs ?? Win32FileDialogService.Instance;
         // Capture the UI-thread dispatcher at construction. Save flows defer
         // a reload via this dispatcher; using Dispatcher.CurrentDispatcher
         // inside the deferred callback would be wrong if Save was ever
@@ -143,16 +146,13 @@ public class ConfigEditorViewModel : ViewModelBase
     public ICommand SaveCommand { get; }
     public ICommand SaveAndCloseCommand { get; }
 
-    /// <summary>
-    /// UI-only stub for now (#70 follow-up). Wires the toolbar button so the
-    /// import flow can be added without touching the ViewModel surface again.
-    /// </summary>
+    /// <summary>Imports one or more rule files from disk as staged new files (#36).</summary>
     public ICommand ImportFilesCommand { get; }
 
-    /// <summary>UI-only stub: export currently selected file. Logic out of scope.</summary>
+    /// <summary>Exports the currently selected file to a user-chosen path (#36).</summary>
     public ICommand ExportSelectedCommand { get; }
 
-    /// <summary>UI-only stub: export a specific file (used by the file-header overflow).</summary>
+    /// <summary>Exports a specific file (used by the file-header overflow menu) (#36).</summary>
     public ICommand ExportFileCommand { get; }
 
     private bool FilterFile(object obj)
@@ -549,24 +549,124 @@ public class ConfigEditorViewModel : ViewModelBase
             RequestClose?.Invoke();
     }
 
-    /// <summary>UI-only stub. Logic intentionally out of scope.</summary>
+    /// <summary>
+    /// Prompts for one or more <c>.json</c> rule files and stages each valid one
+    /// as a new file in the default destination (Project when a project is open,
+    /// else Local). Staging — rather than writing straight to disk — gives the
+    /// "preview before commit" the issue asks for: the imported rules appear in
+    /// the list and only land on disk on the next Save. Names are uniquified so
+    /// an import never silently overwrites an existing file (#36).
+    /// </summary>
     private void ExecuteImportFiles()
     {
-        ValidationMessage = Res.Get("ConfigEditor_Import_NotImplemented");
+        try
+        {
+            var paths = _fileDialogs.OpenFiles(
+                Res.Get("ConfigEditor_Import_DialogTitle"),
+                Res.Get("ConfigEditor_RuleFileFilter"),
+                multiselect: true);
+            if (paths.Length == 0) return; // user cancelled
+
+            var destination = GetDefaultNewFileSource();
+            var dir = GetDirectoryForSource(destination);
+            if (dir == null) { ValidationMessage = Res.Get("ConfigEditor_NewFile_NoDir"); return; }
+
+            // Seed the claim set with both staged and on-disk names so two
+            // imports of the same filename (or a clash with an existing file)
+            // each get a distinct -2, -3, … suffix.
+            var claimed = new HashSet<string>(
+                RuleFiles.Select(f => f.FileName), StringComparer.OrdinalIgnoreCase);
+            foreach (var name in _ruleFiles.ListJsonFileNames(dir))
+                claimed.Add(name);
+
+            var failures = new List<string>();
+            RuleFileViewModel? lastImported = null;
+            int imported = 0;
+
+            foreach (var path in paths)
+            {
+                var file = RuleFileViewModel.FromFile(path, destination, _ruleFiles);
+                if (file == null)
+                {
+                    failures.Add(Path.GetFileName(path));
+                    continue;
+                }
+
+                var uniqueName = ResolveUniqueFileName(Path.GetFileName(path), claimed);
+                claimed.Add(uniqueName);
+
+                file.FileName = uniqueName;
+                file.FilePath = Path.Combine(dir, uniqueName);
+                file.Source = destination;
+                file.SaveDestination = destination;
+                file.IsNew = true;        // staged, not yet on disk -> IsDirty
+                file.IsExpanded = true;
+
+                RuleFiles.Add(file);
+                lastImported = file;
+                imported++;
+            }
+
+            if (lastImported != null)
+            {
+                SelectedFile = lastImported;
+                SelectedRule = lastImported.Rules.FirstOrDefault();
+            }
+            FilteredRuleFiles.Refresh();
+
+            ValidationMessage = BuildImportMessage(imported, failures);
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "ExecuteImportFiles failed");
+            ValidationMessage = Res.Format("ConfigEditor_Import_Failed", ex.Message);
+        }
     }
 
-    /// <summary>UI-only stub. Logic intentionally out of scope.</summary>
-    private void ExecuteExportSelected()
+    private static string BuildImportMessage(int imported, List<string> failures)
     {
-        ExecuteExportFile(SelectedFile);
+        if (imported == 0)
+            return Res.Format("ConfigEditor_Import_NoneValid", string.Join(", ", failures));
+        if (failures.Count == 0)
+            return Res.Format("ConfigEditor_Import_Result", imported);
+        return Res.Format("ConfigEditor_Import_ResultWithErrors",
+            imported, failures.Count, string.Join(", ", failures));
     }
 
-    /// <summary>UI-only stub. Logic intentionally out of scope.</summary>
+    private void ExecuteExportSelected() => ExecuteExportFile(SelectedFile);
+
+    /// <summary>
+    /// Prompts for a destination path and writes the file's current (in-memory,
+    /// including unsaved edits) rule set there using the canonical serializer, so
+    /// an export → import round-trip on the same machine reproduces it exactly
+    /// (#36).
+    /// </summary>
     private void ExecuteExportFile(RuleFileViewModel? file)
     {
-        ValidationMessage = file != null
-            ? Res.Format("ConfigEditor_ExportFile_NotImplemented", file.FileName)
-            : Res.Get("ConfigEditor_Export_NotImplemented");
+        if (file == null)
+        {
+            ValidationMessage = Res.Get("ConfigEditor_Export_NoSelection");
+            return;
+        }
+
+        try
+        {
+            var target = _fileDialogs.SaveFile(
+                Res.Get("ConfigEditor_Export_DialogTitle"),
+                Res.Get("ConfigEditor_RuleFileFilter"),
+                file.FileName);
+            if (target == null) return; // user cancelled
+
+            var json = ConfigLoader.SerializeRuleFile(file.ToBulkChangeConfig());
+            _ruleFiles.WriteAllText(target, json);
+
+            ValidationMessage = Res.Format("ConfigEditor_Export_Success", Path.GetFileName(target));
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "ExecuteExportFile failed for '{FileName}'", file.FileName);
+            ValidationMessage = Res.Format("ConfigEditor_ExportFile_Failed", file.FileName, ex.Message);
+        }
     }
 
     private void ReloadAfterSave()

@@ -345,14 +345,22 @@ public class ConfigLoader
     /// </summary>
     public void SaveRuleFile(string filePath, BulkChangeConfig ruleFileContent)
     {
-        var json = JsonConvert.SerializeObject(ruleFileContent, Formatting.Indented, new JsonSerializerSettings
+        _storage.WriteAllText(StoragePath.FromAbsolute(filePath), SerializeRuleFile(ruleFileContent));
+        Invalidate();
+    }
+
+    /// <summary>
+    /// Serializes a rule file to the canonical on-disk JSON shape (camelCase,
+    /// indented, null fields omitted). Shared by <see cref="SaveRuleFile"/> and
+    /// the ConfigEditor export flow (#36) so an export/import round-trip on the
+    /// same machine reproduces an identical file.
+    /// </summary>
+    public static string SerializeRuleFile(BulkChangeConfig ruleFileContent) =>
+        JsonConvert.SerializeObject(ruleFileContent, Formatting.Indented, new JsonSerializerSettings
         {
             ContractResolver = new CamelCasePropertyNamesContractResolver(),
             NullValueHandling = NullValueHandling.Ignore
         });
-        _storage.WriteAllText(StoragePath.FromAbsolute(filePath), json);
-        Invalidate();
-    }
 
     /// <summary>
     /// Saves the shared rulesDirectory setting to config.json.
