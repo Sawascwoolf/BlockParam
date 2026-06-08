@@ -34,7 +34,8 @@ public class CaptureModeClosePromptTests
             BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
 
         prop.Should().NotBeNull("capture-mode close-bypass depends on this property");
-        prop!.PropertyType.Should().Be(typeof(bool));
+        prop!.DeclaringType.Should().Be(typeof(BulkChangeDialog));
+        prop.PropertyType.Should().Be(typeof(bool));
         prop.CanRead.Should().BeTrue();
         prop.CanWrite.Should().BeTrue();
     }
@@ -60,7 +61,7 @@ public class CaptureModeClosePromptTests
     }
 
     [Fact]
-    public void DiscardPendingSilent_does_not_discard_stashes()
+    public void DiscardPendingSilent_alone_does_not_clear_stashes()
     {
         var env = BuildWithPendingAndStash();
         var stashCountBefore = env.Vm.ActiveSet.StashedDbs.Count;
@@ -69,8 +70,29 @@ public class CaptureModeClosePromptTests
         env.Vm.DiscardPendingSilent();
 
         env.Vm.ActiveSet.StashedDbs.Count.Should().Be(stashCountBefore,
-            "closing the dialog abandons stashes via window disposal; " +
-            "DiscardPendingSilent should only clear active-DB pending edits");
+            "DiscardPendingSilent should only clear active-DB pending edits; " +
+            "ScriptedClose owns the full cleanup including stashes");
+    }
+
+    [Fact]
+    public void ScriptedClose_clears_both_pending_and_stashes_without_prompt()
+    {
+        var env = BuildWithPendingAndStash();
+
+        env.Vm.PendingInlineEditCount.Should().BeGreaterThan(0,
+            "precondition: must have pending edits");
+        env.Vm.ActiveSet.StashedDbs.Count.Should().BeGreaterThan(0,
+            "precondition: must have stashed DBs");
+
+        env.Mbx.Reset();
+        BulkChangeDialog.ScriptedClose(env.Vm);
+
+        env.Vm.PendingInlineEditCount.Should().Be(0,
+            "ScriptedClose must discard all pending inline edits");
+        env.Vm.ActiveSet.StashedDbs.Count.Should().Be(0,
+            "ScriptedClose must clear stashed DBs to prevent in-memory leaks");
+        env.Mbx.TotalCallCount.Should().Be(0,
+            "ScriptedClose must never invoke a message-box prompt");
     }
 
     // ─────────────────── helpers ───────────────────

@@ -111,7 +111,7 @@ public sealed class DevLauncherDbEnumerationTests : IDisposable
     public void Modified_xml_artifacts_are_excluded()
     {
         WriteFixture("DB_Real.xml", globalDb: true, number: 1);
-        WriteFixture("DB_Real_modified.xml", globalDb: true, number: 1);
+        WriteFixtureWithName("DB_Real_modified.xml", "DB_Real", globalDb: true, number: 1);
 
         var result = Program.EnumerateDevLauncherDbs(_tempDir, anchorPlc: null);
 
@@ -214,13 +214,16 @@ public sealed class DevLauncherDbEnumerationTests : IDisposable
     // ───────────── helpers ─────────────
 
     private void WriteFixture(string fileName, bool globalDb, int number)
+        => WriteFixtureWithName(fileName, Path.GetFileNameWithoutExtension(fileName), globalDb, number);
+
+    private void WriteFixtureWithName(string fileName, string blockName, bool globalDb, int number)
     {
         var blockTag = globalDb ? "SW.Blocks.GlobalDB" : "SW.Blocks.InstanceDB";
         var xml = $@"<?xml version=""1.0"" encoding=""utf-8""?>
 <Document>
   <{blockTag} ID=""0"">
     <AttributeList>
-      <Name>{Path.GetFileNameWithoutExtension(fileName)}</Name>
+      <Name>{blockName}</Name>
       <Number>{number}</Number>
     </AttributeList>
   </{blockTag}>
