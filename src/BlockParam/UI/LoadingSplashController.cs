@@ -51,13 +51,16 @@ public sealed class LoadingSplashController : IProgress<string>, IDisposable
         _humorLine = humorLine ?? string.Empty;
     }
 
+    /// <summary>The ~1.5s slow-load threshold #127 specifies (mirrors #125's flash guard).</summary>
+    private const double HumorRevealSeconds = 1.5;
+
     /// <summary>
     /// How long the splash must already have been up before the quip line is
     /// revealed (#127): fast opens stay strictly professional, only a load
-    /// that is already slow earns a quip. Settable for tests; defaults to the
-    /// ~1.5s threshold the issue specifies (mirrors #125's flash guard).
+    /// that is already slow earns a quip. Settable for tests; defaults to
+    /// <see cref="HumorRevealSeconds"/>.
     /// </summary>
-    internal TimeSpan HumorRevealDelay { get; set; } = TimeSpan.FromSeconds(1.5);
+    internal TimeSpan HumorRevealDelay { get; set; } = TimeSpan.FromSeconds(HumorRevealSeconds);
 
     /// <summary>For tests: the quip currently shown (empty until revealed).</summary>
     internal string HumorLine => _vm.HumorLine;

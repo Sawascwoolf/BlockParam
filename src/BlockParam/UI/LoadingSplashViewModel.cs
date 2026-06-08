@@ -18,7 +18,7 @@ public sealed class LoadingSplashViewModel : ViewModelBase
     public string Title
     {
         get => _title;
-        set => SetProperty(ref _title, value);
+        set => SetProperty(ref _title, value ?? string.Empty);
     }
 
     public string StatusText
