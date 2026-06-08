@@ -100,13 +100,13 @@ public class PillSelectionCoordinatorTests
         int addCount = 0;
         var db1 = Db("DB1", "PLC1");
         var state = Snap(db1);
-        var coordinator = new PillSelectionCoordinator(
+        PillSelectionCoordinator? coordinator = null;
+        coordinator = new PillSelectionCoordinator(
             getState: () => state,
             getActiveStatusFor: s => (false, false),
             addActiveDbFromSummary: s =>
             {
                 addCount++;
-                // Simulate the host rebuilding pills during add
                 coordinator!.RebuildPlcPills();
             },
             findActiveDb: s => null,
