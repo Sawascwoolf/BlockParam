@@ -152,7 +152,12 @@ public class BulkChangeContextMenu : ContextMenuAddIn
             // below blocks the TIA UI thread. Shown as fast as possible (no
             // flash-guard delay — prep time isn't predictable); strings are
             // localized here and pushed in.
-            splash = new LoadingSplashController(Res.Get("Splash_Title"));
+            // #127: pick one quip key now (once per session) and localize it
+            // here on the TIA thread — the splash render thread must not touch
+            // Res. The controller reveals it only after the load is already
+            // slow (~1.5s); fast opens never show it.
+            splash = new LoadingSplashController(
+                Res.Get("Splash_Title"), Res.Get(LoadingHumorService.PickKey()));
             splash.Show();
             splash.Report(Res.Get("Splash_Preparing"));
 

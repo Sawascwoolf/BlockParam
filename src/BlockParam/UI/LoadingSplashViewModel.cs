@@ -13,6 +13,7 @@ public sealed class LoadingSplashViewModel : ViewModelBase
     private string _title = string.Empty;
     private string _statusText = string.Empty;
     private string _counterText = string.Empty;
+    private string _humorLine = string.Empty;
 
     public string Title
     {
@@ -31,5 +32,17 @@ public sealed class LoadingSplashViewModel : ViewModelBase
     {
         get => _counterText;
         set => SetProperty(ref _counterText, value ?? string.Empty);
+    }
+
+    /// <summary>
+    /// Light rotating quip (#127), rendered dim/italic under the status line.
+    /// Empty until elapsed prep time crosses the splash threshold, then set
+    /// once and held for the rest of the session. Never replaces the
+    /// load-bearing <see cref="StatusText"/>.
+    /// </summary>
+    public string HumorLine
+    {
+        get => _humorLine;
+        set => SetProperty(ref _humorLine, value ?? string.Empty);
     }
 }

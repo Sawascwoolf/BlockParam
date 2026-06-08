@@ -31,6 +31,23 @@
             <ProgressBar IsIndeterminate="True" Height="6" Width="320"
                          Foreground="#FF0078D4" Background="#FFE6E6E6"
                          BorderThickness="0"/>
+            <!-- #127: rotating quip line. Smaller, dimmer, italic — sits UNDER
+                 the load-bearing status line and never replaces it. Collapsed
+                 (and zero-height) until HumorLine is set, so fast opens show
+                 no quip and no reserved gap. -->
+            <TextBlock Foreground="#FFA0A0A0" FontSize="11" FontStyle="Italic"
+                       TextTrimming="CharacterEllipsis" Margin="0,12,0,0"
+                       Text="{Binding HumorLine}">
+                <TextBlock.Style>
+                    <Style TargetType="TextBlock">
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding HumorLine}" Value="">
+                                <Setter Property="Visibility" Value="Collapsed"/>
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </TextBlock.Style>
+            </TextBlock>
         </StackPanel>
     </Border>
 </Window>
