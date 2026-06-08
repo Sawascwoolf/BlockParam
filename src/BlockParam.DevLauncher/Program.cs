@@ -610,7 +610,7 @@ class Program
     /// neither form exists — both <c>switchToDataBlock</c> and
     /// <c>buildActiveDbForSummary</c> handle that.
     /// </summary>
-    private static string? ResolveFixturePath(string tiaExportDir, DataBlockSummary summary)
+    internal static string? ResolveFixturePath(string tiaExportDir, DataBlockSummary summary)
     {
         if (!string.IsNullOrEmpty(summary.PlcName))
         {

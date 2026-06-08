@@ -38,6 +38,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\BlockParam\BlockParam.csproj" />
+    <ProjectReference Include="..\BlockParam.DevLauncher\BlockParam.DevLauncher.csproj" />
   </ItemGroup>
 
   <!-- Include XML fixture files as embedded resources -->
