@@ -18,12 +18,26 @@ public class OnlineLicenseServiceConcurrencyTests
     private static StoragePath StorageDir =>
         StoragePath.FromAbsolute(@"C:\bp\appdata") / "licensing";
 
-    private static OnlineLicenseService NewService(InMemoryBlockParamStorage? fs = null)
+    private static OnlineLicenseService NewService(
+        InMemoryBlockParamStorage? fs = null,
+        string? serverBaseUrl = null)
     {
         return new OnlineLicenseService(
             fs ?? new InMemoryBlockParamStorage(),
             StorageDir,
-            serverBaseUrl: null);
+            serverBaseUrl: serverBaseUrl);
+    }
+
+    private static OnlineLicenseService NewServiceWithKey(InMemoryBlockParamStorage? fs = null)
+    {
+        var storage = fs ?? new InMemoryBlockParamStorage();
+        var licPath = StorageDir / "license.json";
+        storage.WriteAllText(licPath,
+            "{\"LicenseKey\":\"TEST-KEY\",\"InstanceId\":\"test-id\",\"ActivatedAt\":\"2026-01-01T00:00:00Z\"}");
+        return new OnlineLicenseService(
+            storage,
+            StorageDir,
+            serverBaseUrl: "http://127.0.0.1:1");
     }
 
     [Fact]
@@ -53,7 +67,10 @@ public class OnlineLicenseServiceConcurrencyTests
     [Fact]
     public void Concurrent_StartHeartbeat_StopHeartbeat_do_not_throw()
     {
-        using var svc = NewService();
+        // Non-null server + seeded key so StartHeartbeat installs a real timer
+        // and SendHeartbeatAsync exercises the lock/retry/Interlocked path
+        // (HTTP fails immediately against 127.0.0.1:1 — hits the catch block).
+        using var svc = NewServiceWithKey();
 
         var tasks = new Task[ThreadCount];
         for (int i = 0; i < ThreadCount; i++)
@@ -124,7 +141,7 @@ public class OnlineLicenseServiceConcurrencyTests
     [Fact]
     public void Concurrent_Dispose_and_StartHeartbeat_no_ObjectDisposedException_leaks()
     {
-        var svc = NewService();
+        var svc = NewServiceWithKey();
 
         var barrier = new Barrier(ThreadCount);
         var tasks = new Task[ThreadCount];

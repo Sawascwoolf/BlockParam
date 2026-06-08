@@ -29,8 +29,10 @@ namespace BlockParam.Licensing;
 ///     disposing the timer would risk deadlock.
 ///   - <c>_isManagedKey</c>: set once in the constructor, read-only after construction.
 ///   - Lock-free reads of <c>_licenseData</c> in <see cref="StartHeartbeat"/> and
-///     <see cref="SendHeartbeatAsync"/> are fast-path null checks; reference reads
-///     are atomic on .NET. The full state is re-read under lock when needed.
+///     <see cref="SendHeartbeatAsync"/> are fast-path null checks. Safe because
+///     <c>LicenseData</c> instances are effectively immutable after assignment
+///     (only ever replaced, never mutated in place) and reference writes are
+///     atomic on .NET. The full state is re-read under lock when needed.
 ///   - HTTP / file I/O MUST run outside <c>lock (_lock)</c>. State is captured under
 ///     the lock, then persisted after releasing it.
 /// </summary>
@@ -321,6 +323,7 @@ public class OnlineLicenseService : ILicenseService
                     _retryCount = 0;
                 }
 
+                // Safe outside lock: one-shot timer + ScheduleNextHeartbeat serializes beats.
                 SaveCache(cacheToSave);
                 ScheduleNextHeartbeat(HeartbeatInterval);
                 RaiseLicenseStateChanged();
@@ -400,6 +403,9 @@ public class OnlineLicenseService : ILicenseService
     /// (batch / SCCM / Intune / GPO); every seat picks up the change on next start
     /// without user interaction. The cached server response is invalidated when the
     /// key changes — the heartbeat will re-validate against the server.
+    /// Called only from the constructor (single-threaded) — intentionally
+    /// lock-free. Do not move into a post-construction code path without
+    /// adding lock protection (which would reintroduce I/O-in-lock).
     /// </summary>
     private void AdoptSharedLicenseKeyIfPresent()
     {
