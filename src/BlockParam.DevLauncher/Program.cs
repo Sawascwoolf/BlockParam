@@ -60,6 +60,14 @@ class Program
             return;
         }
 
+        // --demo-splash [slow|fast]               #127: LIVE splash + quip timing
+        if (args.Length >= 1 && args[0] == "--demo-splash")
+        {
+            var slow = !(args.Length >= 2 && args[1].Equals("fast", StringComparison.OrdinalIgnoreCase));
+            SplashDemo.Run(slow);
+            return;
+        }
+
         // --capture-rules <out.png> [<rules-dir>]  website hero: rules editor
         if (args.Length >= 2 && args[0] == "--capture-rules")
         {
