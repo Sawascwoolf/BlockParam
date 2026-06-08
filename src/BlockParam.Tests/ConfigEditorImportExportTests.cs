@@ -100,12 +100,14 @@ public class ConfigEditorImportExportTests : IDisposable
         WriteRuleFile("speed.json", SampleRule);
         var dialogs = new FakeFileDialogService { SaveResult = null }; // user cancels
         var vm = CreateVm(dialogs);
+        vm.ValidationMessage = "prior message"; // must survive a no-op cancel
 
         vm.SelectedFile = vm.RuleFiles.Single();
         vm.ExportSelectedCommand.Execute(null);
 
         Directory.GetFiles(_externalDir).Should().BeEmpty("a cancelled save writes nothing");
-        vm.ValidationMessage.Should().BeEmpty("cancelling is not an error");
+        vm.ValidationMessage.Should().Be("prior message",
+            "cancelling is a no-op and must not clobber the existing message");
     }
 
     [Fact]
@@ -154,6 +156,25 @@ public class ConfigEditorImportExportTests : IDisposable
         vm.SaveCommand.Execute(null);
         File.Exists(Path.Combine(_rulesDir, "incoming.json")).Should()
             .BeTrue("Save commits the staged import to the local rules directory");
+        vm.ValidationMessage.Should().BeEmpty("a successful save reports no error");
+    }
+
+    [Fact]
+    public void ExportFile_ExportsTheGivenFile_NotTheSelectedOne()
+    {
+        WriteRuleFile("alpha.json", SampleRule);
+        WriteRuleFile("beta.json", SampleRule);
+        var target = Path.Combine(_externalDir, "out.json");
+        var dialogs = new FakeFileDialogService { SaveResult = target };
+        var vm = CreateVm(dialogs);
+
+        // Select alpha, but invoke the overflow-menu command on beta.
+        vm.SelectedFile = vm.RuleFiles.Single(f => f.FileName == "alpha.json");
+        var beta = vm.RuleFiles.Single(f => f.FileName == "beta.json");
+        vm.ExportFileCommand.Execute(beta);
+
+        dialogs.LastSaveSuggestedName.Should().Be("beta.json",
+            "the overflow command exports its argument, not the selected file");
     }
 
     [Fact]
@@ -192,11 +213,13 @@ public class ConfigEditorImportExportTests : IDisposable
     {
         var dialogs = new FakeFileDialogService { OpenResult = Array.Empty<string>() };
         var vm = CreateVm(dialogs);
+        vm.ValidationMessage = "prior message"; // must survive a no-op cancel
 
         vm.ImportFilesCommand.Execute(null);
 
         vm.RuleFiles.Should().BeEmpty("a cancelled open imports nothing");
-        vm.ValidationMessage.Should().BeEmpty("cancelling is not an error");
+        vm.ValidationMessage.Should().Be("prior message",
+            "cancelling is a no-op and must not clobber the existing message");
     }
 
     private sealed class FakeFileDialogService : IFileDialogService

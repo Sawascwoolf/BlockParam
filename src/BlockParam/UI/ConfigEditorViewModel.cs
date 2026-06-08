@@ -638,8 +638,9 @@ public class ConfigEditorViewModel : ViewModelBase
     /// <summary>
     /// Prompts for a destination path and writes the file's current (in-memory,
     /// including unsaved edits) rule set there using the canonical serializer, so
-    /// an export → import round-trip on the same machine reproduces it exactly
-    /// (#36).
+    /// an export → import round-trip on the same machine reproduces the rule set
+    /// exactly (#36). Same as Save, this emits version + rules only; provenance
+    /// metadata (<c>_copiedFrom</c>) is intentionally not carried by the editor.
     /// </summary>
     private void ExecuteExportFile(RuleFileViewModel? file)
     {

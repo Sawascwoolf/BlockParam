@@ -1,3 +1,4 @@
+using System.Windows;
 using Microsoft.Win32;
 
 namespace BlockParam.UI;
@@ -39,7 +40,7 @@ public sealed class Win32FileDialogService : IFileDialogService
             Multiselect = multiselect,
             CheckFileExists = true,
         };
-        return dialog.ShowDialog() == true ? dialog.FileNames : Array.Empty<string>();
+        return Show(dialog) ? dialog.FileNames : Array.Empty<string>();
     }
 
     public string? SaveFile(string title, string filter, string suggestedFileName)
@@ -53,6 +54,20 @@ public sealed class Win32FileDialogService : IFileDialogService
             DefaultExt = ".json",
             OverwritePrompt = true,
         };
-        return dialog.ShowDialog() == true ? dialog.FileName : null;
+        return Show(dialog) ? dialog.FileName : null;
+    }
+
+    /// <summary>
+    /// Shows the dialog parented to the active window when one exists. Inside
+    /// TIA Portal the Add-In's WPF window is hosted in an HwndSource and is not
+    /// reliably the Win32 foreground window, so without an explicit owner the
+    /// file dialog can open behind it (matches ThreeButtonDialog /
+    /// SubscriptionViewModel owner resolution).
+    /// </summary>
+    private static bool Show(CommonDialog dialog)
+    {
+        var owner = Application.Current?.Windows.OfType<Window>().FirstOrDefault(w => w.IsActive);
+        var result = owner != null ? dialog.ShowDialog(owner) : dialog.ShowDialog();
+        return result == true;
     }
 }
