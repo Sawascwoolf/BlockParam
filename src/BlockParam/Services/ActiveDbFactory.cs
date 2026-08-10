@@ -172,13 +172,31 @@ public sealed class ActiveDbFactory : IActiveDbFactory
 
             // BackupBlock also exports; if a previous import left the block
             // inconsistent (#19) the same compile-prompt path catches it here.
+            // This is the ONLY backup that actually runs today (#191) — it
+            // exports the pre-import state of THIS DB to _tempDir right
+            // before ImportBlock overwrites it. There is no automatic
+            // restore wired to it (see BulkChangeViewModel.HandleApplyError);
+            // logging the path at least gives support/the user a real file
+            // to manually re-import if an Apply goes wrong.
+            // ITiaPortalAdapter.BackupBlock's return type is non-nullable
+            // (Nullable enabled project-wide) and its only implementation,
+            // TiaPortalAdapter.BackupBlock, builds the path via Path.Combine
+            // BEFORE calling block.Export — it either returns a real,
+            // non-empty path or throws (a non-"inconsistent block" export
+            // failure propagates unchanged through
+            // CompilePromptWorkflow.TryWithRetry, so we'd never reach the
+            // Log.Information below with a null/empty path). backupPath is
+            // declared `string?` only because it stays unset on the
+            // declined-compile branch (thrown before assignment matters).
+            string? backupPath = null;
             if (!_exporter.TryExportWithCompilePrompt(liveDb,
-                    () => _adapter.BackupBlock(liveDb, _tempDir)))
+                    () => backupPath = _adapter.BackupBlock(liveDb, _tempDir)))
             {
                 Log.Information("Apply cancelled: user declined compile for {DbName}", info.Name);
                 throw new OperationCanceledException(
                     "User declined to compile the inconsistent block.");
             }
+            Log.Information("Backup created for {DbName}: {BackupPath}", info.Name, backupPath);
 
             var modifiedPath = Path.Combine(_tempDir,
                 $"{SafeFileName.Sanitize(info.Name)}_modified.xml");

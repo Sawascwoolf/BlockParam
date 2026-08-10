@@ -124,24 +124,6 @@
     <value>Updated {0} comments in '{1}'</value>
     <comment>{0} = count, {1} = DB name</comment>
   </data>
-  <!-- Rollback -->
-  <data name="Rollback_Question" xml:space="preserve">
-    <value>An error occurred during the bulk operation:
-
-{0}
-
-Would you like to rollback all changes?
-Yes = Restore the original Data Block
-No = Keep the current (possibly partial) result</value>
-    <comment>{0} = error message</comment>
-  </data>
-  <data name="Rollback_Complete" xml:space="preserve">
-    <value>Rollback complete — original Data Block restored.</value>
-  </data>
-  <data name="Rollback_Failed" xml:space="preserve">
-    <value>Rollback failed: {0}</value>
-    <comment>{0} = error message</comment>
-  </data>
   <!-- ViewModel Status Messages -->
   <data name="Status_SingleOccurrence" xml:space="preserve">
     <value>This member appears only once — no bulk operation available.</value>
@@ -162,13 +144,9 @@ No = Keep the current (possibly partial) result</value>
     <value>Error during cleanup: {0}</value>
     <comment>{0} = error message</comment>
   </data>
-  <data name="Status_ErrorPartialKept" xml:space="preserve">
-    <value>Error occurred, partial changes kept: {0}</value>
-    <comment>{0} = error message</comment>
-  </data>
-  <data name="Status_ErrorNoBackup" xml:space="preserve">
-    <value>Error: {0} (no backup available for rollback)</value>
-    <comment>{0} = error message</comment>
+  <data name="Status_ErrorNoAutoRollback" xml:space="preserve">
+    <value>Error: {0} (no automatic rollback — BlockParam saves a pre-import backup of every DB it imports under {1}; check the log for the exact file)</value>
+    <comment>{0} = error message, {1} = backup root directory (AppDirectories.Temp)</comment>
   </data>
   <data name="Status_LimitReached" xml:space="preserve">
     <value>Daily limit reached. Upgrade for unlimited use.</value>
