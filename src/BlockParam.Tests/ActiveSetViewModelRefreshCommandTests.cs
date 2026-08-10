@@ -82,6 +82,44 @@ public class ActiveSetViewModelRefreshCommandTests
             "refresh re-enumerates even with no host callback wired");
     }
 
+    [Fact]
+    public void RefreshDataBlocksCommand_RaisesPropertyChanged_ForPlcCandidateList()
+    {
+        // Regression: refresh re-enumerated correctly (the fresh list landed in
+        // _availableDataBlocks) but raised no notification, so the "+ PLC"
+        // popup — bound to ActiveSet.InactiveProjectPlcs / CanAddPlc — kept
+        // rendering its pre-refresh candidates. Observed live in TIA: a PLC
+        // added mid-session stayed invisible after clicking refresh even
+        // though the log showed the new blocks being enumerated.
+        var plcs = new List<DataBlockSummary> { new DataBlockSummary("Alpha", "", plcName: "PLC_1", number: 1) };
+
+        var harness = new Harness(Snap(Db("Anchor", "PLC_1")))
+            .WithEnumerateDataBlocks(() => plcs)
+            .WithSwitchToDataBlock(_ => "<Block/>");
+
+        harness.Vm.OpenDataBlocksDropdownCommand.Execute(null);
+        // The host calls RebuildPlcPills on every active-set change; do it
+        // once here so the row actually holds PLC_1's pill (a pill-less row
+        // would report PLC_1 itself as an add-candidate).
+        harness.Vm.RebuildPlcPills();
+        harness.Vm.InactiveProjectPlcs.Should().BeEmpty("only PLC_1 exists and it is already in the row");
+
+        // A new PLC appears in the project after the first enumeration.
+        plcs.Add(new DataBlockSummary("Beta", "", plcName: "PLC_2", number: 2));
+
+        var raised = new List<string>();
+        harness.Vm.PropertyChanged += (_, e) => raised.Add(e.PropertyName ?? "");
+
+        harness.Vm.RefreshDataBlocksCommand.Execute(null);
+
+        raised.Should().Contain(nameof(ActiveSetViewModel.InactiveProjectPlcs),
+            "the '+ PLC' popup's ItemsSource binding only re-reads on notification");
+        raised.Should().Contain(nameof(ActiveSetViewModel.CanAddPlc),
+            "the '+ PLC' button's Visibility binding only re-reads on notification");
+        harness.Vm.InactiveProjectPlcs.Should().Contain("PLC_2",
+            "the newly enumerated PLC must become an add-candidate");
+    }
+
     // ---------- helpers (copied locally; no shared state) ----------
 
     private static ActiveSetState Snap(params ActiveDb[] dbs)

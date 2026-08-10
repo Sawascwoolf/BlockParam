@@ -389,6 +389,14 @@ public sealed class ActiveSetViewModel : ViewModelBase
         _onRefreshDataBlocks?.Invoke();
         LoadAvailableDataBlocks(force: true);
         ApplyDataBlockFilter();
+        // The re-enumeration above only replaces _availableDataBlocks. The pill
+        // row's derived state (InactiveProjectPlcs / CanAddPlc, i.e. the "+ PLC"
+        // candidate list) is computed from that list by the coordinator, which
+        // raises PropertyChanged only from RebuildPlcPills / AddPlcToRow — so
+        // without this a refresh picked up a newly added PLC in the data but
+        // never repainted the popup. RebuildPlcPills also prunes extra pills
+        // whose PLC disappeared from the project, which is what a refresh means.
+        _pillCoordinator.RebuildPlcPills();
     }
 
     private void LoadAvailableDataBlocks(bool force)
