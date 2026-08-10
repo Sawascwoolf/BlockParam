@@ -320,14 +320,18 @@ public class ApplyProgressTests : IDisposable
     /// swallows an <c>OnApply</c> exception and shows its own message box
     /// (a separate, pre-existing path, untouched here). Force the outer
     /// catch via a post-commit <c>RecordUsage</c> throw and assert the
-    /// resulting StatusText is the same honest "no backup available"
-    /// message used everywhere else — no claim of an automatic rollback
-    /// that doesn't exist (the old dead <c>_onBackup</c>/<c>_onRestore</c>
-    /// callback pair that produced the empty "Backup created:" log line
-    /// has been removed entirely).
+    /// resulting StatusText is the honest "no AUTOMATIC rollback" message —
+    /// distinct from claiming no backup exists at all. A follow-up review
+    /// of the first #191 fix flagged that the original wording
+    /// ("no backup available for rollback") became actively misleading once
+    /// <c>ActiveDbFactory</c> started logging a REAL per-DB backup path
+    /// (every DB it imports gets one, written right before ImportBlock) —
+    /// telling the user "no backup" at that exact moment would send them
+    /// away from a recoverable file instead of toward it. The message must
+    /// name the backup root and point at the log for the exact file.
     /// </summary>
     [Fact]
-    public void Apply_UnexpectedExceptionAfterCommit_SetsHonestNoBackupStatus()
+    public void Apply_UnexpectedExceptionAfterCommit_SetsHonestNoAutoRollbackStatus()
     {
         var xml = TestFixtures.LoadXml("flat-db.xml");
         var db = new SimaticMLParser().Parse(xml);
@@ -349,9 +353,11 @@ public class ApplyProgressTests : IDisposable
 
         vm.StatusText.Should().Be(
             BlockParam.Localization.Res.Format(
-                "Status_ErrorNoBackup", "quota store unavailable"),
-            "the failure path must not claim a backup/rollback that was " +
-            "never actually available");
+                "Status_ErrorNoAutoRollback", "quota store unavailable",
+                AppDirectories.Temp),
+            "the failure path must say rollback isn't automatic without " +
+            "claiming no backup exists — a real per-DB backup is written " +
+            "before every import");
     }
 
     /// <summary>

@@ -157,17 +157,21 @@ public class BulkChangeViewModelMultiDbTests
     /// a declined compile prompt), <c>ExecuteApplyMultiDb</c>'s Phase-2 loop
     /// only catches the cancel case — everything else propagates to the
     /// outer catch, which routes through <c>HandleApplyError</c>. Pin that
-    /// the resulting StatusText is the same honest "no backup available"
-    /// message used everywhere, not a rollback offer the VM can't act on
-    /// (the previous <c>_onBackup</c>/<c>_onRestore</c> callback pair was
-    /// never wired at any production construction site and has been
-    /// removed). Also pins that the DB committed BEFORE the failing one
-    /// (the focused DB, applied first per <c>AllActiveDbs</c> ordering)
-    /// really did write — the half-applied state the honest message must
-    /// not paper over.
+    /// the resulting StatusText says rollback isn't automatic WITHOUT
+    /// claiming no backup exists — a follow-up review of the first #191 fix
+    /// caught that "no backup available for rollback" is actively
+    /// misleading here: the focused DB's <c>OnApply</c> (via
+    /// <c>ActiveDbFactory</c>) already ran <c>BackupBlock</c> and logged a
+    /// real pre-import path for it before the peer threw, so a recoverable
+    /// file genuinely exists at this point — the message must point at it,
+    /// not deny it (a message that hides an available recovery file from
+    /// the user is the same dishonesty #191 removed, just inverted). Also
+    /// pins that the DB committed BEFORE the failing one (the focused DB,
+    /// applied first per <c>AllActiveDbs</c> ordering) really did write —
+    /// the half-applied state the honest message must not paper over.
     /// </summary>
     [Fact]
-    public void Apply_MultipleDbs_OnApplyThrowsNonCancelException_SetsHonestNoBackupStatus()
+    public void Apply_MultipleDbs_OnApplyThrowsNonCancelException_SetsHonestNoAutoRollbackStatus()
     {
         var focusedXml = TestFixtures.LoadXml("flat-db.xml");
         var peerXml = TestFixtures.LoadXml("nested-struct-db.xml");
@@ -209,9 +213,11 @@ public class BulkChangeViewModelMultiDbTests
             "half-applied state the status message must not gloss over");
         vm.StatusText.Should().Be(
             BlockParam.Localization.Res.Format(
-                "Status_ErrorNoBackup", "TIA import failed"),
-            "the failure path must not claim a backup/rollback that was " +
-            "never actually available");
+                "Status_ErrorNoAutoRollback", "TIA import failed",
+                AppDirectories.Temp),
+            "the failure path must say rollback isn't automatic without " +
+            "denying that a real backup exists for the DB that already " +
+            "committed");
     }
 
     [Fact]

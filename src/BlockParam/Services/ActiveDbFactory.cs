@@ -178,6 +178,16 @@ public sealed class ActiveDbFactory : IActiveDbFactory
             // restore wired to it (see BulkChangeViewModel.HandleApplyError);
             // logging the path at least gives support/the user a real file
             // to manually re-import if an Apply goes wrong.
+            // ITiaPortalAdapter.BackupBlock's return type is non-nullable
+            // (Nullable enabled project-wide) and its only implementation,
+            // TiaPortalAdapter.BackupBlock, builds the path via Path.Combine
+            // BEFORE calling block.Export — it either returns a real,
+            // non-empty path or throws (a non-"inconsistent block" export
+            // failure propagates unchanged through
+            // CompilePromptWorkflow.TryWithRetry, so we'd never reach the
+            // Log.Information below with a null/empty path). backupPath is
+            // declared `string?` only because it stays unset on the
+            // declined-compile branch (thrown before assignment matters).
             string? backupPath = null;
             if (!_exporter.TryExportWithCompilePrompt(liveDb,
                     () => backupPath = _adapter.BackupBlock(liveDb, _tempDir)))

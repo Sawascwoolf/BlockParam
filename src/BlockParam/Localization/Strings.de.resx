@@ -85,7 +85,7 @@ Diese Elemente löschen?</value></data>
   <data name="Status_Error" xml:space="preserve"><value>Fehler: {0}</value></data>
   <data name="Status_ErrorComments" xml:space="preserve"><value>Fehler beim Aktualisieren der Kommentare: {0}</value></data>
   <data name="Status_ErrorCleanup" xml:space="preserve"><value>Fehler bei der Bereinigung: {0}</value></data>
-  <data name="Status_ErrorNoBackup" xml:space="preserve"><value>Fehler: {0} (kein Backup für Rückgängig verfügbar)</value></data>
+  <data name="Status_ErrorNoAutoRollback" xml:space="preserve"><value>Fehler: {0} (kein automatisches Rückgängigmachen — BlockParam speichert vor jedem Import eines Datenbausteins ein Backup unter {1}; die genaue Datei steht im Log)</value></data>
   <data name="Status_LimitReached" xml:space="preserve"><value>Tageslimit erreicht. Upgrade für unbegrenzte Nutzung.</value></data>
   <data name="Status_Remaining" xml:space="preserve"><value>Verbleibend: {0}/{1} kostenlose Änderungen heute</value></data>
   <data name="Status_WouldExceedLimit" xml:space="preserve"><value>Dieses Übernehmen würde {0} Änderungen schreiben, aber nur {1} sind heute übrig. Auswahl reduzieren oder auf Pro upgraden für unbegrenzte Nutzung.</value></data>

@@ -73,9 +73,10 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     // null, so every Apply logged an empty "Backup created:" path and the
     // failure branch always reported "no backup available". The REAL backup
     // that exists today runs inside ActiveDbFactory's OnApply closure
-    // (BackupBlock exports each DB right before its ImportBlock call), but
-    // that path is per-DB and discarded, not something this VM can restore
-    // from — see ExecuteApplyMultiDb's partial-commit comment below for why
+    // (BackupBlock exports each DB right before its ImportBlock call, and
+    // now logs the real path too — see HandleApplyError), but this VM never
+    // tracks those per-DB paths and can't drive an automatic restore from
+    // them — see ExecuteApplyMultiDb's partial-commit comment below for why
     // cross-DB rollback isn't attempted once a DB has actually imported.
     // Removed rather than left as a mechanism that logs safety it doesn't
     // provide (issue #191).
@@ -2859,23 +2860,32 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
 
     /// <summary>
     /// F-072 / #191: surfaces an Apply-time exception to the user. This VM
-    /// has no working rollback path today — the previous "ask to restore a
-    /// backup" flow relied on an <c>onBackup</c>/<c>onRestore</c> callback
-    /// pair that no production construction site ever wired (always null),
-    /// so the question could never actually fire and every failure quietly
-    /// fell through to "no backup available" anyway. Removed rather than
-    /// kept as a mechanism that implied a safety net it didn't provide.
-    /// The real per-DB export (<c>ITiaPortalAdapter.BackupBlock</c>, called
-    /// from <c>ActiveDbFactory</c>'s <c>OnApply</c> closure right before
-    /// each DB's import) still runs and leaves a recoverable XML on disk,
-    /// but nothing here tracks those paths or drives an automatic restore
-    /// from them — see ExecuteApplyMultiDb's partial-commit comment for why
-    /// cross-DB rollback isn't attempted once a DB has actually imported.
+    /// has no working AUTOMATIC rollback path today — the previous "ask to
+    /// restore a backup" flow relied on an <c>onBackup</c>/<c>onRestore</c>
+    /// callback pair that no production construction site ever wired
+    /// (always null), so the question could never actually fire. Removed
+    /// rather than kept as a mechanism that implied a safety net it didn't
+    /// provide.
+    ///
+    /// That is NOT the same as "no backup exists" — <c>ActiveDbFactory</c>'s
+    /// <c>OnApply</c> closure calls <c>ITiaPortalAdapter.BackupBlock</c>
+    /// synchronously right before every DB's <c>ImportBlock</c>, so any DB
+    /// that reached import has a real pre-import XML on disk (logged as
+    /// "Backup created for {DbName}: {BackupPath}"). The status message
+    /// below must say so — a message that claims "no backup available" at
+    /// the exact moment a recoverable file is sitting in the backup
+    /// directory is the same dishonesty #191 removed, just inverted, and
+    /// worse: a user who reads "no backup" won't go looking for the file
+    /// that would let them recover. Nothing here tracks the per-DB paths or
+    /// drives an automatic restore from them — see ExecuteApplyMultiDb's
+    /// partial-commit comment for why cross-DB rollback isn't attempted
+    /// once a DB has actually imported — so the message points at the
+    /// backup directory + the log rather than a specific file.
     /// </summary>
     private void HandleApplyError(Exception ex)
     {
         Log.Error(ex, "Apply failed with no automatic rollback available");
-        StatusText = Res.Format("Status_ErrorNoBackup", ex.Message);
+        StatusText = Res.Format("Status_ErrorNoAutoRollback", ex.Message, AppDirectories.Temp);
     }
 
     /// <summary>
