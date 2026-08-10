@@ -1195,23 +1195,9 @@ public partial class BulkChangeDialog : Window
         vm.ActiveSet.IsAddDbPopupOpen = !vm.ActiveSet.IsAddDbPopupOpen;
     }
 
-    /// <summary>
-    /// Click handler for the flat PLC list inside the "+ PLC" popup.
-    /// Adds the selected PLC as an empty pill to the row (the user then
-    /// opens that pill to pick which DB(s) become active) and closes the
-    /// popup. Clearing the selection right after prevents the next open
-    /// from re-firing for a stale item.
-    /// </summary>
-    private void OnAddPlcListSelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
-    {
-        if (DataContext is not BulkChangeViewModel vm) return;
-        if (sender is not System.Windows.Controls.ListBox lb) return;
-        if (lb.SelectedItem is not string plc || string.IsNullOrEmpty(plc)) return;
-
-        vm.ActiveSet.AddPlcToRow(plc);
-        vm.ActiveSet.IsAddDbPopupOpen = false;
-        lb.SelectedItem = null;
-    }
+    // The "+ PLC" popup's list is command-driven (ActiveSet.AddPlcCommand,
+    // one Button per candidate). The former ListBox + SelectionChanged
+    // handler fired twice per click — see AddPlcCommand's remarks.
 
     private void OnClose(object sender, RoutedEventArgs e)
     {

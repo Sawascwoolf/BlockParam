@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.ComponentModel;
 using System.Linq;
 using System.Windows.Input;
 using System.Windows.Threading;
@@ -131,6 +132,13 @@ public sealed class ActiveSetViewModel : ViewModelBase
             getAvailableDataBlocks: () => _availableDataBlocks,
             hasEnumerateDataBlocks: _enumerateDataBlocks != null, // fixed at ctor — field is wired once, never replaced
             onDataBlockListItemToggled: OnDataBlockListItemToggled);
+        // _pillCoordinator is assigned exactly once (above) — safe to
+        // subscribe unconditionally here without a double-subscribe guard.
+        // Without this, ActiveSet.InactiveProjectPlcs / CanAddPlc /
+        // IsAddDbPopupOpen bindings never update: the coordinator raises
+        // PropertyChanged on itself, but XAML binds ActiveSet.*, which never
+        // re-raises for the delegated names (the "+ PLC" button dead-click bug).
+        _pillCoordinator.PropertyChanged += OnPillCoordinatorPropertyChanged;
 
         OpenDataBlocksDropdownCommand = new RelayCommand(ExecuteOpenDataBlocksDropdown,
             () => _enumerateDataBlocks != null && _switchToDataBlock != null);
@@ -140,6 +148,14 @@ public sealed class ActiveSetViewModel : ViewModelBase
         });
         RefreshDataBlocksCommand = new RelayCommand(ExecuteRefreshDataBlocks,
             () => _enumerateDataBlocks != null && !_isLoadingDataBlocks);
+        AddPlcCommand = new RelayCommand(parameter =>
+        {
+            if (parameter is not string plc || string.IsNullOrEmpty(plc)) return;
+            // Close first: AddPlcToRow rebuilds the row and re-raises the
+            // candidate list the popup is bound to.
+            IsAddDbPopupOpen = false;
+            AddPlcToRow(plc);
+        });
         SwitchToStashedDbCommand = new RelayCommand(parameter =>
         {
             // Peer model: clicking a stashed-DB header re-activates that DB
@@ -377,9 +393,18 @@ public sealed class ActiveSetViewModel : ViewModelBase
         // forced reload below actually re-walks the project (the explicit
         // refresh affordance is the cross-open staleness valve) instead of
         // re-reading the session-cached list.
+        Log.Information("DB list refresh requested by user (busting enumeration cache)");
         _onRefreshDataBlocks?.Invoke();
         LoadAvailableDataBlocks(force: true);
         ApplyDataBlockFilter();
+        // The re-enumeration above only replaces _availableDataBlocks. The pill
+        // row's derived state (InactiveProjectPlcs / CanAddPlc, i.e. the "+ PLC"
+        // candidate list) is computed from that list by the coordinator, which
+        // raises PropertyChanged only from RebuildPlcPills / AddPlcToRow — so
+        // without this a refresh picked up a newly added PLC in the data but
+        // never repainted the popup. RebuildPlcPills also prunes extra pills
+        // whose PLC disappeared from the project, which is what a refresh means.
+        _pillCoordinator.RebuildPlcPills();
     }
 
     private void LoadAvailableDataBlocks(bool force)
@@ -583,7 +608,48 @@ public sealed class ActiveSetViewModel : ViewModelBase
 
     public void AddPlcToRow(string plcName) => _pillCoordinator.AddPlcToRow(plcName);
 
+    /// <summary>
+    /// Adds the PLC passed as the command parameter to the pill row and
+    /// closes the "+ PLC" popup.
+    ///
+    /// <para>
+    /// The popup's list is driven by this command rather than by a ListBox
+    /// SelectionChanged handler on purpose. Adding a PLC re-raises
+    /// <see cref="InactiveProjectPlcs"/>, which swaps the list's ItemsSource;
+    /// WPF then moved the selection onto the new first item *on a later
+    /// dispatcher turn* and the handler ran a second time, so one click on
+    /// "PLC_3" also added "PLC_1". A re-entrancy flag could not catch that —
+    /// the second call is not on the same stack. An explicit per-item command
+    /// carries the intended PLC in the parameter and has no selection state
+    /// to be moved, so the failure mode cannot occur.
+    /// </para>
+    /// </summary>
+    public ICommand AddPlcCommand { get; }
+
     public void RebuildPlcPills() => _pillCoordinator.RebuildPlcPills();
+
+    /// <summary>
+    /// Re-raises PropertyChanged on this view model for the pure pass-through
+    /// properties above. The XAML bindings (BulkChangeDialog.xaml) target
+    /// ActiveSet.InactiveProjectPlcs / CanAddPlc / IsAddDbPopupOpen, not the
+    /// coordinator directly, so without this forward the "+ PLC" popup never
+    /// opens and the button's visibility never updates after construction.
+    /// </summary>
+    private void OnPillCoordinatorPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        switch (e.PropertyName)
+        {
+            case nameof(PillSelectionCoordinator.InactiveProjectPlcs):
+                OnPropertyChanged(nameof(InactiveProjectPlcs));
+                break;
+            case nameof(PillSelectionCoordinator.CanAddPlc):
+                OnPropertyChanged(nameof(CanAddPlc));
+                break;
+            case nameof(PillSelectionCoordinator.IsAddDbPopupOpen):
+                OnPropertyChanged(nameof(IsAddDbPopupOpen));
+                break;
+        }
+    }
 
     // ===== Mutators ==========================================================
 

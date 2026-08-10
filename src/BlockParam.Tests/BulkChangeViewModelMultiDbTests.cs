@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Linq;
 using System.Threading.Tasks;
 using BlockParam.Config;
@@ -1400,6 +1401,62 @@ public class BulkChangeViewModelMultiDbTests
 
         vm.ActiveSet.AddPlcToRow("PLC_C");
         vm.ActiveSet.CanAddPlc.Should().BeFalse("every project PLC is now in the row");
+    }
+
+    // ── PropertyChanged forwarding for the delegated pill-row properties ────
+    // Regression coverage for the "+ PLC" dead-click bug: ActiveSetViewModel
+    // delegates InactiveProjectPlcs / CanAddPlc / IsAddDbPopupOpen to
+    // PillSelectionCoordinator as pure pass-throughs, but XAML binds
+    // ActiveSet.* — so ActiveSetViewModel must re-raise PropertyChanged for
+    // those names itself. The tests above only ever read the properties
+    // directly, which is exactly why the missing forward shipped green.
+
+    [Fact]
+    public void IsAddDbPopupOpen_Set_RaisesPropertyChangedOnActiveSet()
+    {
+        var vm = BuildVmForAddPlcTests();
+        var raised = new List<string?>();
+        vm.ActiveSet.PropertyChanged += (_, e) => raised.Add(e.PropertyName);
+
+        vm.ActiveSet.IsAddDbPopupOpen = true;
+
+        vm.ActiveSet.IsAddDbPopupOpen.Should().BeTrue(
+            "the getter delegates straight to the coordinator");
+        raised.Should().Contain(nameof(ActiveSetViewModel.IsAddDbPopupOpen),
+            "the Popup's IsOpen binding targets ActiveSet.IsAddDbPopupOpen and only " +
+            "updates if ActiveSetViewModel itself raises PropertyChanged for it");
+    }
+
+    [Fact]
+    public void IsAddDbPopupOpen_SetToSameValue_DoesNotRaisePropertyChanged()
+    {
+        var vm = BuildVmForAddPlcTests();
+        vm.ActiveSet.IsAddDbPopupOpen = false; // already the default
+        var raised = new List<string?>();
+        vm.ActiveSet.PropertyChanged += (_, e) => raised.Add(e.PropertyName);
+
+        vm.ActiveSet.IsAddDbPopupOpen = false;
+
+        raised.Should().NotContain(nameof(ActiveSetViewModel.IsAddDbPopupOpen),
+            "SetProperty on the coordinator no-ops on an unchanged value, so no " +
+            "PropertyChanged should reach ActiveSet either");
+    }
+
+    [Fact]
+    public void AddPlcToRow_RaisesPropertyChangedOnActiveSet_ForInactiveProjectPlcsAndCanAddPlc()
+    {
+        var vm = BuildVmForAddPlcTests();
+        var raised = new List<string?>();
+        vm.ActiveSet.PropertyChanged += (_, e) => raised.Add(e.PropertyName);
+
+        vm.ActiveSet.AddPlcToRow("PLC_B");
+
+        raised.Should().Contain(nameof(ActiveSetViewModel.InactiveProjectPlcs),
+            "the '+ PLC' popup's ListBox binds ActiveSet.InactiveProjectPlcs and only " +
+            "refreshes if ActiveSetViewModel re-raises the coordinator's event");
+        raised.Should().Contain(nameof(ActiveSetViewModel.CanAddPlc),
+            "the '+ PLC' button's Visibility binds ActiveSet.CanAddPlc and only " +
+            "updates if ActiveSetViewModel re-raises the coordinator's event");
     }
 
     /// <summary>

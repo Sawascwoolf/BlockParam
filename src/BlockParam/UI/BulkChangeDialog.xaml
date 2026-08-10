@@ -227,6 +227,24 @@
                                 </DataTemplate>
                             </ItemsControl.ItemTemplate>
                         </ItemsControl>
+                        <!-- Refresh: busts the TIA-session DB enumeration cache and
+                             re-walks the project (#155). The pill row's PLC/DB lists
+                             are enumerated once per TIA session and cached; if the
+                             user adds a PLC or DB to the open project afterwards it
+                             stays invisible here until this is clicked (previously
+                             only a full TIA Portal restart cleared the cache).
+                             Placed at the head of the row next to the pills it
+                             refreshes, ahead of "+ PLC" since it affects the whole
+                             row, not just the add-PLC flow. -->
+                        <Button x:Name="RefreshDataBlocksButton"
+                                Command="{Binding ActiveSet.RefreshDataBlocksCommand}"
+                                ToolTip="{loc:Loc Dialog_SwitchDb_Refresh}"
+                                Background="White" BorderBrush="#CCC" BorderThickness="1"
+                                Padding="6,2" VerticalAlignment="Center" Cursor="Hand"
+                                Margin="0,0,4,0">
+                            <Path Data="{StaticResource RefreshIconGeometry}"
+                                  Fill="#666" Width="12" Height="12" Stretch="Uniform"/>
+                        </Button>
                         <!-- "+ PLC": opens a flat list of project PLCs that don't have a
                              pill in the row yet. Clicking a PLC adds an empty pill for it;
                              the user then opens that pill to pick its DB(s). -->
@@ -251,26 +269,65 @@
                                     <DropShadowEffect Color="#000000" Opacity="0.18"
                                                       BlurRadius="12" ShadowDepth="2"/>
                                 </Border.Effect>
-                                <ListBox x:Name="AddPlcListBox"
-                                         ItemsSource="{Binding ActiveSet.InactiveProjectPlcs}"
-                                         SelectionChanged="OnAddPlcListSelectionChanged"
-                                         BorderThickness="0"
-                                         Background="Transparent"
-                                         MaxHeight="320">
-                                    <ListBox.ItemTemplate>
+                                <!-- Command-driven menu, NOT a selection list. A
+                                     ListBox + SelectionChanged handler here fired
+                                     twice for one click: adding a PLC re-raises
+                                     InactiveProjectPlcs, the ItemsSource is
+                                     swapped, and WPF moves the selection onto the
+                                     new first item on a LATER dispatcher turn —
+                                     so clicking "PLC_3" also added "PLC_1", and a
+                                     re-entrancy flag could not see it (different
+                                     call stack). Buttons carry the intended PLC in
+                                     CommandParameter and hold no selection state,
+                                     so there is nothing for WPF to move. -->
+                                <ItemsControl x:Name="AddPlcList"
+                                              ItemsSource="{Binding ActiveSet.InactiveProjectPlcs}">
+                                    <ItemsControl.Template>
+                                        <ControlTemplate TargetType="ItemsControl">
+                                            <ScrollViewer MaxHeight="320"
+                                                          VerticalScrollBarVisibility="Auto">
+                                                <ItemsPresenter/>
+                                            </ScrollViewer>
+                                        </ControlTemplate>
+                                    </ItemsControl.Template>
+                                    <ItemsControl.ItemTemplate>
                                         <DataTemplate>
-                                            <StackPanel Orientation="Horizontal" Margin="2">
-                                                <Path Data="{StaticResource DatabaseIconGeometry}"
-                                                      Fill="#1F2937"
-                                                      Stretch="Uniform" Width="14" Height="14"
-                                                      VerticalAlignment="Center"
-                                                      Margin="0,0,8,0"/>
-                                                <TextBlock Text="{Binding}"
-                                                           VerticalAlignment="Center"/>
-                                            </StackPanel>
+                                            <!-- Ancestor is the ItemsControl, not the Window: popup
+                                                 content sits in its own visual tree, so a Window
+                                                 ancestor lookup finds nothing. DataContext still
+                                                 inherits down the logical tree to the VM. -->
+                                            <Button Command="{Binding DataContext.ActiveSet.AddPlcCommand,
+                                                              RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                                    CommandParameter="{Binding}"
+                                                    HorizontalContentAlignment="Left"
+                                                    Cursor="Hand" Padding="4,3" BorderThickness="0"
+                                                    Background="Transparent">
+                                                <Button.Template>
+                                                    <ControlTemplate TargetType="Button">
+                                                        <Border x:Name="Bg" Background="Transparent"
+                                                                CornerRadius="4" Padding="{TemplateBinding Padding}">
+                                                            <ContentPresenter/>
+                                                        </Border>
+                                                        <ControlTemplate.Triggers>
+                                                            <Trigger Property="IsMouseOver" Value="True">
+                                                                <Setter TargetName="Bg" Property="Background" Value="#EEF2FF"/>
+                                                            </Trigger>
+                                                        </ControlTemplate.Triggers>
+                                                    </ControlTemplate>
+                                                </Button.Template>
+                                                <StackPanel Orientation="Horizontal">
+                                                    <Path Data="{StaticResource DatabaseIconGeometry}"
+                                                          Fill="#1F2937"
+                                                          Stretch="Uniform" Width="14" Height="14"
+                                                          VerticalAlignment="Center"
+                                                          Margin="0,0,8,0"/>
+                                                    <TextBlock Text="{Binding}"
+                                                               VerticalAlignment="Center"/>
+                                                </StackPanel>
+                                            </Button>
                                         </DataTemplate>
-                                    </ListBox.ItemTemplate>
-                                </ListBox>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
                             </Border>
                         </Popup>
                     </StackPanel>
