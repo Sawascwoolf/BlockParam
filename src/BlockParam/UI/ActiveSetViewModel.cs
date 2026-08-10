@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.ComponentModel;
 using System.Linq;
 using System.Windows.Input;
 using System.Windows.Threading;
@@ -131,6 +132,13 @@ public sealed class ActiveSetViewModel : ViewModelBase
             getAvailableDataBlocks: () => _availableDataBlocks,
             hasEnumerateDataBlocks: _enumerateDataBlocks != null, // fixed at ctor — field is wired once, never replaced
             onDataBlockListItemToggled: OnDataBlockListItemToggled);
+        // _pillCoordinator is assigned exactly once (above) — safe to
+        // subscribe unconditionally here without a double-subscribe guard.
+        // Without this, ActiveSet.InactiveProjectPlcs / CanAddPlc /
+        // IsAddDbPopupOpen bindings never update: the coordinator raises
+        // PropertyChanged on itself, but XAML binds ActiveSet.*, which never
+        // re-raises for the delegated names (the "+ PLC" button dead-click bug).
+        _pillCoordinator.PropertyChanged += OnPillCoordinatorPropertyChanged;
 
         OpenDataBlocksDropdownCommand = new RelayCommand(ExecuteOpenDataBlocksDropdown,
             () => _enumerateDataBlocks != null && _switchToDataBlock != null);
@@ -584,6 +592,29 @@ public sealed class ActiveSetViewModel : ViewModelBase
     public void AddPlcToRow(string plcName) => _pillCoordinator.AddPlcToRow(plcName);
 
     public void RebuildPlcPills() => _pillCoordinator.RebuildPlcPills();
+
+    /// <summary>
+    /// Re-raises PropertyChanged on this view model for the pure pass-through
+    /// properties above. The XAML bindings (BulkChangeDialog.xaml) target
+    /// ActiveSet.InactiveProjectPlcs / CanAddPlc / IsAddDbPopupOpen, not the
+    /// coordinator directly, so without this forward the "+ PLC" popup never
+    /// opens and the button's visibility never updates after construction.
+    /// </summary>
+    private void OnPillCoordinatorPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        switch (e.PropertyName)
+        {
+            case nameof(PillSelectionCoordinator.InactiveProjectPlcs):
+                OnPropertyChanged(nameof(InactiveProjectPlcs));
+                break;
+            case nameof(PillSelectionCoordinator.CanAddPlc):
+                OnPropertyChanged(nameof(CanAddPlc));
+                break;
+            case nameof(PillSelectionCoordinator.IsAddDbPopupOpen):
+                OnPropertyChanged(nameof(IsAddDbPopupOpen));
+                break;
+        }
+    }
 
     // ===== Mutators ==========================================================
 
