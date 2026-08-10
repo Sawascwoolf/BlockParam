@@ -124,24 +124,6 @@
     <value>Updated {0} comments in '{1}'</value>
     <comment>{0} = count, {1} = DB name</comment>
   </data>
-  <!-- Rollback -->
-  <data name="Rollback_Question" xml:space="preserve">
-    <value>An error occurred during the bulk operation:
-
-{0}
-
-Would you like to rollback all changes?
-Yes = Restore the original Data Block
-No = Keep the current (possibly partial) result</value>
-    <comment>{0} = error message</comment>
-  </data>
-  <data name="Rollback_Complete" xml:space="preserve">
-    <value>Rollback complete — original Data Block restored.</value>
-  </data>
-  <data name="Rollback_Failed" xml:space="preserve">
-    <value>Rollback failed: {0}</value>
-    <comment>{0} = error message</comment>
-  </data>
   <!-- ViewModel Status Messages -->
   <data name="Status_SingleOccurrence" xml:space="preserve">
     <value>This member appears only once — no bulk operation available.</value>
@@ -160,10 +142,6 @@ No = Keep the current (possibly partial) result</value>
   </data>
   <data name="Status_ErrorCleanup" xml:space="preserve">
     <value>Error during cleanup: {0}</value>
-    <comment>{0} = error message</comment>
-  </data>
-  <data name="Status_ErrorPartialKept" xml:space="preserve">
-    <value>Error occurred, partial changes kept: {0}</value>
     <comment>{0} = error message</comment>
   </data>
   <data name="Status_ErrorNoBackup" xml:space="preserve">

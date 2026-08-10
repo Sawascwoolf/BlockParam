@@ -151,6 +151,69 @@ public class BulkChangeViewModelMultiDbTests
         applyOrder.Should().OnlyHaveUniqueItems();
     }
 
+    /// <summary>
+    /// #191: when a DB's <c>OnApply</c> throws something other than
+    /// <c>OperationCanceledException</c> (a genuine TIA-write failure, not
+    /// a declined compile prompt), <c>ExecuteApplyMultiDb</c>'s Phase-2 loop
+    /// only catches the cancel case — everything else propagates to the
+    /// outer catch, which routes through <c>HandleApplyError</c>. Pin that
+    /// the resulting StatusText is the same honest "no backup available"
+    /// message used everywhere, not a rollback offer the VM can't act on
+    /// (the previous <c>_onBackup</c>/<c>_onRestore</c> callback pair was
+    /// never wired at any production construction site and has been
+    /// removed). Also pins that the DB committed BEFORE the failing one
+    /// (the focused DB, applied first per <c>AllActiveDbs</c> ordering)
+    /// really did write — the half-applied state the honest message must
+    /// not paper over.
+    /// </summary>
+    [Fact]
+    public void Apply_MultipleDbs_OnApplyThrowsNonCancelException_SetsHonestNoBackupStatus()
+    {
+        var focusedXml = TestFixtures.LoadXml("flat-db.xml");
+        var peerXml = TestFixtures.LoadXml("nested-struct-db.xml");
+        var parser = new SimaticMLParser();
+        var focused = parser.Parse(focusedXml);
+        var peer = parser.Parse(peerXml);
+
+        var configLoader = new ConfigLoader(null);
+        var bulkService = new BulkChangeService(new ChangeLogger(), configLoader);
+        var tracker = Substitute.For<IUsageTracker>();
+        tracker.GetStatus().Returns(new UsageStatus(0, 100));
+        tracker.RecordUsage(Arg.Any<int>()).Returns(true);
+
+        var focusedCommitted = false;
+
+        // Peer is the second DB in AllActiveDbs order, so its OnApply throw
+        // lands after the focused DB has already imported — the exact
+        // partial-commit scenario #191 is about.
+        var peerDb = new ActiveDb(
+            peer, peerXml,
+            onApply: _ => throw new InvalidOperationException("TIA import failed"));
+
+        var vm = new BulkChangeViewModel(
+            focused, focusedXml,
+            new HierarchyAnalyzer(), bulkService, tracker, configLoader,
+            onApply: _ => focusedCommitted = true,
+            additionalActiveDbs: new[] { peerDb });
+
+        var focusedLeaf = vm.Tree.RootMembers[0].AllDescendants().First(n => n.IsLeaf);
+        var peerLeaf = vm.Tree.RootMembers[1].AllDescendants().First(n => n.IsLeaf);
+        focusedLeaf.EditableStartValue = focusedLeaf.StartValue == "0" ? "1" : "0";
+        peerLeaf.EditableStartValue = peerLeaf.StartValue == "0" ? "1" : "0";
+
+        vm.ApplyCommand.Execute(null);
+
+        focusedCommitted.Should().BeTrue(
+            "the focused DB's OnApply runs before the peer's — its write " +
+            "already landed in TIA when the peer threw, exactly the " +
+            "half-applied state the status message must not gloss over");
+        vm.StatusText.Should().Be(
+            BlockParam.Localization.Res.Format(
+                "Status_ErrorNoBackup", "TIA import failed"),
+            "the failure path must not claim a backup/rollback that was " +
+            "never actually available");
+    }
+
     [Fact]
     public void Apply_MultipleDbs_ChargesUnifiedCounterOnceForSum()
     {

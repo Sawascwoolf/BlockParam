@@ -279,10 +279,9 @@ public class ApplyProgressTests : IDisposable
 
     /// <summary>
     /// <c>OnApply</c> threw a non-cancellation exception (e.g. TIA import
-    /// failed). The VM routes this through <c>HandleErrorWithRollback</c>
-    /// inside the catch. The <c>finally</c> must still raise
-    /// ApplyFinished so the dialog isn't left buried behind TIA after
-    /// the error dialog dismisses.
+    /// failed). The VM routes this through <c>HandleApplyError</c> inside
+    /// the catch. The <c>finally</c> must still raise ApplyFinished so the
+    /// dialog isn't left buried behind TIA after the error dialog dismisses.
     /// </summary>
     [Fact]
     public void Apply_ImportThrows_StillRaisesApplyFinished()
@@ -292,9 +291,9 @@ public class ApplyProgressTests : IDisposable
         var configLoader = CreateEmptyConfig();
         var bulkService = new BulkChangeService(new ChangeLogger(), configLoader);
         var messageBox = Substitute.For<IMessageBoxService>();
-        // No backup callback wired → the error path goes to the
-        // "no backup available" branch which just sets a status string
-        // (no user prompt), so the test runs without an interactive stub.
+        // #191: the VM has no backup/rollback mechanism — HandleApplyError
+        // always sets an honest "no backup available" status string, no
+        // user prompt, so the test runs without an interactive stub.
         var vm = new BulkChangeViewModel(
             db, xml, new HierarchyAnalyzer(), bulkService,
             UsageTracker(), configLoader,
@@ -312,6 +311,47 @@ public class ApplyProgressTests : IDisposable
             "exception during import must still fire ApplyFinished from the " +
             "finally block — without it the dialog stays buried behind TIA " +
             "after the error MessageBox dismisses");
+    }
+
+    /// <summary>
+    /// #191: single-DB Apply's outer <c>catch</c> (which calls
+    /// <c>HandleApplyError</c>) is only reached by exceptions thrown
+    /// AFTER <c>CommitChanges</c> returns — <c>CommitChanges</c> itself
+    /// swallows an <c>OnApply</c> exception and shows its own message box
+    /// (a separate, pre-existing path, untouched here). Force the outer
+    /// catch via a post-commit <c>RecordUsage</c> throw and assert the
+    /// resulting StatusText is the same honest "no backup available"
+    /// message used everywhere else — no claim of an automatic rollback
+    /// that doesn't exist (the old dead <c>_onBackup</c>/<c>_onRestore</c>
+    /// callback pair that produced the empty "Backup created:" log line
+    /// has been removed entirely).
+    /// </summary>
+    [Fact]
+    public void Apply_UnexpectedExceptionAfterCommit_SetsHonestNoBackupStatus()
+    {
+        var xml = TestFixtures.LoadXml("flat-db.xml");
+        var db = new SimaticMLParser().Parse(xml);
+        var configLoader = CreateEmptyConfig();
+        var bulkService = new BulkChangeService(new ChangeLogger(), configLoader);
+        var tracker = Substitute.For<IUsageTracker>();
+        tracker.GetStatus().Returns(new UsageStatus(0, 200));
+        tracker.RecordUsage(Arg.Any<int>())
+            .Returns(_ => throw new InvalidOperationException("quota store unavailable"));
+
+        var vm = new BulkChangeViewModel(
+            db, xml, new HierarchyAnalyzer(), bulkService,
+            tracker, configLoader,
+            onApply: _ => { /* commit itself succeeds */ },
+            applyProgress: new RecordingApplyProgress());
+        vm.Tree.RootMembers.Single(m => m.Name == "Enable").EditableStartValue = "false";
+
+        vm.ApplyCommand.Execute(null);
+
+        vm.StatusText.Should().Be(
+            BlockParam.Localization.Res.Format(
+                "Status_ErrorNoBackup", "quota store unavailable"),
+            "the failure path must not claim a backup/rollback that was " +
+            "never actually available");
     }
 
     /// <summary>

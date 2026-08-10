@@ -172,13 +172,21 @@ public sealed class ActiveDbFactory : IActiveDbFactory
 
             // BackupBlock also exports; if a previous import left the block
             // inconsistent (#19) the same compile-prompt path catches it here.
+            // This is the ONLY backup that actually runs today (#191) — it
+            // exports the pre-import state of THIS DB to _tempDir right
+            // before ImportBlock overwrites it. There is no automatic
+            // restore wired to it (see BulkChangeViewModel.HandleApplyError);
+            // logging the path at least gives support/the user a real file
+            // to manually re-import if an Apply goes wrong.
+            string? backupPath = null;
             if (!_exporter.TryExportWithCompilePrompt(liveDb,
-                    () => _adapter.BackupBlock(liveDb, _tempDir)))
+                    () => backupPath = _adapter.BackupBlock(liveDb, _tempDir)))
             {
                 Log.Information("Apply cancelled: user declined compile for {DbName}", info.Name);
                 throw new OperationCanceledException(
                     "User declined to compile the inconsistent block.");
             }
+            Log.Information("Backup created for {DbName}: {BackupPath}", info.Name, backupPath);
 
             var modifiedPath = Path.Combine(_tempDir,
                 $"{SafeFileName.Sanitize(info.Name)}_modified.xml");

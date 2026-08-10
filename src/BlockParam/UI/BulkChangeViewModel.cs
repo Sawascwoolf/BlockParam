@@ -67,8 +67,18 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     private readonly HierarchyAnalyzer _analyzer;
     private readonly BulkChangeService _bulkChangeService;
     private readonly ConfigLoader _configLoader;
-    private readonly Func<string>? _onBackup;   // callback to create backup, returns backup path
-    private readonly Action<string>? _onRestore; // callback to restore from backup path
+    // #191: there used to be an `_onBackup`/`_onRestore` callback pair here
+    // for an in-VM rollback flow, but no production construction site ever
+    // passed them (grep confirmed zero callers) — `_onBackup` was always
+    // null, so every Apply logged an empty "Backup created:" path and the
+    // failure branch always reported "no backup available". The REAL backup
+    // that exists today runs inside ActiveDbFactory's OnApply closure
+    // (BackupBlock exports each DB right before its ImportBlock call), but
+    // that path is per-DB and discarded, not something this VM can restore
+    // from — see ExecuteApplyMultiDb's partial-commit comment below for why
+    // cross-DB rollback isn't attempted once a DB has actually imported.
+    // Removed rather than left as a mechanism that logs safety it doesn't
+    // provide (issue #191).
     private readonly SimaticMLWriter _writer = new();
     private readonly MemberSearchService _searchService = new();
     private readonly IMessageBoxService _messageBox;
@@ -178,8 +188,6 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         ConfigLoader configLoader,
         bool showPlcChrome = false,
         Action<string>? onApply = null,
-        Func<string>? onBackup = null,
-        Action<string>? onRestore = null,
         IMessageBoxService? messageBox = null,
         TagTableCache? tagTableCache = null,
         Action? onRefreshTagTables = null,
@@ -213,8 +221,6 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         _analyzer = analyzer;
         _bulkChangeService = bulkChangeService;
         _configLoader = configLoader;
-        _onBackup = onBackup;
-        _onRestore = onRestore;
         // #190: PlcName identity (currentPlcName below) must always carry the
         // real PLC name — display chrome is a separate decision the host
         // computes from plcCount and passes here explicitly. Do NOT infer
@@ -2375,18 +2381,6 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
 
         Log.Information("ExecuteApply: {Count} pending changes", pendingEdits.Count);
 
-        // Create backup before modification
-        string? backupPath = null;
-        try
-        {
-            backupPath = _onBackup?.Invoke();
-            Log.Information("Backup created: {BackupPath}", backupPath);
-        }
-        catch (Exception backupEx)
-        {
-            Log.Warning(backupEx, "Backup failed, continuing without backup");
-        }
-
         // #146: open the cross-thread progress splash BEFORE the blocking
         // Openness work begins. The splash paints on its own STA dispatcher
         // so it stays interactive while TIA's UI thread is frozen inside
@@ -2508,7 +2502,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         catch (Exception ex)
         {
             Log.Error(ex, "Apply threw exception");
-            HandleErrorWithRollback(ex, backupPath);
+            HandleApplyError(ex);
         }
         finally
         {
@@ -2578,17 +2572,6 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
 
         Log.Information("ExecuteApplyMultiDb: {Total} pending changes across {DbCount} DBs",
             totalChanges, perDb.Count);
-
-        string? backupPath = null;
-        try
-        {
-            backupPath = _onBackup?.Invoke();
-            Log.Information("Backup created: {BackupPath}", backupPath);
-        }
-        catch (Exception backupEx)
-        {
-            Log.Warning(backupEx, "Backup failed, continuing without backup");
-        }
 
         // #146: cross-thread progress splash for multi-DB Apply. Initial
         // status names the FIRST DB about to be written — the prior
@@ -2761,7 +2744,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         catch (Exception ex)
         {
             Log.Error(ex, "Multi-DB Apply threw");
-            HandleErrorWithRollback(ex, backupPath);
+            HandleApplyError(ex);
         }
         finally
         {
@@ -2875,40 +2858,24 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
-    /// F-072: When an error occurs during bulk operation, ask the user
-    /// whether to rollback (restore backup) or keep the partial result.
+    /// F-072 / #191: surfaces an Apply-time exception to the user. This VM
+    /// has no working rollback path today — the previous "ask to restore a
+    /// backup" flow relied on an <c>onBackup</c>/<c>onRestore</c> callback
+    /// pair that no production construction site ever wired (always null),
+    /// so the question could never actually fire and every failure quietly
+    /// fell through to "no backup available" anyway. Removed rather than
+    /// kept as a mechanism that implied a safety net it didn't provide.
+    /// The real per-DB export (<c>ITiaPortalAdapter.BackupBlock</c>, called
+    /// from <c>ActiveDbFactory</c>'s <c>OnApply</c> closure right before
+    /// each DB's import) still runs and leaves a recoverable XML on disk,
+    /// but nothing here tracks those paths or drives an automatic restore
+    /// from them — see ExecuteApplyMultiDb's partial-commit comment for why
+    /// cross-DB rollback isn't attempted once a DB has actually imported.
     /// </summary>
-    private void HandleErrorWithRollback(Exception ex, string? backupPath)
+    private void HandleApplyError(Exception ex)
     {
-        if (backupPath != null && _onRestore != null)
-        {
-            var message = Res.Format("Rollback_Question", ex.Message);
-
-            if (_messageBox.AskYesNo(message, Res.Get("Rollback_Title")))
-            {
-                try
-                {
-                    _onRestore(backupPath);
-                    Log.Information("Rollback completed from {BackupPath}", backupPath);
-                    StatusText = Res.Get("Rollback_Complete");
-                }
-                catch (Exception restoreEx)
-                {
-                    Log.Error(restoreEx, "Rollback failed from {BackupPath}", backupPath);
-                    StatusText = Res.Format("Rollback_Failed", restoreEx.Message);
-                }
-            }
-            else
-            {
-                Log.Warning("User chose to keep partial result after error: {Error}", ex.Message);
-            StatusText = Res.Format("Status_ErrorPartialKept", ex.Message);
-            }
-        }
-        else
-        {
-            Log.Error(ex, "Error with no backup available");
-            StatusText = Res.Format("Status_ErrorNoBackup", ex.Message);
-        }
+        Log.Error(ex, "Apply failed with no automatic rollback available");
+        StatusText = Res.Format("Status_ErrorNoBackup", ex.Message);
     }
 
     /// <summary>
