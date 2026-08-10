@@ -10,4 +10,12 @@
     -->
     <Geometry x:Key="DatabaseIconGeometry">M12 3C7.58 3 4 4.79 4 7v10c0 2.21 3.59 4 8 4s8-1.79 8-4V7c0-2.21-3.58-4-8-4zm0 2c3.87 0 6 1.5 6 2s-2.13 2-6 2-6-1.5-6-2 2.13-2 6-2zm0 14c-3.87 0-6-1.5-6-2v-2.4c1.43.86 3.6 1.4 6 1.4s4.57-.54 6-1.4V17c0 .5-2.13 2-6 2zm0-5c-3.87 0-6-1.5-6-2V9.6c1.43.86 3.6 1.4 6 1.4s4.57-.54 6-1.4V12c0 .5-2.13 2-6 2z</Geometry>
 
+    <!--
+        Material "refresh" glyph (24x24). Used on the pill-row's re-enumerate
+        button (#155): busts the TIA-session DB enumeration cache and re-walks
+        the project, since the pill row otherwise only ever reflects whatever
+        was enumerated once per TIA session.
+    -->
+    <Geometry x:Key="RefreshIconGeometry">M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z</Geometry>
+
 </ResourceDictionary>

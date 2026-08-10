@@ -227,6 +227,24 @@
                                 </DataTemplate>
                             </ItemsControl.ItemTemplate>
                         </ItemsControl>
+                        <!-- Refresh: busts the TIA-session DB enumeration cache and
+                             re-walks the project (#155). The pill row's PLC/DB lists
+                             are enumerated once per TIA session and cached; if the
+                             user adds a PLC or DB to the open project afterwards it
+                             stays invisible here until this is clicked (previously
+                             only a full TIA Portal restart cleared the cache).
+                             Placed at the head of the row next to the pills it
+                             refreshes, ahead of "+ PLC" since it affects the whole
+                             row, not just the add-PLC flow. -->
+                        <Button x:Name="RefreshDataBlocksButton"
+                                Command="{Binding ActiveSet.RefreshDataBlocksCommand}"
+                                ToolTip="{loc:Loc Dialog_SwitchDb_Refresh}"
+                                Background="White" BorderBrush="#CCC" BorderThickness="1"
+                                Padding="6,2" VerticalAlignment="Center" Cursor="Hand"
+                                Margin="0,0,4,0">
+                            <Path Data="{StaticResource RefreshIconGeometry}"
+                                  Fill="#666" Width="12" Height="12" Stretch="Uniform"/>
+                        </Button>
                         <!-- "+ PLC": opens a flat list of project PLCs that don't have a
                              pill in the row yet. Clicking a PLC adds an empty pill for it;
                              the user then opens that pill to pick its DB(s). -->

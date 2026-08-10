@@ -385,6 +385,7 @@ public sealed class ActiveSetViewModel : ViewModelBase
         // forced reload below actually re-walks the project (the explicit
         // refresh affordance is the cross-open staleness valve) instead of
         // re-reading the session-cached list.
+        Log.Information("DB list refresh requested by user (busting enumeration cache)");
         _onRefreshDataBlocks?.Invoke();
         LoadAvailableDataBlocks(force: true);
         ApplyDataBlockFilter();
