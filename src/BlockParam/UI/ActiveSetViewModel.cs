@@ -22,6 +22,10 @@ public sealed class ActiveSetViewModel : ViewModelBase
 {
     private ActiveSetState _state;
     private string _title = "";
+    // #190: single source of truth for "should the PLC name show in chrome
+    // (title / HasCurrentPlcName)?" — set once at construction from the
+    // host's plcCount > 1, never inferred from AnchorPlcName being empty.
+    private readonly bool _showPlcChrome;
 
     // --- Optional dependencies (8b). All-null defaults keep the legacy
     // ActiveSetViewModel(initial) ctor (used by slice-8a tests) working
@@ -86,9 +90,15 @@ public sealed class ActiveSetViewModel : ViewModelBase
         Action<string>? setStatus,
         Func<int>? getPendingCount,
         Dispatcher? dispatcher,
-        Action? onRefreshDataBlocks = null)
+        Action? onRefreshDataBlocks = null,
+        bool showPlcChrome = false)
     {
         _state = initial ?? throw new ArgumentNullException(nameof(initial));
+        // #190: whether to render the "{PLC} / " prefix at all. Derived by
+        // the host from plcCount > 1 — entirely separate from PlcName /
+        // AnchorPlcName, which now always carry the real PLC name (identity).
+        // Do not resurrect the old "empty PlcName == single-PLC" shortcut.
+        _showPlcChrome = showPlcChrome;
         StashedDbs = new ObservableCollection<StashedDbState>();
         SyncStashedDbsCollection();
         // Seed the dialog window title from the initial snapshot so the
@@ -228,19 +238,25 @@ public sealed class ActiveSetViewModel : ViewModelBase
 
     /// <summary>
     /// Anchor PLC display, derived from <see cref="ActiveSetState.AnchorPlcName"/>.
-    /// Multi-PLC sessions render the chip prefix from this; single-PLC
-    /// hosts (DevLauncher) leave it empty and the prefix is omitted.
+    /// Always the real PLC name (#190) — identity, not a display decision.
+    /// Whether it is actually rendered anywhere is <see cref="HasCurrentPlcName"/>.
     /// </summary>
     public string CurrentPlcName => _state.AnchorPlcName;
 
-    /// <summary>True when <see cref="CurrentPlcName"/> is non-empty.</summary>
-    public bool HasCurrentPlcName => !string.IsNullOrEmpty(_state.AnchorPlcName);
+    /// <summary>
+    /// True when the "{PLC} / " chrome should render. Driven by the host's
+    /// <c>showPlcChrome</c> (plcCount &gt; 1), NOT by whether
+    /// <see cref="CurrentPlcName"/> happens to be empty (#190) — Name/PlcName
+    /// identity must stay populated in single-PLC projects too, so emptiness
+    /// is no longer a valid single-PLC signal.
+    /// </summary>
+    public bool HasCurrentPlcName => _showPlcChrome && !string.IsNullOrEmpty(_state.AnchorPlcName);
 
     private string ComputeTitleFromState()
     {
         var version = typeof(ActiveSetViewModel).Assembly.GetName().Version;
         var anchorName = _state.Dbs.Count > 0 ? _state.Dbs[0].Info.Name : "";
-        return BuildTitle(version, _state.AnchorPlcName, anchorName, _state.Dbs.Count);
+        return BuildTitle(version, _state.AnchorPlcName, anchorName, _state.Dbs.Count, _showPlcChrome);
     }
 
     /// <summary>
@@ -249,13 +265,15 @@ public sealed class ActiveSetViewModel : ViewModelBase
     /// drop the DB/PLC suffix entirely (#91): the chip strip is the
     /// single source of truth for which DBs are in scope, so surfacing
     /// one specific DB's name in the title contradicts the peer-DB
-    /// model. Single-PLC hosts (DevLauncher) pass an empty PLC name and
-    /// the prefix is dropped.
+    /// model. Single-PLC projects pass <paramref name="showPlcChrome"/>
+    /// = false and the prefix is dropped even though <paramref name="plcName"/>
+    /// itself is populated (#190 — plcName is identity, not a display flag).
     /// </summary>
-    private static string BuildTitle(System.Version? version, string plcName, string dbName, int activeDbCount)
+    private static string BuildTitle(
+        System.Version? version, string plcName, string dbName, int activeDbCount, bool showPlcChrome)
     {
         if (activeDbCount > 1) return $"BlockParam v{version}";
-        var location = string.IsNullOrEmpty(plcName) ? dbName : $"{plcName} / {dbName}";
+        var location = showPlcChrome && !string.IsNullOrEmpty(plcName) ? $"{plcName} / {dbName}" : dbName;
         return $"BlockParam v{version}: {location}";
     }
 
@@ -425,13 +443,23 @@ public sealed class ActiveSetViewModel : ViewModelBase
         // still position-based — that's display state, not identity.
         for (int i = 0; i < _state.Dbs.Count; i++)
         {
-            var db = _state.Dbs[i];
-            if (string.Equals(db.Info.Name, summary.Name, StringComparison.Ordinal)
-                && string.Equals(db.PlcName, summary.PlcName, StringComparison.Ordinal))
+            if (MatchesIdentity(_state.Dbs[i], summary.Name, summary.PlcName))
                 return (true, i == 0);
         }
         return (false, false);
     }
+
+    /// <summary>
+    /// (Name, PlcName) identity match shared by <see cref="GetActiveStatusFor"/>,
+    /// <see cref="FindActiveDb"/>, and the add-path dedup guards (#190). One
+    /// place defining "same physical DB" so the three call sites can never
+    /// drift apart — the #190 bug was exactly that kind of drift (identity
+    /// computed one way when matching a dropdown row, another way when
+    /// building the anchor's own ActiveDb).
+    /// </summary>
+    private static bool MatchesIdentity(ActiveDb db, string name, string plcName) =>
+        string.Equals(db.Info.Name, name, StringComparison.Ordinal)
+        && string.Equals(db.PlcName, plcName, StringComparison.Ordinal);
 
     /// <summary>
     /// Pushes the current active-set state back into every existing row so
@@ -503,8 +531,34 @@ public sealed class ActiveSetViewModel : ViewModelBase
             RefreshFilteredDataBlockItemsActiveState();
             return;
         }
+        if (RefuseDuplicateAdd(built)) return;
         SetState(_state.With(dbs: _state.Dbs.Concat(new[] { built }).ToList()));
         Log.Information("DB enabled via dropdown: {Name}", built.Info.Name);
+    }
+
+    /// <summary>
+    /// Defense in depth (#190): even though the caller (dropdown toggle / pill
+    /// popup) already checks <see cref="GetActiveStatusFor"/> before calling
+    /// an add path, that check and this append used to be able to disagree —
+    /// the #190 bug had the row's summary carry a different PlcName than the
+    /// ActiveDb identity it was really matching, so the row read as inactive
+    /// while a second <see cref="ActiveDb"/> for the same physical block got
+    /// appended. Re-checking the freshly-built candidate against
+    /// <c>State.Dbs</c> right before the append means a caller passing a
+    /// mismatched identity can refuse to duplicate instead of silently doing
+    /// so — correct even if a future caller gets the identity string wrong.
+    /// </summary>
+    private bool RefuseDuplicateAdd(ActiveDb candidate)
+    {
+        if (!_state.Dbs.Any(d => MatchesIdentity(d, candidate.Info.Name, candidate.PlcName)))
+            return false;
+
+        Log.Warning(
+            "Add refused: {Name} (plc='{Plc}') is already in the active set — " +
+            "not appending a duplicate ActiveDb",
+            candidate.Info.Name, candidate.PlcName);
+        RefreshFilteredDataBlockItemsActiveState();
+        return true;
     }
 
     // ===== Pill row (delegated to PillSelectionCoordinator, #169) =============
@@ -839,6 +893,7 @@ public sealed class ActiveSetViewModel : ViewModelBase
     {
         var built = BuildActiveDbFromSummary(summary);
         if (built == null) return;
+        if (RefuseDuplicateAdd(built)) return;
         SetState(_state.With(dbs: _state.Dbs.Concat(new[] { built }).ToList()));
         Log.Information("DB enabled via dropdown: {Name}", built.Info.Name);
     }
@@ -854,8 +909,7 @@ public sealed class ActiveSetViewModel : ViewModelBase
     {
         foreach (var db in _state.Dbs)
         {
-            if (string.Equals(db.Info.Name, summary.Name, StringComparison.Ordinal)
-                && string.Equals(db.PlcName, summary.PlcName, StringComparison.Ordinal))
+            if (MatchesIdentity(db, summary.Name, summary.PlcName))
                 return db;
         }
         return null;
@@ -946,7 +1000,7 @@ public sealed class ActiveSetViewModel : ViewModelBase
             blockType: db.Info.BlockType,
             isInstanceDb: string.Equals(db.Info.BlockType, "InstanceDB", StringComparison.Ordinal),
             plcName: db.PlcName ?? "");
-        return new StashedDbState(summary, entries);
+        return new StashedDbState(summary, entries, showPlcChrome: _showPlcChrome);
     }
 
     /// <summary>

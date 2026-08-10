@@ -1442,9 +1442,12 @@
                                                                        VerticalAlignment="Center">
                                                                 <Run Text="PENDING IN "/>
                                                                 <!-- "{PLC} / " prefix: only visible when the
-                                                                     stash carries a non-empty PlcName so
-                                                                     single-PLC stashes stay tidy. -->
-                                                                <Run Text="{Binding Summary.PlcName, Mode=OneWay}"
+                                                                     host enabled PLC chrome (#190 — multi-PLC
+                                                                     projects); PlcNameForDisplay, not
+                                                                     Summary.PlcName directly, since Summary.PlcName
+                                                                     is identity and stays populated even when
+                                                                     chrome is off. -->
+                                                                <Run Text="{Binding PlcNameForDisplay, Mode=OneWay}"
                                                                      Foreground="#5b6471"/>
                                                                 <Run Text="{Binding PlcSeparator, Mode=OneWay}"
                                                                      Foreground="#5b6471"/>

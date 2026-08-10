@@ -124,13 +124,15 @@ public sealed class DbExportCache : IDbExportCache
     /// NUL), unlike concatenation alone.
     ///
     /// <para>
-    /// Note: the DB launch path uses <c>displayPlcName</c> ("" on single-PLC
-    /// projects) while the in-dialog switcher passes the resolved PLC name, so
-    /// on a single-PLC project the same DB can key differently across those two
-    /// paths. That is a missed-hit (perf) only, never a wrong-DB hit:
-    /// <paramref name="projectScope"/> + name + number stay correct, and
-    /// multi-PLC projects (the only place plcName guards correctness) pass the
-    /// resolved name on both paths. Tracked for unified keying in #155.
+    /// #190: the DB launch path and the in-dialog switcher both pass the
+    /// resolved (real) PLC name now — a prior version of the launch path
+    /// passed a display-only <c>displayPlcName</c> ("" on single-PLC
+    /// projects), which produced a missed-hit here (harmless for cache
+    /// correctness, since <paramref name="projectScope"/> + name + number
+    /// stay unique) but also doubled as the root cause of a duplicate-DB
+    /// identity bug elsewhere (<see cref="BlockParam.UI.ActiveDb.PlcName"/>).
+    /// Both paths keying on the same real name is required for THAT identity
+    /// invariant, not just as a cache-hit optimization.
     /// </para>
     /// </summary>
     public static string KeyFor(string projectScope, string plcName, string dbName, int dbNumber)
