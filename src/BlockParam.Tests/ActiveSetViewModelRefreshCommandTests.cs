@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using BlockParam.Models;
 using BlockParam.UI;
 using FluentAssertions;
@@ -118,6 +119,59 @@ public class ActiveSetViewModelRefreshCommandTests
             "the '+ PLC' button's Visibility binding only re-reads on notification");
         harness.Vm.InactiveProjectPlcs.Should().Contain("PLC_2",
             "the newly enumerated PLC must become an add-candidate");
+    }
+
+    [Fact]
+    public void AddPlcCommand_AddsExactlyTheClickedPlc_AndClosesPopup()
+    {
+        // The popup used to be a ListBox whose SelectionChanged handler ran a
+        // second time after the ItemsSource swap, adding a PLC the user never
+        // clicked (clicking "PLC_3" also added "PLC_1"). The command form
+        // carries the intended PLC explicitly; this pins that contract.
+        var plcs = new List<DataBlockSummary>
+        {
+            new DataBlockSummary("Alpha", "", plcName: "PLC_1", number: 1),
+            new DataBlockSummary("Beta", "", plcName: "PLC_2", number: 2),
+            new DataBlockSummary("Gamma", "", plcName: "PLC_3", number: 3),
+        };
+
+        var harness = new Harness(Snap(Db("Anchor", "PLC_2")))
+            .WithEnumerateDataBlocks(() => plcs)
+            .WithSwitchToDataBlock(_ => "<Block/>");
+
+        harness.Vm.OpenDataBlocksDropdownCommand.Execute(null);
+        harness.Vm.RebuildPlcPills();
+        harness.Vm.IsAddDbPopupOpen = true;
+        harness.Vm.InactiveProjectPlcs.Should().BeEquivalentTo(new[] { "PLC_1", "PLC_3" });
+
+        harness.Vm.AddPlcCommand.Execute("PLC_3");
+
+        harness.Vm.PlcPills.Select(p => p.PlcName).Should().BeEquivalentTo(
+            new[] { "PLC_2", "PLC_3" },
+            "only the clicked PLC joins the row — PLC_1 must not come along");
+        harness.Vm.IsAddDbPopupOpen.Should().BeFalse("the popup closes after a pick");
+    }
+
+    [Fact]
+    public void AddPlcCommand_IgnoresNullAndEmptyParameters()
+    {
+        var plcs = new List<DataBlockSummary>
+        {
+            new DataBlockSummary("Alpha", "", plcName: "PLC_1", number: 1),
+            new DataBlockSummary("Beta", "", plcName: "PLC_2", number: 2),
+        };
+
+        var harness = new Harness(Snap(Db("Anchor", "PLC_1")))
+            .WithEnumerateDataBlocks(() => plcs)
+            .WithSwitchToDataBlock(_ => "<Block/>");
+
+        harness.Vm.OpenDataBlocksDropdownCommand.Execute(null);
+        harness.Vm.RebuildPlcPills();
+
+        harness.Vm.AddPlcCommand.Execute(null);
+        harness.Vm.AddPlcCommand.Execute("");
+
+        harness.Vm.PlcPills.Select(p => p.PlcName).Should().BeEquivalentTo(new[] { "PLC_1" });
     }
 
     // ---------- helpers (copied locally; no shared state) ----------

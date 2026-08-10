@@ -269,35 +269,65 @@
                                     <DropShadowEffect Color="#000000" Opacity="0.18"
                                                       BlurRadius="12" ShadowDepth="2"/>
                                 </Border.Effect>
-                                <!-- IsSynchronizedWithCurrentItem=False: when the
-                                     ItemsSource is replaced (AddPlcToRow rebuilds
-                                     the row and re-raises InactiveProjectPlcs) the
-                                     default sync-with-CurrentItem behaviour selects
-                                     the new list's first entry and fires
-                                     SelectionChanged again — one click on "PLC_3"
-                                     also added "PLC_1". The code-behind guard is
-                                     the belt; this is the braces. -->
-                                <ListBox x:Name="AddPlcListBox"
-                                         ItemsSource="{Binding ActiveSet.InactiveProjectPlcs}"
-                                         IsSynchronizedWithCurrentItem="False"
-                                         SelectionChanged="OnAddPlcListSelectionChanged"
-                                         BorderThickness="0"
-                                         Background="Transparent"
-                                         MaxHeight="320">
-                                    <ListBox.ItemTemplate>
+                                <!-- Command-driven menu, NOT a selection list. A
+                                     ListBox + SelectionChanged handler here fired
+                                     twice for one click: adding a PLC re-raises
+                                     InactiveProjectPlcs, the ItemsSource is
+                                     swapped, and WPF moves the selection onto the
+                                     new first item on a LATER dispatcher turn —
+                                     so clicking "PLC_3" also added "PLC_1", and a
+                                     re-entrancy flag could not see it (different
+                                     call stack). Buttons carry the intended PLC in
+                                     CommandParameter and hold no selection state,
+                                     so there is nothing for WPF to move. -->
+                                <ItemsControl x:Name="AddPlcList"
+                                              ItemsSource="{Binding ActiveSet.InactiveProjectPlcs}">
+                                    <ItemsControl.Template>
+                                        <ControlTemplate TargetType="ItemsControl">
+                                            <ScrollViewer MaxHeight="320"
+                                                          VerticalScrollBarVisibility="Auto">
+                                                <ItemsPresenter/>
+                                            </ScrollViewer>
+                                        </ControlTemplate>
+                                    </ItemsControl.Template>
+                                    <ItemsControl.ItemTemplate>
                                         <DataTemplate>
-                                            <StackPanel Orientation="Horizontal" Margin="2">
-                                                <Path Data="{StaticResource DatabaseIconGeometry}"
-                                                      Fill="#1F2937"
-                                                      Stretch="Uniform" Width="14" Height="14"
-                                                      VerticalAlignment="Center"
-                                                      Margin="0,0,8,0"/>
-                                                <TextBlock Text="{Binding}"
-                                                           VerticalAlignment="Center"/>
-                                            </StackPanel>
+                                            <!-- Ancestor is the ItemsControl, not the Window: popup
+                                                 content sits in its own visual tree, so a Window
+                                                 ancestor lookup finds nothing. DataContext still
+                                                 inherits down the logical tree to the VM. -->
+                                            <Button Command="{Binding DataContext.ActiveSet.AddPlcCommand,
+                                                              RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                                    CommandParameter="{Binding}"
+                                                    HorizontalContentAlignment="Left"
+                                                    Cursor="Hand" Padding="4,3" BorderThickness="0"
+                                                    Background="Transparent">
+                                                <Button.Template>
+                                                    <ControlTemplate TargetType="Button">
+                                                        <Border x:Name="Bg" Background="Transparent"
+                                                                CornerRadius="4" Padding="{TemplateBinding Padding}">
+                                                            <ContentPresenter/>
+                                                        </Border>
+                                                        <ControlTemplate.Triggers>
+                                                            <Trigger Property="IsMouseOver" Value="True">
+                                                                <Setter TargetName="Bg" Property="Background" Value="#EEF2FF"/>
+                                                            </Trigger>
+                                                        </ControlTemplate.Triggers>
+                                                    </ControlTemplate>
+                                                </Button.Template>
+                                                <StackPanel Orientation="Horizontal">
+                                                    <Path Data="{StaticResource DatabaseIconGeometry}"
+                                                          Fill="#1F2937"
+                                                          Stretch="Uniform" Width="14" Height="14"
+                                                          VerticalAlignment="Center"
+                                                          Margin="0,0,8,0"/>
+                                                    <TextBlock Text="{Binding}"
+                                                               VerticalAlignment="Center"/>
+                                                </StackPanel>
+                                            </Button>
                                         </DataTemplate>
-                                    </ListBox.ItemTemplate>
-                                </ListBox>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
                             </Border>
                         </Popup>
                     </StackPanel>

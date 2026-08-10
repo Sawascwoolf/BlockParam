@@ -148,6 +148,14 @@ public sealed class ActiveSetViewModel : ViewModelBase
         });
         RefreshDataBlocksCommand = new RelayCommand(ExecuteRefreshDataBlocks,
             () => _enumerateDataBlocks != null && !_isLoadingDataBlocks);
+        AddPlcCommand = new RelayCommand(parameter =>
+        {
+            if (parameter is not string plc || string.IsNullOrEmpty(plc)) return;
+            // Close first: AddPlcToRow rebuilds the row and re-raises the
+            // candidate list the popup is bound to.
+            IsAddDbPopupOpen = false;
+            AddPlcToRow(plc);
+        });
         SwitchToStashedDbCommand = new RelayCommand(parameter =>
         {
             // Peer model: clicking a stashed-DB header re-activates that DB
@@ -599,6 +607,24 @@ public sealed class ActiveSetViewModel : ViewModelBase
     }
 
     public void AddPlcToRow(string plcName) => _pillCoordinator.AddPlcToRow(plcName);
+
+    /// <summary>
+    /// Adds the PLC passed as the command parameter to the pill row and
+    /// closes the "+ PLC" popup.
+    ///
+    /// <para>
+    /// The popup's list is driven by this command rather than by a ListBox
+    /// SelectionChanged handler on purpose. Adding a PLC re-raises
+    /// <see cref="InactiveProjectPlcs"/>, which swaps the list's ItemsSource;
+    /// WPF then moved the selection onto the new first item *on a later
+    /// dispatcher turn* and the handler ran a second time, so one click on
+    /// "PLC_3" also added "PLC_1". A re-entrancy flag could not catch that —
+    /// the second call is not on the same stack. An explicit per-item command
+    /// carries the intended PLC in the parameter and has no selection state
+    /// to be moved, so the failure mode cannot occur.
+    /// </para>
+    /// </summary>
+    public ICommand AddPlcCommand { get; }
 
     public void RebuildPlcPills() => _pillCoordinator.RebuildPlcPills();
 
