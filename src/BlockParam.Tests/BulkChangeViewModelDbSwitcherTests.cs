@@ -87,10 +87,12 @@ public class BulkChangeViewModelDbSwitcherTests
     }
 
     [Fact]
-    public void Header_ShowsPlcPrefix_WhenHostSuppliesPlcName()
+    public void Header_ShowsPlcPrefix_WhenHostSuppliesPlcNameAndEnablesChrome()
     {
-        // Host wires a PLC name → CurrentPlcName / HasCurrentPlcName flip on
-        // and the window title prefixes the DB with "{PLC} / ".
+        // #190: CurrentPlcName (identity) and the "{PLC} / " chrome are
+        // separate decisions. The host wires a real PLC name AND opts into
+        // chrome (multi-PLC project, showPlcChrome: true) → CurrentPlcName /
+        // HasCurrentPlcName flip on and the window title prefixes the DB.
         var primary = TestFixtures.LoadXml("flat-db.xml");
         var parser = new SimaticMLParser();
         var primaryInfo = parser.Parse(primary);
@@ -103,7 +105,8 @@ public class BulkChangeViewModelDbSwitcherTests
         var vm = new BulkChangeViewModel(
             primaryInfo, primary,
             new HierarchyAnalyzer(), bulkService, usageTracker, configLoader,
-            currentPlcName: "PLC_Line1");
+            currentPlcName: "PLC_Line1",
+            showPlcChrome: true);
 
         vm.ActiveSet.HasCurrentPlcName.Should().BeTrue();
         vm.ActiveSet.CurrentPlcName.Should().Be("PLC_Line1");
@@ -113,11 +116,48 @@ public class BulkChangeViewModelDbSwitcherTests
     [Fact]
     public void Header_OmitsPlcPrefix_WhenHostSuppliesNothing()
     {
-        // Single-PLC / DevLauncher: no PlcName → no prefix, no badge.
+        // Single-PLC / DevLauncher: no PlcName, chrome off → no prefix, no badge.
         var h = CreateVm();
         h.Vm.ActiveSet.HasCurrentPlcName.Should().BeFalse();
         h.Vm.ActiveSet.CurrentPlcName.Should().Be("");
         h.Vm.ActiveSet.Title.Should().NotContain(" / ");
+    }
+
+    [Fact]
+    public void Header_OmitsPlcPrefix_SinglePlcProject_EvenWithRealPlcNameIdentity()
+    {
+        // #190 regression guard: a single-PLC project must populate the real
+        // PLC name as IDENTITY (currentPlcName) so the anchor's ActiveDb
+        // matches its own dropdown row — but showPlcChrome stays false
+        // (plcCount == 1), so the header/title must NOT show the PLC prefix
+        // even though CurrentPlcName itself is non-empty. Before #190 this
+        // distinction didn't exist: an empty PlcName was overloaded as both
+        // "hide the prefix" AND "this DB's identity", which desynced the
+        // anchor's identity from its own dropdown row and produced a
+        // duplicate ActiveDb / duplicate pill for the same physical block.
+        var primary = TestFixtures.LoadXml("flat-db.xml");
+        var parser = new SimaticMLParser();
+        var primaryInfo = parser.Parse(primary);
+
+        var configLoader = new ConfigLoader(null);
+        var bulkService = new BulkChangeService(new ChangeLogger(), configLoader);
+        var usageTracker = Substitute.For<IUsageTracker>();
+        usageTracker.GetStatus().Returns(new UsageStatus(0, 3));
+
+        var vm = new BulkChangeViewModel(
+            primaryInfo, primary,
+            new HierarchyAnalyzer(), bulkService, usageTracker, configLoader,
+            currentPlcName: "PLC_1",
+            showPlcChrome: false);
+
+        vm.AllActiveDbs.Should().ContainSingle()
+            .Which.PlcName.Should().Be("PLC_1",
+                "identity must always carry the real PLC name, even in a single-PLC project");
+        vm.ActiveSet.CurrentPlcName.Should().Be("PLC_1");
+        vm.ActiveSet.HasCurrentPlcName.Should().BeFalse(
+            "single-PLC projects must not show PLC chrome despite a populated identity");
+        vm.ActiveSet.Title.Should().NotContain("PLC_1 / ",
+            "the title must not leak the PLC prefix when chrome is off");
     }
 
     [Fact]

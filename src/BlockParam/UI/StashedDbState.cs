@@ -13,12 +13,21 @@ public class StashedDbState : ViewModelBase
 {
     private bool _isExpanded = true;
 
+    // #190: whether the "{PLC} / " chrome renders in the "PENDING IN ..."
+    // header. Driven by the host's plcCount > 1, not by Summary.PlcName
+    // being empty — Summary.PlcName is identity and is always the real PLC
+    // name now (see ActiveSetViewModel.CaptureStashForDb). Defaults to false
+    // so existing callers that don't care about display chrome are unaffected.
+    private readonly bool _showPlcChrome;
+
     public StashedDbState(
         DataBlockSummary summary,
-        IReadOnlyList<StashedEditEntry> edits)
+        IReadOnlyList<StashedEditEntry> edits,
+        bool showPlcChrome = false)
     {
         Summary = summary;
         Edits = new ObservableCollection<StashedEditEntry>(edits);
+        _showPlcChrome = showPlcChrome;
     }
 
     /// <summary>The DB this stash belongs to.</summary>
@@ -43,12 +52,21 @@ public class StashedDbState : ViewModelBase
     }
 
     /// <summary>
-    /// " / " when this stash carries a PLC name, otherwise empty. Lets the
-    /// XAML header ("PENDING IN {PLC} / {DB}") collapse the prefix without
-    /// a visibility converter when single-PLC hosts stash with PlcName="".
+    /// The PLC name to actually render in the "PENDING IN {PLC} / {DB}"
+    /// header, or "" when chrome is off (#190). <see cref="Summary"/>'s
+    /// PlcName is always the real PLC name (identity); this property is the
+    /// display gate on top of it — bind to this, not <c>Summary.PlcName</c>.
+    /// </summary>
+    public string PlcNameForDisplay => _showPlcChrome ? Summary.PlcName : "";
+
+    /// <summary>
+    /// " / " when <see cref="PlcNameForDisplay"/> is non-empty, otherwise
+    /// empty. Lets the XAML header collapse the prefix without a visibility
+    /// converter — single-PLC sessions (chrome off) and hosts that supply no
+    /// PLC name both stay tidy.
     /// </summary>
     public string PlcSeparator =>
-        string.IsNullOrEmpty(Summary.PlcName) ? "" : " / ";
+        string.IsNullOrEmpty(PlcNameForDisplay) ? "" : " / ";
 }
 
 /// <summary>

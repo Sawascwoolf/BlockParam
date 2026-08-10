@@ -164,6 +164,10 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     private readonly IReadOnlyList<string> _projectLanguages;
     private readonly CommentLanguagePolicy _commentLanguagePolicy;
     private readonly Dispatcher _dispatcher;
+    // #190: whether the "{PLC} / " prefix chrome is shown at all — derived
+    // by the host from plcCount > 1, entirely separate from PlcName identity
+    // (see the ctor-body comment below and ActiveSetViewModel.HasCurrentPlcName).
+    private readonly bool _showPlcChrome;
 
     public BulkChangeViewModel(
         DataBlockInfo dataBlockInfo,
@@ -172,6 +176,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         BulkChangeService bulkChangeService,
         IUsageTracker usageTracker,
         ConfigLoader configLoader,
+        bool showPlcChrome = false,
         Action<string>? onApply = null,
         Func<string>? onBackup = null,
         Action<string>? onRestore = null,
@@ -210,6 +215,11 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         _configLoader = configLoader;
         _onBackup = onBackup;
         _onRestore = onRestore;
+        // #190: PlcName identity (currentPlcName below) must always carry the
+        // real PLC name — display chrome is a separate decision the host
+        // computes from plcCount and passes here explicitly. Do NOT infer
+        // this from currentPlcName being empty; see ActiveSetViewModel.
+        _showPlcChrome = showPlcChrome;
         _messageBox = messageBox ?? new WpfMessageBoxService();
         _tagTableCache = tagTableCache;
         _onRefreshTagTables = onRefreshTagTables;
@@ -243,6 +253,14 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         // held the real PLC, forcing every identity check to special-case
         // index 0. Aligning them lets FindActiveDb / SyncSelectedDbs drop the
         // fallback and treat index 0 like any peer.
+        //
+        // #190: the caller MUST pass the real PLC name here even in
+        // single-PLC projects — currentPlcName is identity, not display.
+        // (BulkChangeContextMenu used to pass a display-only "" for
+        // single-PLC projects, which desynced the anchor's identity from its
+        // own dropdown row and produced a duplicate ActiveDb / duplicate
+        // pill.) Whether the UI actually shows the PLC name is the separate
+        // _showPlcChrome flag, not the emptiness of this value.
         var initialDbs = new List<ActiveDb>
         {
             new ActiveDb(dataBlockInfo, currentXml, onApply, plcName: currentPlcName ?? ""),
@@ -270,7 +288,8 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             restoreStashOntoLive: RestoreStashOntoLive,
             setStatus: value => StatusText = value,
             getPendingCount: () => Pending?.PendingEdits.Count ?? 0,
-            dispatcher: _dispatcher);
+            dispatcher: _dispatcher,
+            showPlcChrome: _showPlcChrome);
         ActiveSet.StateChanged += HandleActiveSetStateChanged;
         _autocompleteProvider = tagTableCache != null
             ? new AutocompleteProvider(configLoader, tagTableCache)

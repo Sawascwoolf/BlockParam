@@ -221,12 +221,17 @@ public class BulkChangeContextMenu : ContextMenuAddIn
             // and the user can refresh from inside the dialog.
             var constantResolver = TryBuildConstantResolver(tagTableDir);
 
-            // PLC count drives whether the header shows a "{PLC} / " prefix (#59 follow-up).
-            // Single source of truth so chip/dropdown PlcName stays consistent.
+            // #190: identity and display chrome are separate decisions.
+            // `plcName` (computed above, real or "") is the DB's IDENTITY —
+            // it flows into ActiveDb.PlcName for every active DB (anchor
+            // included) and must never be blanked out, or the anchor's
+            // identity stops matching its own dropdown row (ActiveSetViewModel
+            // matches on (Name, PlcName)), producing a duplicate ActiveDb /
+            // duplicate pill for the same physical block. `showPlcChrome` is
+            // the separate, purely-display decision — the header only shows
+            // a "{PLC} / " prefix in multi-PLC projects (#59 follow-up).
             var plcCount = discovery.CountPlcSoftwares(project);
-            var displayPlcName = plcSoftware != null && plcCount > 1
-                ? ProjectDiscovery.SafeGetPlcName(plcSoftware)
-                : "";
+            var showPlcChrome = plcSoftware != null && plcCount > 1;
 
             // Active DB factory. Encapsulates export + parse + OnApply closure
             // for every selected DB so OnClick no longer carries that logic.
@@ -246,7 +251,7 @@ public class BulkChangeContextMenu : ContextMenuAddIn
 #endif
             var totalDbs = allSelected.Count;
             splash.SetCounter(totalDbs > 1 ? Res.Format("Splash_Counter", 1, totalDbs) : string.Empty);
-            focused = dbFactory.Build(allSelected[0], displayPlcName, splash);
+            focused = dbFactory.Build(allSelected[0], plcName, splash);
             if (focused == null) return;
             var currentFocused = focused;
 
@@ -255,7 +260,7 @@ public class BulkChangeContextMenu : ContextMenuAddIn
             for (int i = 1; i < allSelected.Count; i++)
             {
                 splash.SetCounter(Res.Format("Splash_Counter", i + 1, totalDbs));
-                var c = dbFactory.Build(allSelected[i], displayPlcName, splash);
+                var c = dbFactory.Build(allSelected[i], plcName, splash);
                 if (c != null) additionalDbs.Add(c);
             }
             splash.SetCounter(string.Empty);
@@ -332,7 +337,8 @@ public class BulkChangeContextMenu : ContextMenuAddIn
                 onRefreshDataBlocks: project != null
                     ? new Action(() => _projectDbCache.Invalidate(scope))
                     : null,
-                currentPlcName: displayPlcName,
+                currentPlcName: plcName,
+                showPlcChrome: showPlcChrome,
                 switchToDataBlock: plcSoftware != null
                     ? new Func<DataBlockSummary, string>(summary =>
                     {
