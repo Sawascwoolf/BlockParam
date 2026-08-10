@@ -269,8 +269,17 @@
                                     <DropShadowEffect Color="#000000" Opacity="0.18"
                                                       BlurRadius="12" ShadowDepth="2"/>
                                 </Border.Effect>
+                                <!-- IsSynchronizedWithCurrentItem=False: when the
+                                     ItemsSource is replaced (AddPlcToRow rebuilds
+                                     the row and re-raises InactiveProjectPlcs) the
+                                     default sync-with-CurrentItem behaviour selects
+                                     the new list's first entry and fires
+                                     SelectionChanged again — one click on "PLC_3"
+                                     also added "PLC_1". The code-behind guard is
+                                     the belt; this is the braces. -->
                                 <ListBox x:Name="AddPlcListBox"
                                          ItemsSource="{Binding ActiveSet.InactiveProjectPlcs}"
+                                         IsSynchronizedWithCurrentItem="False"
                                          SelectionChanged="OnAddPlcListSelectionChanged"
                                          BorderThickness="0"
                                          Background="Transparent"

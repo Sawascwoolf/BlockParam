@@ -1196,21 +1196,46 @@ public partial class BulkChangeDialog : Window
     }
 
     /// <summary>
+    /// Guards <see cref="OnAddPlcListSelectionChanged"/> against re-entry.
+    /// AddPlcToRow raises PropertyChanged for InactiveProjectPlcs, which
+    /// swaps this ListBox's ItemsSource while the handler is still on the
+    /// stack; WPF then moves the selection onto the new list's first item
+    /// and fires SelectionChanged a second time. Without this guard one
+    /// click on "PLC_3" also added "PLC_1" (observed in TIA V21).
+    /// </summary>
+    private bool _inAddPlcSelectionChanged;
+
+    /// <summary>
     /// Click handler for the flat PLC list inside the "+ PLC" popup.
     /// Adds the selected PLC as an empty pill to the row (the user then
     /// opens that pill to pick which DB(s) become active) and closes the
-    /// popup. Clearing the selection right after prevents the next open
-    /// from re-firing for a stale item.
+    /// popup.
+    ///
+    /// <para>
+    /// Order matters: the selection is cleared and the popup closed BEFORE
+    /// AddPlcToRow, because that call rebuilds the pill row and re-raises
+    /// InactiveProjectPlcs — clearing afterwards (the original order) ran
+    /// too late to stop the re-entrant add.
+    /// </para>
     /// </summary>
     private void OnAddPlcListSelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
     {
+        if (_inAddPlcSelectionChanged) return;
         if (DataContext is not BulkChangeViewModel vm) return;
         if (sender is not System.Windows.Controls.ListBox lb) return;
         if (lb.SelectedItem is not string plc || string.IsNullOrEmpty(plc)) return;
 
-        vm.ActiveSet.AddPlcToRow(plc);
-        vm.ActiveSet.IsAddDbPopupOpen = false;
-        lb.SelectedItem = null;
+        _inAddPlcSelectionChanged = true;
+        try
+        {
+            lb.SelectedItem = null;
+            vm.ActiveSet.IsAddDbPopupOpen = false;
+            vm.ActiveSet.AddPlcToRow(plc);
+        }
+        finally
+        {
+            _inAddPlcSelectionChanged = false;
+        }
     }
 
     private void OnClose(object sender, RoutedEventArgs e)
