@@ -170,6 +170,15 @@ public class BulkChangeViewModelMultiDbTests
     /// pins that the DB committed BEFORE the failing one (the focused DB,
     /// applied first per <c>AllActiveDbs</c> ordering) really did write —
     /// the half-applied state the honest message must not paper over.
+    ///
+    /// <para>
+    /// #192 turned that half-applied state into an offered rollback — but only
+    /// where it can actually be completed. These ActiveDbs carry no backup path
+    /// and no restore callback (as in DevLauncher / dropdown-added read-only
+    /// DBs), so <c>CanOfferRollback</c> declines and this stays the fallback
+    /// path. The rollback-capable shape is covered in
+    /// <c>MultiDbRollbackTests</c>.
+    /// </para>
     /// </summary>
     [Fact]
     public void Apply_MultipleDbs_OnApplyThrowsNonCancelException_SetsHonestNoAutoRollbackStatus()

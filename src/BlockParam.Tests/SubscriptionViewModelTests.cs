@@ -228,6 +228,12 @@ public class SubscriptionViewModelTests
             RecordedTotal += count;
             return true;
         }
+        public void RefundUsage(int count)
+        {
+            var refunded = Math.Min(count, _used);
+            _used -= refunded;
+            RecordedTotal -= refunded;
+        }
     }
 
     private sealed class StubUpdateService : IUpdateCheckService

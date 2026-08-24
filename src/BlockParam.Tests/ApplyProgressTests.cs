@@ -291,9 +291,10 @@ public class ApplyProgressTests : IDisposable
         var configLoader = CreateEmptyConfig();
         var bulkService = new BulkChangeService(new ChangeLogger(), configLoader);
         var messageBox = Substitute.For<IMessageBoxService>();
-        // #191: the VM has no backup/rollback mechanism — HandleApplyError
-        // always sets an honest "no backup available" status string, no
-        // user prompt, so the test runs without an interactive stub.
+        // #191/#192: single-DB Apply has nothing committed behind the failure,
+        // so the multi-DB rollback (#192) is never offered here —
+        // HandleApplyError just sets the honest "no AUTOMATIC rollback"
+        // status, no user prompt, so the test runs without an interactive stub.
         var vm = new BulkChangeViewModel(
             db, xml, new HierarchyAnalyzer(), bulkService,
             UsageTracker(), configLoader,
