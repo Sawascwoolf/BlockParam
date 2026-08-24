@@ -40,7 +40,44 @@ declare -A BEATS=(
 # Extract (filename, beat) pairs from the JSON in scene order.
 # Python handles the JSON; bash does the lookup and ffmpeg concat formatting.
 # JSON is piped on stdin to sidestep msys path translation of $scenes_json.
-mapfile -t scene_rows < <(python -c "
+# Resolve a usable Python. `python` on PATH is NOT trustworthy on Windows:
+# it is commonly the Microsoft Store stub (exits 9009 without running) or
+# Inkscape's bundled interpreter (real, but its PIL cannot load _imaging
+# outside Inkscape's DLL directory). So don't trust a name — probe each
+# candidate by running the exact import the caller needs, and keep the
+# first one that survives it.
+python_candidates() {
+    printf '%s\n' "py -3" python3 python
+    # The launcher is not always on PATH: a per-user CPython install puts it
+    # in %LOCALAPPDATA%\Programs\Python\Launcher, which the installer only
+    # adds to PATH when "Add python.exe to PATH" was ticked.
+    if [[ -n "${LOCALAPPDATA:-}" ]]; then
+        local base
+        base="$(cygpath -u "$LOCALAPPDATA" 2>/dev/null || echo "$LOCALAPPDATA")"
+        printf '%s\n' "$base/Programs/Python/Launcher/py.exe -3"
+    fi
+}
+
+# $1 = python statement that must succeed. Echoes the winning command.
+find_python() {
+    local c
+    while IFS= read -r c; do
+        if $c -c "$1" >/dev/null 2>&1; then
+            echo "$c"
+            return 0
+        fi
+    done < <(python_candidates)
+    return 1
+}
+
+PY="$(find_python 'import json, sys')" || {
+    echo "No working Python found. Tried:" >&2
+    python_candidates | sed 's/^/  /' >&2
+    echo "Install Python 3 and ensure it (or the py launcher) is on PATH." >&2
+    exit 1
+}
+
+mapfile -t scene_rows < <($PY -c "
 import json, sys
 data = json.load(sys.stdin)
 for s in data['scenes']:
@@ -85,12 +122,19 @@ echo "MP4: $((mp4_size / 1024)) KB"
 # review aid that shouldn't block the pipeline.
 grid_script="$script_dir/build_workflow_grid.py"
 if [[ -f "$grid_script" ]]; then
-    if command -v python >/dev/null && python -c "import PIL" 2>/dev/null; then
+    # Probe the real import the grid script performs, NOT a bare `import PIL`.
+    # `import PIL` only executes PIL/__init__.py and succeeds even when the
+    # compiled _imaging extension cannot load — exactly what Inkscape's
+    # bundled Python does, which made this guard report green and then let
+    # the grid die with "DLL load failed while importing _imaging".
+    # Resolve independently of $PY: the interpreter that parses the manifest
+    # need not be the one carrying a working Pillow.
+    if PY_PIL="$(find_python 'from PIL import Image, ImageDraw')"; then
         echo "Building validation grid -> assets/screenshots/workflow/_validation_grid.png"
-        ( cd "$script_dir/../../.." && python "$grid_script" )
+        ( cd "$script_dir/../../.." && $PY_PIL "$grid_script" )
     else
-        echo "WARN: skipping validation grid (python or Pillow not on PATH)."
-        echo "      Install: python -m pip install Pillow"
+        echo "WARN: skipping validation grid — no Python with a working Pillow."
+        echo "      Install: $PY -m pip install Pillow"
     fi
 fi
 

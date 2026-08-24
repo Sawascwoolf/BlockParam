@@ -14,11 +14,19 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 
 from PIL import Image, ImageDraw
 
-from build_masonry import _load_label_font
+# build_masonry.py is a sibling module, not an installed package. Relying on
+# the implicit sys.path[0] entry breaks the moment this file is imported
+# rather than run as a script, or when Python starts with -P /
+# PYTHONSAFEPATH=1 (which suppresses that entry entirely). Add the directory
+# explicitly so the import works regardless of how we were invoked.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from build_masonry import _load_label_font  # noqa: E402  (needs the path above)
 
 
 def build_montage_labeled(

@@ -460,15 +460,7 @@
     { "id": "mdb01_plus_release", "filename": "mdb01_plus_release.png", "beat": "clickRelease", "dialog": "main", "preserveState": true, "click": "release",
       "cursor": { "target": "addDbButton" } },
 
-    { "id": "mdb02_dropdown_open", "filename": "mdb02_dropdown_open.png", "beat": "readingShort", "dialog": "main", "preserveState": true,
-      "activeSet": { "openAddDropdown": true },
-      "cursor": { "target": "addDbButton" } },
-
-    { "id": "mdb03_filter_typing", "filename": "mdb03_filter_typing.png", "beat": "typingAChar", "dialog": "main", "preserveState": true,
-      "activeSet": { "openAddDropdown": true },
-      "cursor": { "target": "addDbButton" } },
-
-    { "id": "mdb04_peer_hover", "filename": "mdb04_peer_hover.png", "beat": "pointingWithMouse", "dialog": "main", "preserveState": true,
+    { "id": "mdb02_dropdown_open", "filename": "mdb02_dropdown_open.png", "beat": "readingBulk", "dialog": "main", "preserveState": true,
       "activeSet": { "openAddDropdown": true },
       "cursor": { "target": "addDbButton" } },
 
@@ -573,16 +565,9 @@
       "activeSet": { "reactivate": "DB_ProcessPlant_A1", "promptAnswer": "add" },
       "cursor": { "target": "chip:DB_ProcessPlant_A1" } },
 
-    { "id": "mdb23_pick_add", "filename": "mdb23_pick_add.png", "beat": "pointingWithMouse", "dialog": "main", "preserveState": true,
-      "cursor": { "target": "chip:DB_ProcessPlant_A1" } },
-
     { "id": "mdb24_three_dbs_with_edit", "filename": "mdb24_three_dbs_with_edit.png", "beat": "readingBulk", "dialog": "main", "preserveState": true,
       "cursor": { "target": "chip:DB_ProcessPlant_A1" },
       "caption": "3 chips · A1's pending row restored" },
-
-    { "id": "mdb25_replace_branch_alt", "filename": "mdb25_replace_branch_alt.png", "beat": "readingShort", "dialog": "main", "preserveState": true,
-      "cursor": { "target": "chip:DB_ProcessPlant_A1" },
-      "caption": "Replace path → session collapses to A1 only" },
 
     { "id": "mdb26_chip_body_hover", "filename": "mdb26_chip_body_hover.png", "beat": "pointingWithMouse", "dialog": "main", "preserveState": true,
       "cursor": { "target": "chip:DB_ProcessPlant_C1" } },
@@ -594,8 +579,9 @@
       "cursor": { "target": "chip:DB_ProcessPlant_C1" },
       "caption": "Solo via chip body · single-DB title restored" },
 
-    { "id": "mdb28_multi_plc_chips", "filename": "mdb28_multi_plc_chips.png", "beat": "readingShort", "dialog": "main", "preserveState": true,
-      "cursor": { "target": "chip:DB_ProcessPlant_C1" },
+    { "id": "mdb28_multi_plc_chips", "filename": "mdb28_multi_plc_chips.png", "beat": "readingBulk", "dialog": "main", "preserveState": true,
+      "activeSet": { "addPeer": "DB_ProcessPlant_B1" },
+      "cursor": { "target": "chip:DB_ProcessPlant_B1" },
       "caption": "Multi-PLC: chips grouped under PLC headers" }
   ]
 }
