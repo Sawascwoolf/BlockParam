@@ -148,6 +148,71 @@
     <value>Error: {0} (no automatic rollback — BlockParam saves a pre-import backup of every DB it imports under {1}; check the log for the exact file)</value>
     <comment>{0} = error message, {1} = backup root directory (AppDirectories.Temp)</comment>
   </data>
+  <!-- Multi-DB Apply rollback (#192) -->
+  <data name="Rollback_Prompt_Title" xml:space="preserve">
+    <value>Apply failed — roll back the data blocks already written?</value>
+  </data>
+  <data name="Rollback_Prompt_Message" xml:space="preserve">
+    <value>Applying to several data blocks failed on '{0}':
+
+{1}
+
+{2} data block(s) had already been written to TIA Portal when that happened. BlockParam saved a backup of each one right before importing it:
+
+{3}
+
+Roll all of them back?
+
+Yes — every data block listed above is restored from its backup; the project ends up as it was before this Apply.
+No — the writes above stay in the project; the backup files stay on disk so you can restore them by hand later.</value>
+    <comment>{0} = failed DB name, {1} = error message, {2} = committed DB count, {3} = backup list (Rollback_BackupLine per DB)</comment>
+  </data>
+  <data name="Rollback_BackupLine" xml:space="preserve">
+    <value>  • {0} — backup: {1}</value>
+    <comment>{0} = DB name, {1} = full backup file path. One line per DB.</comment>
+  </data>
+  <data name="Rollback_RestoreFailedLine" xml:space="preserve">
+    <value>  • {0} — backup: {1} (restore failed: {2})</value>
+    <comment>{0} = DB name, {1} = full backup file path, {2} = restore error message</comment>
+  </data>
+  <data name="Rollback_BackupInline" xml:space="preserve">
+    <value>{0} → {1}</value>
+    <comment>{0} = DB name, {1} = full backup file path. Compact form for the status bar.</comment>
+  </data>
+  <data name="Rollback_ListEmpty" xml:space="preserve">
+    <value>  (none)</value>
+  </data>
+  <data name="Rollback_Status_RolledBack" xml:space="preserve">
+    <value>Apply failed on '{0}': {1} — all {2} data block(s) already written were restored from their backups. The project is unchanged.</value>
+    <comment>{0} = failed DB name, {1} = error message, {2} = restored DB count</comment>
+  </data>
+  <data name="Rollback_Status_PartialKept" xml:space="preserve">
+    <value>Apply failed on '{0}': {1} — rollback declined, {2} data block(s) stay written. Backups for a manual restore: {3}</value>
+    <comment>{0} = failed DB name, {1} = error message, {2} = kept DB count, {3} = "DB → path" list</comment>
+  </data>
+  <data name="Rollback_Failed_Title" xml:space="preserve">
+    <value>Rollback FAILED — data blocks are in a mixed state</value>
+  </data>
+  <data name="Rollback_Failed_Message" xml:space="preserve">
+    <value>Apply failed on '{0}':
+
+{1}
+
+The rollback that followed could NOT be completed. Part of the project is back at its pre-Apply content and part is not — please read this carefully:
+
+RESTORED (back to the state before Apply):
+{2}
+
+STILL WRITTEN — restore these by hand:
+{3}
+
+To finish the rollback manually, import each backup file listed above in TIA Portal (right-click the block folder → Import, overwrite the existing block). The backup files stay on disk, and the log records the full sequence.</value>
+    <comment>{0} = failed DB name, {1} = error message, {2} = restored list, {3} = failed list</comment>
+  </data>
+  <data name="Rollback_Status_RestoreFailed" xml:space="preserve">
+    <value>Rollback FAILED after Apply failed on '{0}': {1} data block(s) restored, {2} still written — see the dialog and the log for the backup files to import by hand.</value>
+    <comment>{0} = failed DB name, {1} = restored count, {2} = still-written count</comment>
+  </data>
   <data name="Status_LimitReached" xml:space="preserve">
     <value>Daily limit reached. Upgrade for unlimited use.</value>
   </data>

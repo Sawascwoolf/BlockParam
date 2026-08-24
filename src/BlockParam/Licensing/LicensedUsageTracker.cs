@@ -32,4 +32,12 @@ public class LicensedUsageTracker : IUsageTracker
 
         return _freeTracker.RecordUsage(count);
     }
+
+    public void RefundUsage(int count)
+    {
+        // Pro never charged anything, so there is nothing to credit back.
+        if (_licenseService.IsProActive) return;
+
+        _freeTracker.RefundUsage(count);
+    }
 }

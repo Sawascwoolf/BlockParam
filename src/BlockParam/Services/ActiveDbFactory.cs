@@ -166,18 +166,27 @@ public sealed class ActiveDbFactory : IActiveDbFactory
         Log.Information("Parsed DB {Name}: {MemberCount} top-level members, {TotalCount} total",
             info.Name, info.Members.Count, info.AllMembers().Count());
 
+        // #192: the pre-import backup path of the LAST Apply on this DB.
+        // Captured in the closure and published read-only via
+        // ActiveDb.GetLastBackupPath so BulkChangeViewModel's Phase-2 commit
+        // loop can carry (ActiveDb, backupPath) pairs and drive a real
+        // rollback when a LATER DB fails. Reset at the top of every OnApply
+        // so a stale path from a previous attempt can never be mistaken for
+        // this attempt's backup.
+        string? lastBackupPath = null;
+
         Action<string> onApply = modifiedXml =>
         {
             Log.Information("Apply: writing modified XML for {DbName}", info.Name);
+            lastBackupPath = null;
 
             // BackupBlock also exports; if a previous import left the block
             // inconsistent (#19) the same compile-prompt path catches it here.
-            // This is the ONLY backup that actually runs today (#191) — it
-            // exports the pre-import state of THIS DB to _tempDir right
-            // before ImportBlock overwrites it. There is no automatic
-            // restore wired to it (see BulkChangeViewModel.HandleApplyError);
-            // logging the path at least gives support/the user a real file
-            // to manually re-import if an Apply goes wrong.
+            // It exports the pre-import state of THIS DB to _tempDir right
+            // before ImportBlock overwrites it, and since #192 the path is
+            // both logged AND handed to the caller (lastBackupPath below):
+            // multi-DB Apply restores from it via `onRestore` when a later
+            // DB's import fails and the user confirms the rollback.
             // ITiaPortalAdapter.BackupBlock's return type is non-nullable
             // (Nullable enabled project-wide) and its only implementation,
             // TiaPortalAdapter.BackupBlock, builds the path via Path.Combine
@@ -197,6 +206,7 @@ public sealed class ActiveDbFactory : IActiveDbFactory
                     "User declined to compile the inconsistent block.");
             }
             Log.Information("Backup created for {DbName}: {BackupPath}", info.Name, backupPath);
+            lastBackupPath = backupPath;
 
             var modifiedPath = Path.Combine(_tempDir,
                 $"{SafeFileName.Sanitize(info.Name)}_modified.xml");
@@ -220,6 +230,37 @@ public sealed class ActiveDbFactory : IActiveDbFactory
             Log.Information("Import completed for {DbName}", info.Name);
         };
 
-        return new ActiveDb(info, xml, onApply, plcName: plcName);
+        // #192: the rollback half of the same seam. Re-imports the pre-import
+        // backup XML through the SAME block group + cache invalidation the
+        // forward import uses, so a restored DB is indistinguishable from one
+        // that was never applied. Deliberately does NOT swallow exceptions —
+        // a failed restore leaves the project in a worse state than the
+        // original failure and MUST reach the caller so it can escalate
+        // (MultiDbRollbackCoordinator names every backup file in that case).
+        Action<string> onRestore = backupPath =>
+        {
+            Log.Warning("Rollback: restoring {DbName} from backup {BackupPath}",
+                info.Name, backupPath);
+            var blockGroup = (PlcBlockGroup)_adapter.GetBlockGroup(liveDb);
+            _adapter.RestoreFromBackup(blockGroup, backupPath);
+
+            var restored = blockGroup.Blocks.Find(info.Name) as DataBlock;
+            if (restored != null)
+            {
+                liveDb = restored;
+            }
+            else
+            {
+                Log.Warning(
+                    "Could not re-resolve DataBlock '{DbName}' after restore — next Apply may fail",
+                    info.Name);
+            }
+            _cache.Invalidate(cacheKey);
+            Log.Information("Rollback completed for {DbName}", info.Name);
+        };
+
+        return new ActiveDb(info, xml, onApply, plcName: plcName,
+            onRestore: onRestore,
+            getLastBackupPath: () => lastBackupPath);
     }
 }

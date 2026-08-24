@@ -79,6 +79,41 @@ Diese Elemente löschen?</value></data>
   <data name="Comments_Updated" xml:space="preserve"><value>{0} Kommentare in '{1}' aktualisiert</value></data>
   <!-- Rollback -->
   <data name="Rollback_Title" xml:space="preserve"><value>BlockParam – Fehler</value></data>
+  <!-- Multi-DB-Rollback (#192) -->
+  <data name="Rollback_Prompt_Title" xml:space="preserve"><value>Übernehmen fehlgeschlagen — bereits geschriebene Datenbausteine zurückrollen?</value></data>
+  <data name="Rollback_Prompt_Message" xml:space="preserve"><value>Das Übernehmen über mehrere Datenbausteine ist bei '{0}' fehlgeschlagen:
+
+{1}
+
+{2} Datenbaustein(e) waren zu diesem Zeitpunkt bereits nach TIA Portal geschrieben. BlockParam hat von jedem davon unmittelbar vor dem Import ein Backup gespeichert:
+
+{3}
+
+Alle zurückrollen?
+
+Ja — jeder oben aufgeführte Datenbaustein wird aus seinem Backup wiederhergestellt; das Projekt ist danach im Zustand vor diesem Übernehmen.
+Nein — die oben genannten Schreibvorgänge bleiben im Projekt; die Backup-Dateien bleiben auf der Platte und können später von Hand zurückgespielt werden.</value></data>
+  <data name="Rollback_BackupLine" xml:space="preserve"><value>  • {0} — Backup: {1}</value></data>
+  <data name="Rollback_RestoreFailedLine" xml:space="preserve"><value>  • {0} — Backup: {1} (Wiederherstellung fehlgeschlagen: {2})</value></data>
+  <data name="Rollback_BackupInline" xml:space="preserve"><value>{0} → {1}</value></data>
+  <data name="Rollback_ListEmpty" xml:space="preserve"><value>  (keine)</value></data>
+  <data name="Rollback_Status_RolledBack" xml:space="preserve"><value>Übernehmen bei '{0}' fehlgeschlagen: {1} — alle {2} bereits geschriebenen Datenbausteine wurden aus ihren Backups wiederhergestellt. Das Projekt ist unverändert.</value></data>
+  <data name="Rollback_Status_PartialKept" xml:space="preserve"><value>Übernehmen bei '{0}' fehlgeschlagen: {1} — Rollback abgelehnt, {2} Datenbaustein(e) bleiben geschrieben. Backups für eine manuelle Wiederherstellung: {3}</value></data>
+  <data name="Rollback_Failed_Title" xml:space="preserve"><value>ROLLBACK FEHLGESCHLAGEN — Datenbausteine in gemischtem Zustand</value></data>
+  <data name="Rollback_Failed_Message" xml:space="preserve"><value>Übernehmen bei '{0}' fehlgeschlagen:
+
+{1}
+
+Der anschließende Rollback konnte NICHT abgeschlossen werden. Ein Teil des Projekts steht wieder auf dem Stand vor dem Übernehmen, ein Teil nicht — bitte sorgfältig lesen:
+
+WIEDERHERGESTELLT (Zustand vor dem Übernehmen):
+{2}
+
+WEITERHIN GESCHRIEBEN — bitte von Hand wiederherstellen:
+{3}
+
+Um den Rollback manuell abzuschließen, importieren Sie jede oben genannte Backup-Datei in TIA Portal (Rechtsklick auf den Bausteinordner → Importieren, vorhandenen Baustein überschreiben). Die Backup-Dateien bleiben auf der Platte, der Ablauf steht vollständig im Log.</value></data>
+  <data name="Rollback_Status_RestoreFailed" xml:space="preserve"><value>ROLLBACK FEHLGESCHLAGEN, nachdem Übernehmen bei '{0}' fehlschlug: {1} Datenbaustein(e) wiederhergestellt, {2} weiterhin geschrieben — die von Hand zu importierenden Backup-Dateien stehen im Dialog und im Log.</value></data>
   <!-- Status -->
   <data name="Status_SingleOccurrence" xml:space="preserve"><value>Dieses Element kommt nur einmal vor — keine Massenoperation möglich.</value></data>
   <data name="Status_Changed" xml:space="preserve"><value>{0} Werte in '{1}' geändert</value></data>
