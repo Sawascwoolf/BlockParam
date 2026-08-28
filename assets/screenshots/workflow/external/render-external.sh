@@ -9,6 +9,11 @@
 # assets/screenshots/scripts/workflow_inline.json. Adding/removing/
 # reordering an external scene in the manifest auto-updates this run.
 #
+# Source screenshots are expected to be free of recording environment — no
+# Windows taskbar, no TIA status-bar notification (#198). After adding a new
+# one to TiaScreenshots/, run `py -3 clean-tia-sources.py` (same directory,
+# idempotent) before rendering.
+#
 # Per-scene manifest fields:
 #   source     relative path (from assets/screenshots/workflow/) to the
 #              original screenshot (any resolution; SVG upscales to 4K).

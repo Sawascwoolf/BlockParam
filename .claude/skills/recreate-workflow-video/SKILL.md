@@ -12,6 +12,10 @@ Rebuilds `assets/screenshots/workflow/workflow_inline.mp4` end-to-end: rebuild D
 ```bash
 dotnet build src/BlockParam.DevLauncher -c Debug
 
+# Only needed after dropping a NEW TIA screenshot into workflow/TiaScreenshots/ —
+# idempotent, so running it always is harmless.
+py -3 assets/screenshots/workflow/external/clean-tia-sources.py
+
 src/BlockParam.DevLauncher/bin/Debug/net48/BlockParam.DevLauncher.exe \
     --capture-script assets/screenshots/scripts/workflow_inline.json
 
@@ -34,6 +38,14 @@ The stitch script does NOT auto-open the MP4 by default; set `BLOCKPARAM_AUTO_OP
 2. **render-chapters.sh** renders chapter title cards from `chapters/chapter-template.svg` (Inkscape) — driven by the same `workflow_inline.json` (chapter scenes have `kind: "chapter"`, `chapterTitle`, `chapterSubtitle`). Adding a chapter scene to the manifest auto-resizes the progress bar across all cards.
 3. **render-external.sh** renders external/painpoint scenes (TIA Portal screenshots) with a synthetic cursor + click-ring overlay matching BlockParam's CursorOverlay style. Each `kind: "external"` scene declares `source` (path to source PNG), `cursor: { x, y }` in DIPs, and optional `click: "press" | "release"`.
 4. **build_workflow_video.sh** stitches every scene's PNG into the MP4 with per-beat pacing.
+
+`clean-tia-sources.py` runs before step 3 and paints the recording environment
+out of the raw TIA screenshots — the Windows taskbar (whose clock dates the
+recording) and TIA's status-bar notification (#198). It edits
+`workflow/TiaScreenshots/**` in place and is idempotent, so a shot that is
+already clean is left untouched. A freshly recorded screenshot that does not
+match the expected layout makes it fail loudly instead of painting over the
+wrong region.
 
 Steps 1, 2, and 3 don't conflict — the DevLauncher capture loop skips both `chapter` and `external` scenes — so they can run in any order.
 
