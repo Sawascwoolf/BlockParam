@@ -315,16 +315,39 @@ class Program
         var freeTracker = new LocalUsageTracker(
             Path.Combine(Path.GetTempPath(), "BlockParam_dev_usage.dat"));
 
-        var serverUrl = configLoader.ReadLicenseServerUrl() ?? OnlineLicenseService.DefaultServerUrl;
+        // Capture-script mode runs as Pro (#198): the status bar then reads
+        // "Pro License — Unlimited operations" instead of a free-tier counter,
+        // which is what the hero screenshot shows and what the workflow video
+        // should ship. Everything lives in a throwaway sandbox — a seeded
+        // license.json + fresh response cache, an unreachable server so no
+        // request is ever made, and a shared-license path that does not exist
+        // (a real IT-pushed key would invalidate the cache and drop us to Free).
+        var isCapture = capturePlan is CapturePlan;
+        var licenseStorage = isCapture
+            ? ProLicenseSandbox.CreateProStorage()
+            : appDataDir;
+        var serverUrl = isCapture
+            ? "https://capture.invalid"
+            : configLoader.ReadLicenseServerUrl() ?? OnlineLicenseService.DefaultServerUrl;
         var licenseService = new OnlineLicenseService(
-            appDataDir,
+            licenseStorage,
             serverUrl,
-            sharedLicenseFilePath: OnlineLicenseService.DefaultSharedLicenseFilePath);
+            sharedLicenseFilePath: isCapture
+                ? Path.Combine(licenseStorage, "shared", "license.key")
+                : OnlineLicenseService.DefaultSharedLicenseFilePath);
+
+        // Fail the capture run loudly rather than record 199 frames whose
+        // status bar quietly fell back to the free-tier counter — the exact
+        // regression #198 was filed for.
+        if (isCapture && !licenseService.IsProActive)
+            throw new InvalidOperationException(
+                $"Capture mode expected Pro from the seeded sandbox at {licenseStorage}, " +
+                "but the license service reports Free.");
 
         // Capture mode bypasses the freemium counter so Apply always works
         // regardless of how many prior runs have accumulated (#96). Interactive
         // DevLauncher and the shipped Add-In continue to use the real tracker.
-        IUsageTracker usageTracker = capturePlan is CapturePlan
+        IUsageTracker usageTracker = isCapture
             ? new UnlimitedUsageTracker()
             : new LicensedUsageTracker(licenseService, freeTracker);
 
@@ -421,7 +444,11 @@ class Program
                 return new ActiveDb(peerInfo, peerXml, peerOnApply, plcName: summary.PlcName);
             });
 
-        licenseService.StartHeartbeat();
+        // No heartbeat in capture mode: the sandbox server is unreachable, so
+        // every beat would just burn a retry cycle mid-recording. The seeded
+        // cache alone keeps Pro active for the length of the run.
+        if (!isCapture)
+            licenseService.StartHeartbeat();
         var dialog = new BulkChangeDialog(vm);
 
         // #127 integration demo: with --with-splash, run the REAL pre-dialog
@@ -462,6 +489,12 @@ class Program
         app.Run(dialog);
         licenseService.StopHeartbeat();
         licenseService.Dispose();
+        if (isCapture)
+        {
+            try { Directory.Delete(licenseStorage, recursive: true); }
+            catch (IOException) { /* best effort — it's a temp dir */ }
+            catch (UnauthorizedAccessException) { }
+        }
     }
 
     private static void RunScenes(BulkChangeDialog dialog, BulkChangeViewModel vm, CapturePlan plan)

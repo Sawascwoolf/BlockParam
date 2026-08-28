@@ -3,7 +3,6 @@ using System.Globalization;
 using System.IO;
 using System.Threading;
 using System.Windows;
-using Newtonsoft.Json;
 using Serilog;
 using BlockParam.Licensing;
 using BlockParam.Services;
@@ -44,8 +43,8 @@ internal static class LicenseCapture
             {
                 // IT pushed key, server already confirmed (cache present + matching).
                 File.WriteAllText(sharedKey, "PRO-IT-1234-5678");
-                WriteLicenseData(storage, "PRO-IT-1234-5678");
-                WriteProCache(storage);
+                ProLicenseSandbox.WriteLicenseData(storage, "PRO-IT-1234-5678");
+                ProLicenseSandbox.WriteProCache(storage);
             }),
             ("03_managed_free_after_rotation.png", (storage, sharedKey) =>
             {
@@ -53,8 +52,8 @@ internal static class LicenseCapture
                 // key, but AdoptSharedLicenseKeyIfPresent invalidates it on
                 // construction — heartbeat hasn't run yet, so tier is Free.
                 File.WriteAllText(sharedKey, "PRO-IT-NEW-ROTATED");
-                WriteLicenseData(storage, "PRO-IT-OLD-EXPIRED");
-                WriteProCache(storage);
+                ProLicenseSandbox.WriteLicenseData(storage, "PRO-IT-OLD-EXPIRED");
+                ProLicenseSandbox.WriteProCache(storage);
             }),
         };
 
@@ -100,31 +99,5 @@ internal static class LicenseCapture
         app.Run();
 
         try { Directory.Delete(sandboxRoot, recursive: true); } catch { /* best effort */ }
-    }
-
-    private static void WriteLicenseData(string storage, string key)
-    {
-        var data = new OnlineLicenseService.LicenseData
-        {
-            LicenseKey = key,
-            InstanceId = Guid.NewGuid().ToString(),
-            ActivatedAt = DateTime.UtcNow,
-        };
-        File.WriteAllText(Path.Combine(storage, "license.json"),
-            JsonConvert.SerializeObject(data, Formatting.Indented));
-    }
-
-    private static void WriteProCache(string storage)
-    {
-        var cache = new OnlineLicenseService.CachedLicenseResponse
-        {
-            ReceivedAtUtc = DateTime.UtcNow,
-            ExpiresAt = null,
-            MaxConcurrent = 1,
-            ActiveSessions = 1,
-        };
-        var json = JsonConvert.SerializeObject(cache);
-        File.WriteAllBytes(Path.Combine(storage, "license_cache.dat"),
-            Obfuscation.Obfuscate(json));
     }
 }
