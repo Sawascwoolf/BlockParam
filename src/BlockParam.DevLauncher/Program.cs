@@ -471,6 +471,15 @@ class Program
 
         if (capturePlan is CapturePlan plan)
         {
+            // The dialog ships WindowState="Maximized" (BulkChangeDialog.xaml)
+            // so real users get the full screen. In capture mode that silently
+            // wins over Width/Height, which made every shot come out at the
+            // capturing machine's monitor resolution instead of the viewport
+            // the script asks for - non-reproducible, and it broke the crop
+            // rectangles in build_website_shots.sh. Capture always runs
+            // windowed.
+            dialog.WindowState = WindowState.Normal;
+
             if (plan.Viewport is { } vp)
             {
                 dialog.Width = vp.Width;
@@ -522,6 +531,7 @@ class Program
 
             if (effective != null)
             {
+                dialog.WindowState = WindowState.Normal;
                 dialog.Width = effective.Width;
                 dialog.Height = effective.Height;
                 // Let WPF fully measure / arrange against the new size before
