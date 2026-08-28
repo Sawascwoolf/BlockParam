@@ -131,6 +131,7 @@ public class SubscriptionViewModelCommandTests
             _used += count;
             return true;
         }
+        public void RefundUsage(int count) => _used -= Math.Min(count, _used);
     }
 
     private sealed class StubUpdateService : IUpdateCheckService

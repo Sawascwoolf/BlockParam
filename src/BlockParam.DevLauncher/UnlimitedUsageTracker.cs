@@ -30,4 +30,7 @@ internal sealed class UnlimitedUsageTracker : IUsageTracker
 
     /// <summary>Always returns true — capture mode has no quota.</summary>
     public bool RecordUsage(int count) => true;
+
+    /// <summary>No-op — nothing was ever charged, so there is nothing to credit back.</summary>
+    public void RefundUsage(int count) { }
 }

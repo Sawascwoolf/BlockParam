@@ -18,12 +18,16 @@ public class ActiveDb
         DataBlockInfo info,
         string xml,
         System.Action<string>? onApply = null,
-        string? plcName = null)
+        string? plcName = null,
+        System.Action<string>? onRestore = null,
+        System.Func<string?>? getLastBackupPath = null)
     {
         Info = info;
         Xml = xml;
         OnApply = onApply;
         PlcName = plcName ?? "";
+        OnRestore = onRestore;
+        GetLastBackupPath = getLastBackupPath;
     }
 
     /// <summary>
@@ -53,4 +57,30 @@ public class ActiveDb
     /// <c>ExclusiveAccess</c> block (#58).
     /// </summary>
     public System.Action<string>? OnApply { get; }
+
+    /// <summary>
+    /// Host callback that re-imports a previously written backup XML for this
+    /// DB, undoing the last <see cref="OnApply"/> import (#192). The argument
+    /// is the backup path handed out by <see cref="GetLastBackupPath"/>.
+    ///
+    /// Null when the host cannot restore (DevLauncher / read-only ActiveDbs
+    /// added from the dropdown before per-DB host wiring). A null here means
+    /// multi-DB Apply must NOT offer a rollback that it cannot complete —
+    /// see <see cref="MultiDbRollbackCoordinator.CanOfferRollback"/>.
+    /// </summary>
+    public System.Action<string>? OnRestore { get; }
+
+    /// <summary>
+    /// Returns the path of the pre-import backup written during the most
+    /// recent <see cref="OnApply"/> invocation, or null when this DB has not
+    /// been imported in this session / the host writes no backup.
+    ///
+    /// A delegate rather than a mutable property on purpose: the path lives
+    /// in <c>ActiveDbFactory</c>'s OnApply closure (which is what actually
+    /// calls <c>ITiaPortalAdapter.BackupBlock</c>), and the anchor ActiveDb
+    /// built by <c>BulkChangeContextMenu</c> is a thunk over whichever
+    /// factory-built ActiveDb is currently focused — a plain field would go
+    /// stale on every DB switch (#192).
+    /// </summary>
+    public System.Func<string?>? GetLastBackupPath { get; }
 }

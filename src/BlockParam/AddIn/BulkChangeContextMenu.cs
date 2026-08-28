@@ -304,6 +304,12 @@ public class BulkChangeContextMenu : ContextMenuAddIn
                 // Thunk: the focused ActiveDb may be swapped by switchToDataBlock,
                 // so we route Apply through the latest reference, not a captured one.
                 onApply: xml => currentFocused.OnApply!(xml),
+                // #192: same thunk shape for the rollback half — the anchor
+                // ActiveDb the VM owns must restore / report the backup of
+                // whichever factory-built DB is focused right now, not the one
+                // captured at construction time.
+                onRestore: backupPath => currentFocused.OnRestore!(backupPath),
+                getLastBackupPath: () => currentFocused.GetLastBackupPath?.Invoke(),
                 // #155 item 2: TagTableExporter.Export wipes + re-exports every
                 // tag table from Openness (~4.6s) on first tag-table need of
                 // each open. The XML is already on disk from a prior open, so

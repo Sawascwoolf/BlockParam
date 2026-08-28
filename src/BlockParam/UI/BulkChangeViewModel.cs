@@ -67,19 +67,18 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     private readonly HierarchyAnalyzer _analyzer;
     private readonly BulkChangeService _bulkChangeService;
     private readonly ConfigLoader _configLoader;
-    // #191: there used to be an `_onBackup`/`_onRestore` callback pair here
-    // for an in-VM rollback flow, but no production construction site ever
-    // passed them (grep confirmed zero callers) — `_onBackup` was always
-    // null, so every Apply logged an empty "Backup created:" path and the
-    // failure branch always reported "no backup available". The REAL backup
-    // that exists today runs inside ActiveDbFactory's OnApply closure
-    // (BackupBlock exports each DB right before its ImportBlock call, and
-    // now logs the real path too — see HandleApplyError), but this VM never
-    // tracks those per-DB paths and can't drive an automatic restore from
-    // them — see ExecuteApplyMultiDb's partial-commit comment below for why
-    // cross-DB rollback isn't attempted once a DB has actually imported.
-    // Removed rather than left as a mechanism that logs safety it doesn't
-    // provide (issue #191).
+    // #191/#192: there used to be an `_onBackup`/`_onRestore` callback pair
+    // here for an in-VM rollback flow that no production construction site
+    // ever passed (always null), so #191 deleted it. The REAL backup runs
+    // inside ActiveDbFactory's OnApply closure — BackupBlock exports each DB
+    // right before its ImportBlock call — and #192 wired that path through
+    // instead of re-inventing it: every ActiveDb now publishes its last
+    // pre-import backup (ActiveDb.GetLastBackupPath) plus a restore callback
+    // (ActiveDb.OnRestore), and ExecuteApplyMultiDb carries (ActiveDb,
+    // backupPath) pairs through Phase 2 so a later DB's failure can put the
+    // already-committed ones back. The flow itself lives in
+    // MultiDbRollbackCoordinator, not here.
+    private readonly MultiDbRollbackCoordinator _rollback;
     private readonly SimaticMLWriter _writer = new();
     private readonly MemberSearchService _searchService = new();
     private readonly IMessageBoxService _messageBox;
@@ -210,7 +209,13 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         Action? onRefreshDataBlocks = null,
         Action? onInvalidateTagTableSession = null,
         Action? onInvalidateUdtSession = null,
-        IApplyProgressService? applyProgress = null)
+        IApplyProgressService? applyProgress = null,
+        // #192: the rollback counterparts of `onApply` for the anchor DB.
+        // The host passes thunks over the currently focused factory-built
+        // ActiveDb (the anchor's onApply is a thunk too — the in-dialog DB
+        // switcher swaps the target without rebuilding this VM).
+        Action<string>? onRestore = null,
+        Func<string?>? getLastBackupPath = null)
     {
         _dispatcher = Dispatcher.CurrentDispatcher;
         // Default to NoOp so headless tests and DevLauncher don't accidentally
@@ -228,6 +233,10 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         // this from currentPlcName being empty; see ActiveSetViewModel.
         _showPlcChrome = showPlcChrome;
         _messageBox = messageBox ?? new WpfMessageBoxService();
+        // #192: multi-DB rollback orchestration (prompt composition, restore
+        // loop, escalation on a failed restore) lives in its own class so
+        // this VM keeps only the wiring — see CLAUDE.md's hotspot rule.
+        _rollback = new MultiDbRollbackCoordinator(_messageBox);
         _tagTableCache = tagTableCache;
         _onRefreshTagTables = onRefreshTagTables;
         _tagTableDir = tagTableDir;
@@ -270,7 +279,8 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         // _showPlcChrome flag, not the emptiness of this value.
         var initialDbs = new List<ActiveDb>
         {
-            new ActiveDb(dataBlockInfo, currentXml, onApply, plcName: currentPlcName ?? ""),
+            new ActiveDb(dataBlockInfo, currentXml, onApply, plcName: currentPlcName ?? "",
+                onRestore: onRestore, getLastBackupPath: getLastBackupPath),
         };
         if (additionalActiveDbs != null)
             initialDbs.AddRange(additionalActiveDbs);
@@ -2614,16 +2624,31 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
             // #58 (decision: one undo step across the whole multi-DB
             // Apply). User-cancel inside any callback aborts the rest.
             //
-            // Partial-commit accounting: if DB#1 succeeds and DB#2 cancels,
-            // DB#1's xml is already in TIA — we cannot roll it back from
-            // here. The honest path is to charge quota for the writes that
-            // DID succeed, surface a partial-commit status, and clear
-            // pending values on committed DBs (so they don't show up as
-            // pending forever). The cancelled DB's pending values stay in
-            // its tree so the user can retry it after compiling / fixing.
+            // Partial-commit accounting, two distinct failure shapes:
+            //
+            //  * OperationCanceledException — the user declined a compile
+            //    prompt, i.e. they chose to stop. Nothing is rolled back:
+            //    quota is charged for the writes that DID succeed, the
+            //    status names the partial commit, and pending values are
+            //    cleared on the committed DBs while the cancelled DB keeps
+            //    its own for a retry.
+            //
+            //  * Any other exception — a genuine write failure (#192). The
+            //    already-committed DBs each have a real pre-import backup on
+            //    disk, so the user is shown what happened and offered a true
+            //    all-or-nothing rollback. Before #192 this case just fell
+            //    through to the outer catch and left a half-applied project
+            //    behind; that is no longer the design, only the fallback for
+            //    hosts that cannot restore (see CanOfferRollback).
+            //
+            // Carrying (ActiveDb, backupPath, changes) triples is what makes
+            // the rollback possible at all — the backup path is read right
+            // after the import returned, never later (a retry would overwrite
+            // it).
             int committedChanges = 0;
             int committedDbs = 0;
             string? cancelledOnDb = null;
+            var committedWrites = new List<CommittedDbWrite>();
             for (int i = 0; i < perDb.Count; i++)
             {
                 var (db, edits) = perDb[i];
@@ -2638,11 +2663,28 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
                     db.OnApply?.Invoke(db.Xml);
                     committedChanges += edits.Count;
                     committedDbs++;
+                    committedWrites.Add(new CommittedDbWrite(
+                        db, db.GetLastBackupPath?.Invoke(), edits.Count));
                 }
                 catch (OperationCanceledException)
                 {
                     cancelledOnDb = db.Info.Name;
                     break;
+                }
+                catch (Exception ex)
+                {
+                    Log.Error(ex,
+                        "ExecuteApplyMultiDb: commit failed on {Db} after {Count} committed DB(s)",
+                        db.Info.Name, committedWrites.Count);
+                    // Nothing restorable behind us (nothing committed yet, or
+                    // a host without backup/restore wiring): keep the #191
+                    // honest-error path — rethrow into the outer catch, which
+                    // reports the failure and points at the backup directory.
+                    if (!_rollback.CanOfferRollback(committedWrites)) throw;
+
+                    HandleRollbackableCommitFailure(
+                        committedWrites, committedChanges, db.Info.Name, ex);
+                    return;
                 }
             }
 
@@ -2651,17 +2693,7 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
                 // Charge the partial committed sum so the user can't
                 // accidentally double-spend on the next click. Counter
                 // race handling mirrors the all-success path.
-                if (committedChanges > 0 && !Subscription.RecordUsage(committedChanges))
-                {
-                    var remaining = Subscription.GetUsageStatus().RemainingToday;
-                    if (remaining > 0 && !Subscription.RecordUsage(remaining))
-                    {
-                        Log.Warning(
-                            "ExecuteApplyMultiDb partial-commit: second RecordUsage({Remaining}) " +
-                            "also failed — counter may have diverged from quota state",
-                            remaining);
-                    }
-                }
+                ChargeCommittedChanges(committedChanges, "partial-commit");
 
                 // Surface what actually happened. Without this, UI just
                 // shows the empty status text and the user sees pending
@@ -2757,6 +2789,81 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
         Subscription.UpdateUsageStatus();
     }
 
+    /// <summary>
+    /// Charges <paramref name="count"/> value-writes that have actually landed
+    /// in TIA against today's quota, pinning the counter to the cap if a
+    /// parallel writer (second Add-In instance on the same machine) consumed
+    /// quota between pre-check and write. Extracted so the multi-DB
+    /// partial-commit and rollback paths can't drift apart (#192).
+    /// </summary>
+    private void ChargeCommittedChanges(int count, string context)
+    {
+        if (count <= 0 || Subscription.RecordUsage(count)) return;
+
+        var remaining = Subscription.GetUsageStatus().RemainingToday;
+        if (remaining > 0 && !Subscription.RecordUsage(remaining))
+        {
+            Log.Warning(
+                "ExecuteApplyMultiDb {Context}: second RecordUsage({Remaining}) " +
+                "also failed — counter may have diverged from quota state",
+                context, remaining);
+        }
+    }
+
+    /// <summary>
+    /// A DB's import threw mid-commit while earlier DBs had already been
+    /// written, and every one of those has a restorable backup (#192).
+    ///
+    /// <para>
+    /// Sequence, in this order on purpose: the already-committed writes exist
+    /// in the project at this instant, so they are charged exactly like the
+    /// cancel branch charges its partial commit; then the user is shown the
+    /// facts and decides; then whatever the rollback actually restored is
+    /// credited back, because a user must not pay for writes that no longer
+    /// exist. Charging first and crediting after keeps the ledger honest even
+    /// if the restore only half-succeeds — only the DBs that really went back
+    /// are refunded.
+    /// </para>
+    ///
+    /// <para>
+    /// Pending state follows the same rule: DBs whose writes survive drop
+    /// their pending flags (the values are in TIA), restored DBs keep theirs
+    /// so the whole Apply can be retried after the cause is fixed. The
+    /// in-memory XML of a restored DB still carries the new values, so a retry
+    /// re-imports the same content — idempotent.
+    /// </para>
+    /// </summary>
+    private void HandleRollbackableCommitFailure(
+        IReadOnlyList<CommittedDbWrite> committed,
+        int committedChanges,
+        string failedDbName,
+        Exception failure)
+    {
+        ChargeCommittedChanges(committedChanges, "rollback");
+
+        var outcome = _rollback.RunRollbackFlow(committed, failedDbName, failure);
+
+        if (outcome.RefundedChanges > 0)
+        {
+            Subscription.RefundUsage(outcome.RefundedChanges);
+            Log.Information(
+                "ExecuteApplyMultiDb rollback: credited {Refunded} change(s) back to today's quota",
+                outcome.RefundedChanges);
+        }
+
+        foreach (var db in outcome.KeptDbs)
+            ClearPendingValuesForDb(db);
+
+        StatusText = outcome.StatusText;
+        _lastApplySucceeded = false;
+        // A completed rollback leaves the modified XML in memory but the
+        // pre-Apply content in TIA — there genuinely ARE changes waiting to be
+        // written, so Apply stays armed for a retry. Anything the user kept is
+        // already in TIA (mirrors the cancel branch).
+        HasPendingChanges = outcome.Decision == RollbackDecision.RolledBack;
+        RefreshPendingAndPreview();
+        Subscription.UpdateUsageStatus();
+    }
 
     /// <summary>
     /// F-031: Bulk-update all comments in the current scope using the configured
@@ -2859,28 +2966,32 @@ public class BulkChangeViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
-    /// F-072 / #191: surfaces an Apply-time exception to the user. This VM
-    /// has no working AUTOMATIC rollback path today — the previous "ask to
-    /// restore a backup" flow relied on an <c>onBackup</c>/<c>onRestore</c>
-    /// callback pair that no production construction site ever wired
-    /// (always null), so the question could never actually fire. Removed
-    /// rather than kept as a mechanism that implied a safety net it didn't
-    /// provide.
+    /// F-072 / #191 / #192: surfaces an Apply-time exception for which no
+    /// automatic rollback ran. Since #192 the multi-DB commit loop DOES roll
+    /// back — it offers a real all-or-nothing restore from the pre-import
+    /// backups whenever every already-committed DB has one (see
+    /// <see cref="MultiDbRollbackCoordinator"/>), and those outcomes never
+    /// reach this method. What still lands here:
     ///
-    /// That is NOT the same as "no backup exists" — <c>ActiveDbFactory</c>'s
+    /// <list type="bullet">
+    ///   <item>failures with nothing committed behind them (single-DB Apply,
+    ///   or the first DB of a multi-DB Apply) — nothing to roll back;</item>
+    ///   <item>hosts whose ActiveDbs carry no backup path / restore callback
+    ///   (DevLauncher, dropdown-added read-only DBs) — a rollback that could
+    ///   only be half-performed is worse than an honest report;</item>
+    ///   <item>failures outside the commit loop (XML write, tree refresh).</item>
+    /// </list>
+    ///
+    /// The message must not claim "no backup exists" — <c>ActiveDbFactory</c>'s
     /// <c>OnApply</c> closure calls <c>ITiaPortalAdapter.BackupBlock</c>
     /// synchronously right before every DB's <c>ImportBlock</c>, so any DB
     /// that reached import has a real pre-import XML on disk (logged as
-    /// "Backup created for {DbName}: {BackupPath}"). The status message
-    /// below must say so — a message that claims "no backup available" at
-    /// the exact moment a recoverable file is sitting in the backup
-    /// directory is the same dishonesty #191 removed, just inverted, and
-    /// worse: a user who reads "no backup" won't go looking for the file
-    /// that would let them recover. Nothing here tracks the per-DB paths or
-    /// drives an automatic restore from them — see ExecuteApplyMultiDb's
-    /// partial-commit comment for why cross-DB rollback isn't attempted
-    /// once a DB has actually imported — so the message points at the
-    /// backup directory + the log rather than a specific file.
+    /// "Backup created for {DbName}: {BackupPath}"). A message that denies a
+    /// recoverable file sitting in the backup directory is the same
+    /// dishonesty #191 removed, just inverted, and worse: a user who reads
+    /// "no backup" won't go looking for the file that would let them recover.
+    /// This path has no specific per-DB path to name, so it points at the
+    /// backup directory + the log.
     /// </summary>
     private void HandleApplyError(Exception ex)
     {

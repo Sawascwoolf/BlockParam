@@ -21,6 +21,18 @@ public interface IUsageTracker
     /// </summary>
     bool RecordUsage(int count);
 
+    /// <summary>
+    /// Credits <paramref name="count"/> value-changes back to today's quota
+    /// (#192). Charged writes that were undone must not stay charged — the
+    /// multi-DB rollback restores DBs from their pre-import backups, so the
+    /// values those units paid for no longer exist in the project.
+    ///
+    /// Never drops the counter below zero, and never crosses a day boundary:
+    /// a refund issued after midnight applies to the (already reset) current
+    /// day, which can only ever under-charge the user, never over-charge.
+    /// </summary>
+    void RefundUsage(int count);
+
     /// <summary>Maximum value-changes per day for the free tier.</summary>
     int DailyLimit { get; }
 }

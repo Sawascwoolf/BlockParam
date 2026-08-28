@@ -65,6 +65,20 @@ public class LocalUsageTracker : IUsageTracker
         return true;
     }
 
+    public void RefundUsage(int count)
+    {
+        if (count <= 0) return;
+
+        var data = ReadData();
+        var refunded = Math.Min(count, data.Count);
+        if (refunded == 0) return;
+
+        data.Count -= refunded;
+        WriteData(data);
+        Log.Information("LocalUsageTracker: credited {Refunded} change(s) back (now {Count}/{Limit})",
+            refunded, data.Count, DailyLimit);
+    }
+
     private UsageData ReadData()
     {
         // Local copy so any property access on the readonly StoragePath field

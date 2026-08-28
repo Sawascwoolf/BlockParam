@@ -163,6 +163,13 @@ public class SubscriptionViewModel : ViewModelBase, IDisposable
 
     public bool RecordUsage(int count) => _usageTracker.RecordUsage(count);
 
+    /// <summary>
+    /// Credits changes back to today's quota after a multi-DB rollback undid
+    /// the writes they paid for (#192). See
+    /// <see cref="IUsageTracker.RefundUsage"/>.
+    /// </summary>
+    public void RefundUsage(int count) => _usageTracker.RefundUsage(count);
+
     // --- Operations ---
 
     /// <summary>
