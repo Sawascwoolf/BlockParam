@@ -48,16 +48,29 @@ internal static class RulesCapture
 
         var dialog = new ConfigEditorDialog(vm)
         {
-            Width = 800,
-            Height = 600,
+            // 4:3, matching the other two website shots. Grown from 800x600
+            // because the file-grouped list plus the detail panel no longer
+            // fit that width - the Exclude checkbox label was clipped.
+            Width = 880,
+            Height = 660,
         };
 
         dialog.ContentRendered += (_, _) =>
         {
             dialog.Dispatcher.BeginInvoke(new Action(() =>
             {
-                if (vm.RuleFiles.Count > 0)
-                    vm.SelectedFile = vm.RuleFiles.First();
+                // Select a RULE, not just its file. Since the rules editor was
+                // regrouped by file, SelectedFile only puts a file header in
+                // focus and leaves the detail panel empty - which is what the
+                // website shot is meant to show. Setting SelectedRule also
+                // sets SelectedFile (see ConfigEditorViewModel.SelectedRule),
+                // so this covers both.
+                var firstFileWithRules = vm.RuleFiles.FirstOrDefault(f => f.Rules.Count > 0);
+                if (firstFileWithRules != null)
+                {
+                    firstFileWithRules.IsExpanded = true;
+                    vm.SelectedRule = firstFileWithRules.Rules.First();
+                }
 
                 dialog.UpdateLayout();
                 dialog.Dispatcher.Invoke(() => { },

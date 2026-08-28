@@ -10,8 +10,20 @@
 #     assets/fixtures/rules/. Always reflects the current ConfigEditorDialog.
 #
 # Tune the crops by editing the per-shot config blocks below. ffmpeg's
-# `crop=W:H:X:Y` works in source-PNG pixels (3840x2160 for the workflow
-# frames). `scale=W:H` is the final output size.
+# `crop=W:H:X:Y` works in source-PNG pixels: 3840x2160 for the workflow
+# frames, which is what workflow_inline.json asks for (1920x1080 viewport at
+# dpi 192). These rectangles are only valid at that size.
+#
+# They briefly were not. BulkChangeDialog.xaml gained WindowState="Maximized"
+# in f84725a (2026-05-02), which silently overrode the viewport the capture
+# script sets, so every frame came out at the capturing machine's monitor
+# resolution instead - 5152x2816 here - and these crops landed on empty
+# canvas, producing 11 KB blank PNGs. DevLauncher now forces
+# WindowState.Normal in capture mode (Program.cs), which restores the
+# scripted size. If the crops ever produce blanks again, check the frame
+# dimensions before re-tuning the rectangles.
+#
+# `scale=W:H` is the final output size.
 #
 # Output ratios are intentionally per-shot for now; once the website column
 # is finalized we'll standardize on one ratio across all three.
@@ -90,6 +102,10 @@ crop_one "$INLINE_SOURCE" "$INLINE_CROP" "$INLINE_OUT_SIZE" "$OUT/workflow_inlin
 
 echo "Capturing rules editor via DevLauncher..."
 "$DEVLAUNCHER" --capture-rules "$OUT/workflow_rules.png" >/dev/null
-echo "  workflow_rules.png  (native 1600x1200 from 800x600 DIP @ 2x)"
+# DevLauncher renders 880x660 DIP at 2x = 1760x1320; scale down to the
+# 1600x1200 the other two shots use so the website column stays uniform.
+ffmpeg -loglevel error -y -i "$OUT/workflow_rules.png"     -vf "scale=1600:1200:flags=lanczos" "$OUT/workflow_rules.tmp.png"
+mv "$OUT/workflow_rules.tmp.png" "$OUT/workflow_rules.png"
+echo "  workflow_rules.png  (880x660 DIP @ 2x = 1760x1320, scaled to 1600x1200)"
 
 echo "Wrote: $OUT/{workflow_bulk,workflow_inline,workflow_rules}.png"
